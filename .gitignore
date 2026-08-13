@@ -3,3 +3,7 @@
 .DS_Store
 .idea/
 .vscode/settings.json
+target/
+wasm/target/
+playground/node_modules/
+playground/dist/
