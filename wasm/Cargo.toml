@@ -1,0 +1,12 @@
+[package]
+name = "padma-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+padma-lang = { path = ".." }
+wasm-bindgen = "0.2"

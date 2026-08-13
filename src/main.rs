@@ -1,8 +1,8 @@
-//! Padma v0.1.0 — a small, dependency-free Bangla-English language MVP.
-//!
-//! This executable intentionally implements a narrow but complete vertical slice:
-//! UTF-8 source, Bangla/English keyword aliases, expressions, variables, print,
-//! conditionals, string interpolation, and localized diagnostics.
+// Padma v0.1.0 — a small, dependency-free Bangla-English language MVP.
+//
+// This executable intentionally implements a narrow but complete vertical slice:
+// UTF-8 source, Bangla/English keyword aliases, expressions, variables, print,
+// conditionals, string interpolation, and localized diagnostics.
 
 use std::collections::HashMap;
 use std::env;
