@@ -1,0 +1,1101 @@
+//! Padma v0.1.0 — a small, dependency-free Bangla-English language MVP.
+//!
+//! This executable intentionally implements a narrow but complete vertical slice:
+//! UTF-8 source, Bangla/English keyword aliases, expressions, variables, print,
+//! conditionals, string interpolation, and localized diagnostics.
+
+use std::collections::HashMap;
+use std::env;
+use std::fmt;
+use std::fs;
+use std::process;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Locale {
+    Bangla,
+    English,
+}
+
+impl Locale {
+    fn from_source(source: &str) -> Self {
+        if source.contains("padma:locale=en") {
+            return Self::English;
+        }
+        if source.contains("padma:locale=bn") {
+            return Self::Bangla;
+        }
+
+        let bangla = ["ধরি", "দেখাও", "যদি", "নইলে", "সত্য", "মিথ্যা"]
+            .iter()
+            .map(|word| source.matches(word).count())
+            .sum::<usize>();
+        let english = ["let", "print", "if", "else", "true", "false"]
+            .iter()
+            .map(|word| source.matches(word).count())
+            .sum::<usize>();
+
+        if english > bangla {
+            Self::English
+        } else {
+            Self::Bangla
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Position {
+    line: usize,
+    column: usize,
+}
+
+impl Position {
+    const fn new(line: usize, column: usize) -> Self {
+        Self { line, column }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PadmaError {
+    code: &'static str,
+    message: String,
+    hint: Option<String>,
+    position: Position,
+}
+
+impl PadmaError {
+    fn new(
+        code: &'static str,
+        message: impl Into<String>,
+        hint: Option<String>,
+        position: Position,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            hint,
+            position,
+        }
+    }
+}
+
+fn error_for(locale: Locale, code: &'static str, position: Position, detail: &str) -> PadmaError {
+    let (message, hint) = match (locale, code) {
+        (Locale::Bangla, "P1001") => (
+            format!("অচেনা চিহ্ন `{detail}`"),
+            Some("শুধু অনুমোদিত Padma চিহ্ন ব্যবহার করুন।".into()),
+        ),
+        (Locale::English, "P1001") => (
+            format!("Unexpected character `{detail}`"),
+            Some("Use only supported Padma characters.".into()),
+        ),
+        (Locale::Bangla, "P1002") => (
+            "string শেষ হওয়ার আগে file শেষ হয়ে গেছে".into(),
+            Some("string-এর শেষে একটি closing quote (\") যোগ করুন।".into()),
+        ),
+        (Locale::English, "P1002") => (
+            "Reached the end of the file before the string was closed".into(),
+            Some("Add a closing double quote (\").".into()),
+        ),
+        (Locale::Bangla, "P1003") => (
+            format!("এখানে `{detail}` প্রত্যাশিত ছিল"),
+            Some("আগের statement ও বন্ধনীগুলো পরীক্ষা করুন।".into()),
+        ),
+        (Locale::English, "P1003") => (
+            format!("Expected `{detail}` here"),
+            Some("Check the preceding statement and delimiters.".into()),
+        ),
+        (Locale::Bangla, "P1004") => (
+            format!("এই statement শুরু করতে `{detail}` ব্যবহার করা যাবে না"),
+            Some("`ধরি`, `দেখাও`, অথবা `যদি` দিয়ে নতুন statement শুরু করুন।".into()),
+        ),
+        (Locale::English, "P1004") => (
+            format!("`{detail}` cannot start a statement"),
+            Some("Start a statement with `let`, `print`, or `if`.".into()),
+        ),
+        (Locale::Bangla, "P1007") => (
+            format!("`{detail}` নামে কোনো variable পাওয়া যায়নি"),
+            Some(format!("আগে এটি ঘোষণা করুন: `ধরি {detail} = ...`")),
+        ),
+        (Locale::English, "P1007") => (
+            format!("Cannot find variable `{detail}`"),
+            Some(format!("Declare it first: `let {detail} = ...`")),
+        ),
+        (Locale::Bangla, "P1010") => (
+            format!("`{detail}` অপারেশনের জন্য মানগুলোর ধরন মিলছে না"),
+            Some("সংখ্যার সঙ্গে সংখ্যা বা লেখার সঙ্গে লেখা ব্যবহার করুন।".into()),
+        ),
+        (Locale::English, "P1010") => (
+            format!("Values do not have compatible types for `{detail}`"),
+            Some("Use numbers with numbers or text with text.".into()),
+        ),
+        (Locale::Bangla, "P1011") => (
+            "শূন্য দিয়ে ভাগ করা যাবে না".into(),
+            Some("ভাজকটি শূন্য কি না আগে `যদি` দিয়ে পরীক্ষা করুন।".into()),
+        ),
+        (Locale::English, "P1011") => (
+            "Cannot divide by zero".into(),
+            Some("Use `if` to check that the divisor is not zero first.".into()),
+        ),
+        _ => (format!("Internal Padma error: {detail}"), None),
+    };
+    PadmaError::new(code, message, hint, position)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum TokenKind {
+    Let,
+    Print,
+    If,
+    Else,
+    True,
+    False,
+    Identifier(String),
+    Number(f64),
+    String(String),
+    Equal,
+    EqualEqual,
+    BangEqual,
+    Greater,
+    GreaterEqual,
+    Less,
+    LessEqual,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    Newline,
+    Eof,
+}
+
+#[derive(Clone, Debug)]
+struct Token {
+    kind: TokenKind,
+    position: Position,
+}
+
+struct Lexer {
+    chars: Vec<char>,
+    current: usize,
+    line: usize,
+    column: usize,
+    locale: Locale,
+}
+
+impl Lexer {
+    fn new(source: &str, locale: Locale) -> Self {
+        Self {
+            chars: source.chars().collect(),
+            current: 0,
+            line: 1,
+            column: 1,
+            locale,
+        }
+    }
+
+    fn tokenize(mut self) -> Result<Vec<Token>, PadmaError> {
+        let mut tokens = Vec::new();
+        while !self.is_at_end() {
+            let position = self.position();
+            let character = self.advance();
+            match character {
+                ' ' | '\t' | '\r' => {}
+                '\n' => tokens.push(self.token(TokenKind::Newline, position)),
+                '#' => self.consume_comment(),
+                '"' => tokens.push(self.string(position)?),
+                '=' => {
+                    if self.matches('=') {
+                        tokens.push(self.token(TokenKind::EqualEqual, position));
+                    } else {
+                        tokens.push(self.token(TokenKind::Equal, position));
+                    }
+                }
+                '!' => {
+                    if self.matches('=') {
+                        tokens.push(self.token(TokenKind::BangEqual, position));
+                    } else {
+                        return Err(error_for(self.locale, "P1001", position, "!"));
+                    }
+                }
+                '>' => {
+                    if self.matches('=') {
+                        tokens.push(self.token(TokenKind::GreaterEqual, position));
+                    } else {
+                        tokens.push(self.token(TokenKind::Greater, position));
+                    }
+                }
+                '<' => {
+                    if self.matches('=') {
+                        tokens.push(self.token(TokenKind::LessEqual, position));
+                    } else {
+                        tokens.push(self.token(TokenKind::Less, position));
+                    }
+                }
+                '+' => tokens.push(self.token(TokenKind::Plus, position)),
+                '-' => tokens.push(self.token(TokenKind::Minus, position)),
+                '*' => tokens.push(self.token(TokenKind::Star, position)),
+                '/' => tokens.push(self.token(TokenKind::Slash, position)),
+                '(' => tokens.push(self.token(TokenKind::LeftParen, position)),
+                ')' => tokens.push(self.token(TokenKind::RightParen, position)),
+                '{' => tokens.push(self.token(TokenKind::LeftBrace, position)),
+                '}' => tokens.push(self.token(TokenKind::RightBrace, position)),
+                ch if is_digit(ch) => tokens.push(self.number(position)?),
+                ch if is_identifier_start(ch) => tokens.push(self.identifier(position)),
+                ch => return Err(error_for(self.locale, "P1001", position, &ch.to_string())),
+            }
+        }
+        tokens.push(self.token(TokenKind::Eof, self.position()));
+        Ok(tokens)
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current >= self.chars.len()
+    }
+
+    fn position(&self) -> Position {
+        Position::new(self.line, self.column)
+    }
+
+    fn token(&self, kind: TokenKind, position: Position) -> Token {
+        Token { kind, position }
+    }
+
+    fn advance(&mut self) -> char {
+        let value = self.chars[self.current];
+        self.current += 1;
+        if value == '\n' {
+            self.line += 1;
+            self.column = 1;
+        } else {
+            self.column += 1;
+        }
+        value
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.current).copied()
+    }
+
+    fn matches(&mut self, expected: char) -> bool {
+        if self.peek() == Some(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn consume_comment(&mut self) {
+        while let Some(character) = self.peek() {
+            if character == '\n' {
+                break;
+            }
+            self.advance();
+        }
+    }
+
+    fn string(&mut self, position: Position) -> Result<Token, PadmaError> {
+        let mut value = String::new();
+        while let Some(character) = self.peek() {
+            if character == '"' {
+                self.advance();
+                return Ok(self.token(TokenKind::String(value), position));
+            }
+            if character == '\\' {
+                self.advance();
+                let escaped = self
+                    .peek()
+                    .ok_or_else(|| error_for(self.locale, "P1002", position, "string"))?;
+                self.advance();
+                value.push(match escaped {
+                    'n' => '\n',
+                    't' => '\t',
+                    '"' => '"',
+                    '\\' => '\\',
+                    other => other,
+                });
+            } else {
+                value.push(self.advance());
+            }
+        }
+        Err(error_for(self.locale, "P1002", position, "string"))
+    }
+
+    fn number(&mut self, position: Position) -> Result<Token, PadmaError> {
+        let mut raw = String::new();
+        raw.push(normalize_digit(self.chars[self.current - 1]));
+        while let Some(character) = self.peek() {
+            if is_digit(character) {
+                raw.push(normalize_digit(self.advance()));
+            } else if character == '.' {
+                raw.push(self.advance());
+            } else {
+                break;
+            }
+        }
+        match raw.parse::<f64>() {
+            Ok(number) => Ok(self.token(TokenKind::Number(number), position)),
+            Err(_) => Err(error_for(self.locale, "P1001", position, &raw)),
+        }
+    }
+
+    fn identifier(&mut self, position: Position) -> Token {
+        let mut word = String::new();
+        word.push(self.chars[self.current - 1]);
+        while let Some(character) = self.peek() {
+            if is_identifier_continue(character) {
+                word.push(self.advance());
+            } else {
+                break;
+            }
+        }
+        let kind = match word.as_str() {
+            "ধরি" | "let" => TokenKind::Let,
+            "দেখাও" | "print" => TokenKind::Print,
+            "যদি" | "if" => TokenKind::If,
+            "নইলে" | "else" => TokenKind::Else,
+            "সত্য" | "true" => TokenKind::True,
+            "মিথ্যা" | "false" => TokenKind::False,
+            _ => TokenKind::Identifier(word),
+        };
+        self.token(kind, position)
+    }
+}
+
+fn is_digit(character: char) -> bool {
+    character.is_ascii_digit() || ('০'..='৯').contains(&character)
+}
+
+fn normalize_digit(character: char) -> char {
+    match character {
+        '০' => '0',
+        '১' => '1',
+        '২' => '2',
+        '৩' => '3',
+        '৪' => '4',
+        '৫' => '5',
+        '৬' => '6',
+        '৭' => '7',
+        '৮' => '8',
+        '৯' => '9',
+        other => other,
+    }
+}
+
+fn is_bangla(character: char) -> bool {
+    ('\u{0980}'..='\u{09ff}').contains(&character)
+}
+
+fn is_identifier_start(character: char) -> bool {
+    character == '_' || character.is_alphabetic() || is_bangla(character)
+}
+
+fn is_identifier_continue(character: char) -> bool {
+    is_identifier_start(character) || character.is_ascii_digit() || is_digit(character)
+}
+
+#[derive(Clone, Debug)]
+enum Stmt {
+    Let {
+        name: String,
+        value: Expr,
+    },
+    Print {
+        value: Expr,
+    },
+    If {
+        condition: Expr,
+        then_branch: Vec<Stmt>,
+        else_branch: Vec<Stmt>,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum Expr {
+    Literal(Value, Position),
+    Variable(String, Position),
+    Unary {
+        operator: TokenKind,
+        right: Box<Expr>,
+        position: Position,
+    },
+    Binary {
+        left: Box<Expr>,
+        operator: TokenKind,
+        right: Box<Expr>,
+        position: Position,
+    },
+}
+
+struct Parser {
+    tokens: Vec<Token>,
+    current: usize,
+    locale: Locale,
+}
+
+impl Parser {
+    fn new(tokens: Vec<Token>, locale: Locale) -> Self {
+        Self {
+            tokens,
+            current: 0,
+            locale,
+        }
+    }
+
+    fn parse(mut self) -> Result<Vec<Stmt>, PadmaError> {
+        let mut statements = Vec::new();
+        self.skip_newlines();
+        while !self.is_at_end() {
+            statements.push(self.statement()?);
+            self.skip_newlines();
+        }
+        Ok(statements)
+    }
+
+    fn statement(&mut self) -> Result<Stmt, PadmaError> {
+        if self.matches(|kind| matches!(kind, TokenKind::Let)) {
+            return self.let_statement(self.previous().position);
+        }
+        if self.matches(|kind| matches!(kind, TokenKind::Print)) {
+            return self.print_statement(self.previous().position);
+        }
+        if self.matches(|kind| matches!(kind, TokenKind::If)) {
+            return self.if_statement(self.previous().position);
+        }
+        let token = self.peek().clone();
+        Err(error_for(
+            self.locale,
+            "P1004",
+            token.position,
+            &display_token(&token.kind),
+        ))
+    }
+
+    fn let_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let name = match self.advance().clone() {
+            Token {
+                kind: TokenKind::Identifier(name),
+                ..
+            } => name,
+            token => {
+                return Err(error_for(
+                    self.locale,
+                    "P1003",
+                    token.position,
+                    "variable name",
+                ))
+            }
+        };
+        self.consume(|kind| matches!(kind, TokenKind::Equal), "=")?;
+        let value = self.expression()?;
+        self.consume_statement_end()?;
+        let _ = position;
+        Ok(Stmt::Let { name, value })
+    }
+
+    fn print_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let value = self.expression()?;
+        self.consume_statement_end()?;
+        let _ = position;
+        Ok(Stmt::Print { value })
+    }
+
+    fn if_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let condition = self.expression()?;
+        self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
+        let then_branch = self.block()?;
+        self.skip_newlines();
+        let else_branch = if self.matches(|kind| matches!(kind, TokenKind::Else)) {
+            self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
+            self.block()?
+        } else {
+            Vec::new()
+        };
+        let _ = position;
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
+    }
+
+    fn block(&mut self) -> Result<Vec<Stmt>, PadmaError> {
+        let mut statements = Vec::new();
+        self.skip_newlines();
+        while !self.check(|kind| matches!(kind, TokenKind::RightBrace)) && !self.is_at_end() {
+            statements.push(self.statement()?);
+            self.skip_newlines();
+        }
+        self.consume(|kind| matches!(kind, TokenKind::RightBrace), "}")?;
+        Ok(statements)
+    }
+
+    fn expression(&mut self) -> Result<Expr, PadmaError> {
+        self.equality()
+    }
+
+    fn equality(&mut self) -> Result<Expr, PadmaError> {
+        let mut expression = self.comparison()?;
+        while self.matches(|kind| matches!(kind, TokenKind::EqualEqual | TokenKind::BangEqual)) {
+            let operator = self.previous().clone();
+            let right = self.comparison()?;
+            expression = Expr::Binary {
+                left: Box::new(expression),
+                operator: operator.kind,
+                right: Box::new(right),
+                position: operator.position,
+            };
+        }
+        Ok(expression)
+    }
+
+    fn comparison(&mut self) -> Result<Expr, PadmaError> {
+        let mut expression = self.term()?;
+        while self.matches(|kind| {
+            matches!(
+                kind,
+                TokenKind::Greater
+                    | TokenKind::GreaterEqual
+                    | TokenKind::Less
+                    | TokenKind::LessEqual
+            )
+        }) {
+            let operator = self.previous().clone();
+            let right = self.term()?;
+            expression = Expr::Binary {
+                left: Box::new(expression),
+                operator: operator.kind,
+                right: Box::new(right),
+                position: operator.position,
+            };
+        }
+        Ok(expression)
+    }
+
+    fn term(&mut self) -> Result<Expr, PadmaError> {
+        let mut expression = self.factor()?;
+        while self.matches(|kind| matches!(kind, TokenKind::Plus | TokenKind::Minus)) {
+            let operator = self.previous().clone();
+            let right = self.factor()?;
+            expression = Expr::Binary {
+                left: Box::new(expression),
+                operator: operator.kind,
+                right: Box::new(right),
+                position: operator.position,
+            };
+        }
+        Ok(expression)
+    }
+
+    fn factor(&mut self) -> Result<Expr, PadmaError> {
+        let mut expression = self.unary()?;
+        while self.matches(|kind| matches!(kind, TokenKind::Star | TokenKind::Slash)) {
+            let operator = self.previous().clone();
+            let right = self.unary()?;
+            expression = Expr::Binary {
+                left: Box::new(expression),
+                operator: operator.kind,
+                right: Box::new(right),
+                position: operator.position,
+            };
+        }
+        Ok(expression)
+    }
+
+    fn unary(&mut self) -> Result<Expr, PadmaError> {
+        if self.matches(|kind| matches!(kind, TokenKind::Minus)) {
+            let operator = self.previous().clone();
+            let right = self.unary()?;
+            return Ok(Expr::Unary {
+                operator: operator.kind,
+                right: Box::new(right),
+                position: operator.position,
+            });
+        }
+        self.primary()
+    }
+
+    fn primary(&mut self) -> Result<Expr, PadmaError> {
+        let token = self.advance().clone();
+        match token.kind {
+            TokenKind::Number(value) => Ok(Expr::Literal(Value::Number(value), token.position)),
+            TokenKind::String(value) => Ok(Expr::Literal(Value::String(value), token.position)),
+            TokenKind::True => Ok(Expr::Literal(Value::Boolean(true), token.position)),
+            TokenKind::False => Ok(Expr::Literal(Value::Boolean(false), token.position)),
+            TokenKind::Identifier(name) => Ok(Expr::Variable(name, token.position)),
+            TokenKind::LeftParen => {
+                let expression = self.expression()?;
+                self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
+                Ok(expression)
+            }
+            _ => Err(error_for(
+                self.locale,
+                "P1003",
+                token.position,
+                "expression",
+            )),
+        }
+    }
+
+    fn consume_statement_end(&mut self) -> Result<(), PadmaError> {
+        if self.check(|kind| {
+            matches!(
+                kind,
+                TokenKind::Newline | TokenKind::RightBrace | TokenKind::Eof
+            )
+        }) {
+            return Ok(());
+        }
+        let token = self.peek().clone();
+        Err(error_for(self.locale, "P1003", token.position, "new line"))
+    }
+
+    fn consume<F>(&mut self, predicate: F, expected: &str) -> Result<Token, PadmaError>
+    where
+        F: Fn(&TokenKind) -> bool,
+    {
+        if self.check(predicate) {
+            Ok(self.advance().clone())
+        } else {
+            let token = self.peek().clone();
+            Err(error_for(self.locale, "P1003", token.position, expected))
+        }
+    }
+
+    fn skip_newlines(&mut self) {
+        while self.matches(|kind| matches!(kind, TokenKind::Newline)) {}
+    }
+
+    fn matches<F>(&mut self, predicate: F) -> bool
+    where
+        F: Fn(&TokenKind) -> bool,
+    {
+        if self.check(predicate) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn check<F>(&self, predicate: F) -> bool
+    where
+        F: Fn(&TokenKind) -> bool,
+    {
+        !self.is_at_end() && predicate(&self.peek().kind)
+    }
+
+    fn advance(&mut self) -> &Token {
+        if !self.is_at_end() {
+            self.current += 1;
+        }
+        self.previous()
+    }
+
+    fn is_at_end(&self) -> bool {
+        matches!(self.peek().kind, TokenKind::Eof)
+    }
+
+    fn peek(&self) -> &Token {
+        &self.tokens[self.current]
+    }
+
+    fn previous(&self) -> &Token {
+        &self.tokens[self.current - 1]
+    }
+}
+
+fn display_token(kind: &TokenKind) -> String {
+    match kind {
+        TokenKind::Let => "let/ধরি".into(),
+        TokenKind::Print => "print/দেখাও".into(),
+        TokenKind::If => "if/যদি".into(),
+        TokenKind::Else => "else/নইলে".into(),
+        TokenKind::Eof => "end of file".into(),
+        TokenKind::Newline => "new line".into(),
+        TokenKind::Identifier(value) => value.clone(),
+        TokenKind::Number(value) => value.to_string(),
+        TokenKind::String(value) => format!("\"{value}\""),
+        _ => "operator".into(),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Value {
+    Number(f64),
+    String(String),
+    Boolean(bool),
+}
+
+impl Value {
+    fn truthy(&self) -> bool {
+        match self {
+            Self::Boolean(value) => *value,
+            Self::Number(value) => *value != 0.0,
+            Self::String(value) => !value.is_empty(),
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Number(value) if value.fract() == 0.0 => write!(formatter, "{value:.0}"),
+            Self::Number(value) => write!(formatter, "{value}"),
+            Self::String(value) => write!(formatter, "{value}"),
+            Self::Boolean(true) => write!(formatter, "true"),
+            Self::Boolean(false) => write!(formatter, "false"),
+        }
+    }
+}
+
+struct Interpreter {
+    environment: HashMap<String, Value>,
+    output: Vec<String>,
+    locale: Locale,
+}
+
+impl Interpreter {
+    fn new(locale: Locale) -> Self {
+        Self {
+            environment: HashMap::new(),
+            output: Vec::new(),
+            locale,
+        }
+    }
+
+    fn run(&mut self, program: &[Stmt]) -> Result<(), PadmaError> {
+        for statement in program {
+            self.execute(statement)?;
+        }
+        Ok(())
+    }
+
+    fn execute(&mut self, statement: &Stmt) -> Result<(), PadmaError> {
+        match statement {
+            Stmt::Let { name, value, .. } => {
+                let value = self.evaluate(value)?;
+                self.environment.insert(name.clone(), value);
+            }
+            Stmt::Print { value, .. } => {
+                let value = self.evaluate(value)?;
+                self.output.push(value.to_string());
+            }
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let branch = if self.evaluate(condition)?.truthy() {
+                    then_branch
+                } else {
+                    else_branch
+                };
+                self.run(branch)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn evaluate(&mut self, expression: &Expr) -> Result<Value, PadmaError> {
+        match expression {
+            Expr::Literal(Value::String(value), position) => {
+                Ok(Value::String(self.interpolate(value, *position)?))
+            }
+            Expr::Literal(value, _) => Ok(value.clone()),
+            Expr::Variable(name, position) => self
+                .environment
+                .get(name)
+                .cloned()
+                .ok_or_else(|| error_for(self.locale, "P1007", *position, name)),
+            Expr::Unary {
+                operator,
+                right,
+                position,
+            } => match (operator, self.evaluate(right)?) {
+                (TokenKind::Minus, Value::Number(value)) => Ok(Value::Number(-value)),
+                (TokenKind::Minus, _) => Err(error_for(self.locale, "P1010", *position, "-")),
+                _ => unreachable!("parser only creates supported unary expressions"),
+            },
+            Expr::Binary {
+                left,
+                operator,
+                right,
+                position,
+            } => {
+                let left = self.evaluate(left)?;
+                let right = self.evaluate(right)?;
+                self.binary(left, operator, right, *position)
+            }
+        }
+    }
+
+    fn binary(
+        &self,
+        left: Value,
+        operator: &TokenKind,
+        right: Value,
+        position: Position,
+    ) -> Result<Value, PadmaError> {
+        use TokenKind::*;
+        match operator {
+            Plus => match (left, right) {
+                (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left + right)),
+                (Value::String(left), Value::String(right)) => Ok(Value::String(left + &right)),
+                _ => Err(error_for(self.locale, "P1010", position, "+")),
+            },
+            Minus => numeric(self.locale, position, "-", left, right, |a, b| a - b),
+            Star => numeric(self.locale, position, "*", left, right, |a, b| a * b),
+            Slash => match (left, right) {
+                (Value::Number(left), Value::Number(right)) if right == 0.0 => {
+                    let _ = left;
+                    Err(error_for(self.locale, "P1011", position, "/"))
+                }
+                (Value::Number(left), Value::Number(right)) => Ok(Value::Number(left / right)),
+                _ => Err(error_for(self.locale, "P1010", position, "/")),
+            },
+            EqualEqual => Ok(Value::Boolean(left == right)),
+            BangEqual => Ok(Value::Boolean(left != right)),
+            Greater => compare(self.locale, position, ">", left, right, |a, b| a > b),
+            GreaterEqual => compare(self.locale, position, ">=", left, right, |a, b| a >= b),
+            Less => compare(self.locale, position, "<", left, right, |a, b| a < b),
+            LessEqual => compare(self.locale, position, "<=", left, right, |a, b| a <= b),
+            _ => unreachable!("parser only creates supported binary expressions"),
+        }
+    }
+
+    fn interpolate(&self, text: &str, position: Position) -> Result<String, PadmaError> {
+        let mut result = String::new();
+        let mut characters = text.chars().peekable();
+        while let Some(character) = characters.next() {
+            if character != '{' {
+                result.push(character);
+                continue;
+            }
+            let mut variable = String::new();
+            let mut closed = false;
+            for candidate in characters.by_ref() {
+                if candidate == '}' {
+                    closed = true;
+                    break;
+                }
+                variable.push(candidate);
+            }
+            if !closed || variable.trim().is_empty() {
+                result.push('{');
+                result.push_str(&variable);
+                if closed {
+                    result.push('}');
+                }
+                continue;
+            }
+            let name = variable.trim();
+            let value = self
+                .environment
+                .get(name)
+                .ok_or_else(|| error_for(self.locale, "P1007", position, name))?;
+            result.push_str(&value.to_string());
+        }
+        Ok(result)
+    }
+}
+
+fn numeric<F>(
+    locale: Locale,
+    position: Position,
+    operator: &str,
+    left: Value,
+    right: Value,
+    operation: F,
+) -> Result<Value, PadmaError>
+where
+    F: FnOnce(f64, f64) -> f64,
+{
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => Ok(Value::Number(operation(left, right))),
+        _ => Err(error_for(locale, "P1010", position, operator)),
+    }
+}
+
+fn compare<F>(
+    locale: Locale,
+    position: Position,
+    operator: &str,
+    left: Value,
+    right: Value,
+    comparison: F,
+) -> Result<Value, PadmaError>
+where
+    F: FnOnce(f64, f64) -> bool,
+{
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => Ok(Value::Boolean(comparison(left, right))),
+        _ => Err(error_for(locale, "P1010", position, operator)),
+    }
+}
+
+fn compile(source: &str) -> Result<(Vec<Stmt>, Locale), PadmaError> {
+    let locale = Locale::from_source(source);
+    let tokens = Lexer::new(source, locale).tokenize()?;
+    let program = Parser::new(tokens, locale).parse()?;
+    Ok((program, locale))
+}
+
+fn format_diagnostic(path: &str, source: &str, error: &PadmaError, locale: Locale) -> String {
+    let line = source
+        .lines()
+        .nth(error.position.line.saturating_sub(1))
+        .unwrap_or("");
+    let gutter_width = error.position.line.to_string().len();
+    let marker = " ".repeat(error.position.column.saturating_sub(1));
+    let (label, point, hint_label) = match locale {
+        Locale::Bangla => ("ত্রুটি", "এই স্থানে", "পরামর্শ"),
+        Locale::English => ("error", "here", "help"),
+    };
+    let mut rendered = format!(
+        "{label}[{}]: {}\n  --> {}:{}:{}\n   |\n{:>width$} | {}\n   | {}^ {point}\n",
+        error.code,
+        error.message,
+        path,
+        error.position.line,
+        error.position.column,
+        error.position.line,
+        line,
+        marker,
+        width = gutter_width
+    );
+    if let Some(hint) = &error.hint {
+        rendered.push_str(&format!("   = {hint_label}: {hint}\n"));
+    }
+    rendered
+}
+
+fn usage(locale: Locale) -> &'static str {
+    match locale {
+        Locale::Bangla => {
+            "ব্যবহার: padma <run|check|ast> <file.pd>\n\nউদাহরণ:\n  padma run examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+        }
+        Locale::English => {
+            "Usage: padma <run|check|ast> <file.pd>\n\nExamples:\n  padma run examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+        }
+    }
+}
+
+fn main() {
+    let arguments: Vec<String> = env::args().collect();
+    if arguments.len() == 2 && matches!(arguments[1].as_str(), "--version" | "-V") {
+        println!("padma 0.1.0");
+        return;
+    }
+    if arguments.len() != 3 {
+        eprintln!("{}", usage(Locale::Bangla));
+        process::exit(64);
+    }
+
+    let command = &arguments[1];
+    let path = &arguments[2];
+    let source = match fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("Cannot read `{path}`: {error}");
+            process::exit(66);
+        }
+    };
+    let locale = Locale::from_source(&source);
+    let compiled = compile(&source);
+    let (program, locale) = match compiled {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("{}", format_diagnostic(path, &source, &error, locale));
+            process::exit(1);
+        }
+    };
+
+    match command.as_str() {
+        "check" => match locale {
+            Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো syntax error পাওয়া যায়নি।"),
+            Locale::English => println!("ok: no syntax errors found in `{path}`."),
+        },
+        "ast" => println!("{program:#?}"),
+        "run" => {
+            let mut interpreter = Interpreter::new(locale);
+            if let Err(error) = interpreter.run(&program) {
+                eprintln!("{}", format_diagnostic(path, &source, &error, locale));
+                process::exit(1);
+            }
+            for line in interpreter.output {
+                println!("{line}");
+            }
+        }
+        _ => {
+            eprintln!("{}", usage(locale));
+            process::exit(64);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(source: &str) -> Result<Vec<String>, PadmaError> {
+        let (program, locale) = compile(source)?;
+        let mut interpreter = Interpreter::new(locale);
+        interpreter.run(&program)?;
+        Ok(interpreter.output)
+    }
+
+    #[test]
+    fn runs_bangla_program_with_bangla_digits_and_interpolation() {
+        let output = run(
+            "ধরি নাম = \"রাফি\"\nধরি নম্বর = ৭০ + ২৩\nযদি নম্বর >= 90 {\n  দেখাও \"{নাম}: {নম্বর}\"\n}\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["রাফি: 93"]);
+    }
+
+    #[test]
+    fn runs_english_program() {
+        let output = run("let score = 15 * 2\nif score == 30 {\n  print \"passed\"\n}\n").unwrap();
+        assert_eq!(output, vec!["passed"]);
+    }
+
+    #[test]
+    fn supports_mixed_keyword_style() {
+        let output = run("ধরি price = 250\nif price > 200 {\n  দেখাও \"discount\"\n}\n").unwrap();
+        assert_eq!(output, vec!["discount"]);
+    }
+
+    #[test]
+    fn reports_missing_bangla_variable_in_bangla() {
+        let error = run("ধরি নাম = \"রাফি\"\nদেখাও বয়স\n").unwrap_err();
+        assert_eq!(error.code, "P1007");
+        assert!(error.message.contains("কোনো variable পাওয়া যায়নি"));
+    }
+
+    #[test]
+    fn reports_missing_english_variable_in_english() {
+        let error = run("let name = \"Rafi\"\nprint age\n").unwrap_err();
+        assert_eq!(error.code, "P1007");
+        assert!(error.message.contains("Cannot find variable"));
+    }
+
+    #[test]
+    fn prevents_division_by_zero() {
+        let error = run("let total = 10 / 0\n").unwrap_err();
+        assert_eq!(error.code, "P1011");
+    }
+
+    #[test]
+    fn parses_else_block() {
+        let output = run(
+            "let score = 40\nif score >= 50 {\n print \"pass\"\n} else {\n print \"retry\"\n}\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["retry"]);
+    }
+}

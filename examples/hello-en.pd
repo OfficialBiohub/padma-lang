@@ -1,0 +1,9 @@
+# Padma's first English program
+let name = "Rafi"
+let score = 70 + 23
+
+if score >= 90 {
+    print "{name}, your score is: {score}"
+} else {
+    print "{name}, try again."
+}

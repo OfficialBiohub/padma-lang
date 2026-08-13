@@ -1,0 +1,5 @@
+# একটি statement-এ বাংলা ও English keyword ব্যবহার করা যায়।
+ধরি price = 250
+if price > 200 {
+    দেখাও "ছাড় প্রযোজ্য: {price} টাকা"
+}
