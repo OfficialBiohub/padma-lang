@@ -11,6 +11,7 @@ Padma allows Bengali and English keywords to represent the **same internal synta
 | Declare a variable | `ধরি` | `let` |
 | Show output | `দেখাও` | `print` |
 | Conditional branch | `যদি` / `নইলে` | `if` / `else` |
+| Repeating loop and assignment | `যতক্ষণ`, `=` | `while`, `=` |
 | Boolean values | `সত্য` / `মিথ্যা` | `true` / `false` |
 | Number, string, arithmetic, comparison | Yes | Yes |
 | String interpolation | `"নাম: {নাম}"` | `"Name: {name}"` |
@@ -63,6 +64,20 @@ if score >= 90 {
 }
 ```
 
+### Updating values and repeating work
+
+Padma variables can be updated after declaration, and both Bengali and English loop keywords are accepted:
+
+```padma
+ধরি i = ০
+যতক্ষণ i < ৩ {
+    দেখাও i
+    i = i + ১
+}
+```
+
+The interpreter enforces a loop-iteration safety limit so an accidental infinite loop cannot run forever on Termux.
+
 ## Commands
 
 | Command | Purpose |
@@ -113,14 +128,14 @@ cargo test
 cargo build --release
 ```
 
-The MVP has no third-party compiler dependencies. Unit tests cover Bengali, English, mixed syntax, Bengali digits, conditional execution, string interpolation, localization, and division-by-zero handling.
+The MVP has no third-party compiler dependencies. Unit tests cover Bengali, English, mixed syntax, Bengali digits, conditional execution, string interpolation, localization, division-by-zero handling, assignment, while loops, and loop safety limits.
 
 ## Scope and roadmap
 
 | Release | Planned outcome |
 |---|---|
 | `v0.1` | Interpreter MVP: variables, output, arithmetic, conditions, diagnostics. |
-| `v0.2` | Functions, lists, maps, modules, assignments, formatter, stronger type errors. |
+| `v0.2` | Functions, lists, maps, modules, formatter, stronger type errors. |
 | `v0.3` | TypeScript code generator, browser playground, Node.js package bridge. |
 | `v0.4` | Python bridge for data/AI workflows, project manifest and lockfile. |
 | `v0.5` | VS Code extension, Tree-sitter grammar, language server. |

@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: padma-playground
-    runtime: static
-    rootDir: playground
-    buildCommand: pnpm install --frozen-lockfile && pnpm build
-    staticPublishPath: dist/public
-    pullRequestPreviewsEnabled: false

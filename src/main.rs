@@ -136,6 +136,14 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
             "Cannot divide by zero".into(),
             Some("Use `if` to check that the divisor is not zero first.".into()),
         ),
+        (Locale::Bangla, "P1012") => (
+            "loop নির্ধারিত iteration সীমা অতিক্রম করেছে".into(),
+            Some("condition ও loop-এর variable update পরীক্ষা করুন।".into()),
+        ),
+        (Locale::English, "P1012") => (
+            "The loop exceeded the configured iteration limit".into(),
+            Some("Check the condition and update the loop variable.".into()),
+        ),
         _ => (format!("Internal Padma error: {detail}"), None),
     };
     PadmaError::new(code, message, hint, position)
@@ -147,6 +155,7 @@ enum TokenKind {
     Print,
     If,
     Else,
+    While,
     True,
     False,
     Identifier(String),
@@ -357,6 +366,7 @@ impl Lexer {
             "দেখাও" | "print" => TokenKind::Print,
             "যদি" | "if" => TokenKind::If,
             "নইলে" | "else" => TokenKind::Else,
+            "যতক্ষণ" | "while" => TokenKind::While,
             "সত্য" | "true" => TokenKind::True,
             "মিথ্যা" | "false" => TokenKind::False,
             _ => TokenKind::Identifier(word),
@@ -406,10 +416,20 @@ enum Stmt {
     Print {
         value: Expr,
     },
+    Assign {
+        name: String,
+        value: Expr,
+        position: Position,
+    },
     If {
         condition: Expr,
         then_branch: Vec<Stmt>,
         else_branch: Vec<Stmt>,
+    },
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+        position: Position,
     },
 }
 
@@ -465,6 +485,17 @@ impl Parser {
         if self.matches(|kind| matches!(kind, TokenKind::If)) {
             return self.if_statement(self.previous().position);
         }
+        if self.matches(|kind| matches!(kind, TokenKind::While)) {
+            return self.while_statement(self.previous().position);
+        }
+        if self.check(|kind| matches!(kind, TokenKind::Identifier(_)))
+            && self
+                .tokens
+                .get(self.current + 1)
+                .is_some_and(|token| matches!(token.kind, TokenKind::Equal))
+        {
+            return self.assign_statement();
+        }
         let token = self.peek().clone();
         Err(error_for(
             self.locale,
@@ -503,6 +534,22 @@ impl Parser {
         Ok(Stmt::Print { value })
     }
 
+    fn assign_statement(&mut self) -> Result<Stmt, PadmaError> {
+        let token = self.advance().clone();
+        let name = match token.kind {
+            TokenKind::Identifier(name) => name,
+            _ => unreachable!("assignment lookahead guarantees an identifier"),
+        };
+        self.consume(|kind| matches!(kind, TokenKind::Equal), "=")?;
+        let value = self.expression()?;
+        self.consume_statement_end()?;
+        Ok(Stmt::Assign {
+            name,
+            value,
+            position: token.position,
+        })
+    }
+
     fn if_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
         let condition = self.expression()?;
         self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
@@ -519,6 +566,17 @@ impl Parser {
             condition,
             then_branch,
             else_branch,
+        })
+    }
+
+    fn while_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let condition = self.expression()?;
+        self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
+        let body = self.block()?;
+        Ok(Stmt::While {
+            condition,
+            body,
+            position,
         })
     }
 
@@ -784,6 +842,17 @@ impl Interpreter {
                 let value = self.evaluate(value)?;
                 self.output.push(value.to_string());
             }
+            Stmt::Assign {
+                name,
+                value,
+                position,
+            } => {
+                if !self.environment.contains_key(name) {
+                    return Err(error_for(self.locale, "P1007", *position, name));
+                }
+                let value = self.evaluate(value)?;
+                self.environment.insert(name.clone(), value);
+            }
             Stmt::If {
                 condition,
                 then_branch,
@@ -796,6 +865,25 @@ impl Interpreter {
                     else_branch
                 };
                 self.run(branch)?;
+            }
+            Stmt::While {
+                condition,
+                body,
+                position,
+            } => {
+                let mut iterations = 0usize;
+                while self.evaluate(condition)?.truthy() {
+                    iterations += 1;
+                    if iterations > 1_000_000 {
+                        return Err(error_for(
+                            self.locale,
+                            "P1012",
+                            *position,
+                            "loop iteration limit",
+                        ));
+                    }
+                    self.run(body)?;
+                }
             }
         }
         Ok(())
@@ -1097,5 +1185,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, vec!["retry"]);
+    }
+
+    #[test]
+    fn updates_variables_and_runs_bangla_while_loop() {
+        let output = run("ধরি i = ০\nযতক্ষণ i < ৩ {\n দেখাও i\n i = i + ১\n}\n").unwrap();
+        assert_eq!(output, vec!["0", "1", "2"]);
+    }
+
+    #[test]
+    fn reports_undefined_assignment_target() {
+        let error = run("count = 1\n").unwrap_err();
+        assert_eq!(error.code, "P1007");
+    }
+
+    #[test]
+    fn stops_non_terminating_loop_with_safety_error() {
+        let error = run("let i = 0\nwhile true {\n i = i + 1\n}\n").unwrap_err();
+        assert_eq!(error.code, "P1012");
     }
 }
