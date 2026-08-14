@@ -19,6 +19,8 @@
 - [ ] Add Python-versus-Padma downloader examples and Termux smoke tests.
 - [ ] Add `@downloads` alias that resolves to Termux shared storage Download folder.
 - [ ] Make the minimal downloader example runnable from any working directory with one `padma file.pd` command.
+- [ ] Verify installer behavior on a fresh Termux shell and ensure `$PREFIX/bin/padma` is on PATH.
+- [ ] Add a clear post-install command check and recovery message for `padma: command not found`.
 - [ ] Add safe interoperability paths for Python, JavaScript/TypeScript, C, and shell instead of claiming automatic conversion.
 - [ ] Add package metadata, lockfile, registry-ready layout, reproducible builds, and semantic versioning.
 - [ ] Add security limits, sandbox boundaries, path validation, dependency checks, and supply-chain guidance.
