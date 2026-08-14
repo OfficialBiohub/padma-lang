@@ -9,6 +9,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::process;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -440,12 +441,23 @@ fn is_identifier_continue(character: char) -> bool {
     is_identifier_start(character) || character.is_ascii_digit() || is_digit(character)
 }
 
-fn validate_output_path(path: &str) -> Result<(), ()> {
-    let candidate = std::path::Path::new(path);
-    if path.is_empty() || candidate.is_absolute() || path.split('/').any(|part| part == "..") {
+fn resolve_output_path(path: &str) -> Result<PathBuf, ()> {
+    if path.is_empty() || path.split('/').any(|part| part == "..") {
         return Err(());
     }
-    Ok(())
+    if path == "@downloads" || path.starts_with("@downloads/") {
+        let home = env::var_os("HOME").ok_or(())?;
+        let relative = path
+            .strip_prefix("@downloads")
+            .unwrap_or("")
+            .trim_start_matches('/');
+        return Ok(PathBuf::from(home).join("storage/downloads").join(relative));
+    }
+    let candidate = std::path::Path::new(path);
+    if candidate.is_absolute() {
+        return Err(());
+    }
+    Ok(PathBuf::from(path))
 }
 
 fn expect_string<'a>(
@@ -1141,9 +1153,9 @@ impl Interpreter {
                         Value::String(value) => value,
                         _ => return Err(error_for(self.locale, "P1010", *position, "content")),
                     };
-                    validate_output_path(path)
+                    let resolved_path = resolve_output_path(path)
                         .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
-                    fs::write(path, content)
+                    fs::write(&resolved_path, content)
                         .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
                     return Ok(Value::Boolean(true));
                 }
@@ -1182,19 +1194,27 @@ impl Interpreter {
                         .map(|argument| self.evaluate(argument))
                         .collect::<Result<Vec<_>, _>>()?;
                     let (program, args) = if name == "media.download" {
-                        if values.len() != 2 {
+                        if values.len() != 1 && values.len() != 2 {
                             return Err(error_for(self.locale, "P1009", *position, name));
                         }
                         let url = expect_string(&values[0], self.locale, *position, "url")?;
-                        let output = expect_string(&values[1], self.locale, *position, "output")?;
+                        let output = if values.len() == 2 {
+                            expect_string(&values[1], self.locale, *position, "output")?.to_string()
+                        } else {
+                            "@downloads/%(title)s.%(ext)s".to_string()
+                        };
                         if !(url.starts_with("https://") || url.starts_with("http://")) {
                             return Err(error_for(self.locale, "P1016", *position, url));
                         }
-                        validate_output_path(output)
-                            .map_err(|_| error_for(self.locale, "P1014", *position, output))?;
+                        let resolved_output = resolve_output_path(&output)
+                            .map_err(|_| error_for(self.locale, "P1014", *position, &output))?;
                         (
                             "yt-dlp".to_string(),
-                            vec!["-o".to_string(), output.to_string(), url.to_string()],
+                            vec![
+                                "-o".to_string(),
+                                resolved_output.to_string_lossy().to_string(),
+                                url.to_string(),
+                            ],
                         )
                     } else {
                         if values.is_empty() {
