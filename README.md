@@ -12,6 +12,7 @@ Padma allows Bengali and English keywords to represent the **same internal synta
 | Show output | `দেখাও` | `print` |
 | Conditional branch | `যদি` / `নইলে` | `if` / `else` |
 | Repeating loop and assignment | `যতক্ষণ`, `=` | `while`, `=` |
+| Function and return | `ফাংশন`, `ফেরত` | `function`, `return` |
 | Boolean values | `সত্য` / `মিথ্যা` | `true` / `false` |
 | Number, string, arithmetic, comparison | Yes | Yes |
 | String interpolation | `"নাম: {নাম}"` | `"Name: {name}"` |
@@ -88,6 +89,18 @@ Padma variables can be updated after declaration, and both Bengali and English l
 ```
 
 The interpreter enforces a loop-iteration safety limit so an accidental infinite loop cannot run forever on Termux.
+
+### Functions
+
+Functions accept parameters and return a value:
+
+```padma
+ফাংশন যোগ(a, b) {
+    ফেরত a + b
+}
+ধরি ফল = যোগ(২, ৩)
+দেখাও ফল
+```
 
 ## Commands
 

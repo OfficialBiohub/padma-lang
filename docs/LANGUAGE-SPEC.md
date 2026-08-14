@@ -10,6 +10,8 @@ The current executable core supports UTF-8 identifiers, Bengali digits, numbers,
 | Output | `দেখাও` | `print` |
 | Conditional | `যদি` / `নইলে` | `if` / `else` |
 | Loop | `যতক্ষণ` | `while` |
+| Function | `ফাংশন` | `function` / `fn` |
+| Return | `ফেরত` | `return` |
 | Boolean | `সত্য` / `মিথ্যা` | `true` / `false` |
 
-The specification is versioned with the compiler. A syntax change requires a test, an example, and a documented compatibility decision before it is considered stable.
+Functions use lexical call scopes, comma-separated parameters, calls with parentheses, and an optional `ফেরত`/`return` value. The specification is versioned with the compiler. A syntax change requires a test, an example, and a documented compatibility decision before it is considered stable.

@@ -156,6 +156,8 @@ enum TokenKind {
     If,
     Else,
     While,
+    Function,
+    Return,
     True,
     False,
     Identifier(String),
@@ -176,6 +178,7 @@ enum TokenKind {
     RightParen,
     LeftBrace,
     RightBrace,
+    Comma,
     Newline,
     Eof,
 }
@@ -251,6 +254,7 @@ impl Lexer {
                 ')' => tokens.push(self.token(TokenKind::RightParen, position)),
                 '{' => tokens.push(self.token(TokenKind::LeftBrace, position)),
                 '}' => tokens.push(self.token(TokenKind::RightBrace, position)),
+                ',' => tokens.push(self.token(TokenKind::Comma, position)),
                 ch if is_digit(ch) => tokens.push(self.number(position)?),
                 ch if is_identifier_start(ch) => tokens.push(self.identifier(position)),
                 ch => return Err(error_for(self.locale, "P1001", position, &ch.to_string())),
@@ -367,6 +371,8 @@ impl Lexer {
             "যদি" | "if" => TokenKind::If,
             "নইলে" | "else" => TokenKind::Else,
             "যতক্ষণ" | "while" => TokenKind::While,
+            "ফাংশন" | "function" | "fn" => TokenKind::Function,
+            "ফেরত" | "return" => TokenKind::Return,
             "সত্য" | "true" => TokenKind::True,
             "মিথ্যা" | "false" => TokenKind::False,
             _ => TokenKind::Identifier(word),
@@ -431,6 +437,14 @@ enum Stmt {
         body: Vec<Stmt>,
         position: Position,
     },
+    Function {
+        name: String,
+        params: Vec<String>,
+        body: Vec<Stmt>,
+    },
+    Return {
+        value: Option<Expr>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -446,6 +460,11 @@ enum Expr {
         left: Box<Expr>,
         operator: TokenKind,
         right: Box<Expr>,
+        position: Position,
+    },
+    Call {
+        name: String,
+        arguments: Vec<Expr>,
         position: Position,
     },
 }
@@ -487,6 +506,12 @@ impl Parser {
         }
         if self.matches(|kind| matches!(kind, TokenKind::While)) {
             return self.while_statement(self.previous().position);
+        }
+        if self.matches(|kind| matches!(kind, TokenKind::Function)) {
+            return self.function_statement();
+        }
+        if self.matches(|kind| matches!(kind, TokenKind::Return)) {
+            return self.return_statement(self.previous().position);
         }
         if self.check(|kind| matches!(kind, TokenKind::Identifier(_)))
             && self
@@ -578,6 +603,60 @@ impl Parser {
             body,
             position,
         })
+    }
+
+    fn function_statement(&mut self) -> Result<Stmt, PadmaError> {
+        let name = match self.advance().clone().kind {
+            TokenKind::Identifier(name) => name,
+            _token => {
+                return Err(error_for(
+                    self.locale,
+                    "P1003",
+                    self.previous().position,
+                    "function name",
+                ))
+            }
+        };
+        self.consume(|kind| matches!(kind, TokenKind::LeftParen), "(")?;
+        let mut params = Vec::new();
+        if !self.check(|kind| matches!(kind, TokenKind::RightParen)) {
+            loop {
+                match self.advance().clone().kind {
+                    TokenKind::Identifier(name) => params.push(name),
+                    _ => {
+                        return Err(error_for(
+                            self.locale,
+                            "P1003",
+                            self.previous().position,
+                            "parameter name",
+                        ))
+                    }
+                }
+                if !self.matches(|kind| matches!(kind, TokenKind::Comma)) {
+                    break;
+                }
+            }
+        }
+        self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
+        self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
+        let body = self.block()?;
+        Ok(Stmt::Function { name, params, body })
+    }
+
+    fn return_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let value = if self.check(|kind| {
+            matches!(
+                kind,
+                TokenKind::Newline | TokenKind::RightBrace | TokenKind::Eof
+            )
+        }) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.consume_statement_end()?;
+        let _ = position;
+        Ok(Stmt::Return { value })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, PadmaError> {
@@ -683,7 +762,27 @@ impl Parser {
             TokenKind::String(value) => Ok(Expr::Literal(Value::String(value), token.position)),
             TokenKind::True => Ok(Expr::Literal(Value::Boolean(true), token.position)),
             TokenKind::False => Ok(Expr::Literal(Value::Boolean(false), token.position)),
-            TokenKind::Identifier(name) => Ok(Expr::Variable(name, token.position)),
+            TokenKind::Identifier(name) => {
+                if self.matches(|kind| matches!(kind, TokenKind::LeftParen)) {
+                    let mut arguments = Vec::new();
+                    if !self.check(|kind| matches!(kind, TokenKind::RightParen)) {
+                        loop {
+                            arguments.push(self.expression()?);
+                            if !self.matches(|kind| matches!(kind, TokenKind::Comma)) {
+                                break;
+                            }
+                        }
+                    }
+                    self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
+                    Ok(Expr::Call {
+                        name,
+                        arguments,
+                        position: token.position,
+                    })
+                } else {
+                    Ok(Expr::Variable(name, token.position))
+                }
+            }
             TokenKind::LeftParen => {
                 let expression = self.expression()?;
                 self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
@@ -812,6 +911,8 @@ impl fmt::Display for Value {
 
 struct Interpreter {
     environment: HashMap<String, Value>,
+    functions: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    return_value: Option<Value>,
     output: Vec<String>,
     locale: Locale,
 }
@@ -820,6 +921,8 @@ impl Interpreter {
     fn new(locale: Locale) -> Self {
         Self {
             environment: HashMap::new(),
+            functions: HashMap::new(),
+            return_value: None,
             output: Vec::new(),
             locale,
         }
@@ -885,6 +988,16 @@ impl Interpreter {
                     self.run(body)?;
                 }
             }
+            Stmt::Function { name, params, body } => {
+                self.functions
+                    .insert(name.clone(), (params.clone(), body.clone()));
+            }
+            Stmt::Return { value, .. } => {
+                self.return_value = Some(match value {
+                    Some(expression) => self.evaluate(expression)?,
+                    None => Value::String(String::new()),
+                });
+            }
         }
         Ok(())
     }
@@ -918,6 +1031,37 @@ impl Interpreter {
                 let left = self.evaluate(left)?;
                 let right = self.evaluate(right)?;
                 self.binary(left, operator, right, *position)
+            }
+            Expr::Call {
+                name,
+                arguments,
+                position,
+            } => {
+                let (parameters, body) = self
+                    .functions
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| error_for(self.locale, "P1008", *position, name))?;
+                if parameters.len() != arguments.len() {
+                    return Err(error_for(self.locale, "P1009", *position, name));
+                }
+                let values = arguments
+                    .iter()
+                    .map(|argument| self.evaluate(argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let previous_environment = std::mem::replace(&mut self.environment, HashMap::new());
+                let previous_return = self.return_value.take();
+                for (parameter, value) in parameters.iter().zip(values) {
+                    self.environment.insert(parameter.clone(), value);
+                }
+                self.run(&body)?;
+                let result = self
+                    .return_value
+                    .take()
+                    .unwrap_or(Value::String(String::new()));
+                self.environment = previous_environment;
+                self.return_value = previous_return;
+                Ok(result)
             }
         }
     }
@@ -1203,5 +1347,13 @@ mod tests {
     fn stops_non_terminating_loop_with_safety_error() {
         let error = run("let i = 0\nwhile true {\n i = i + 1\n}\n").unwrap_err();
         assert_eq!(error.code, "P1012");
+    }
+
+    #[test]
+    fn calls_function_with_parameters_and_return_value() {
+        let output =
+            run("function add(a, b) {\n return a + b\n}\nlet result = add(2, 3)\nprint result\n")
+                .unwrap();
+        assert_eq!(output, vec!["5"]);
     }
 }
