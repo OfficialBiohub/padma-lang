@@ -4,7 +4,8 @@
 - [x] Expose the existing compiler core through the reusable `src/lib.rs` API used by the WASM wrapper.
 - [ ] Define and document the stable Padma language specification for Bengali, English, and mixed source.
 - [x] Add first-class functions, parameters, calls, return values, blocks, and loops.
-- [ ] Add lists, maps, modules, and structured error handling.
+- [x] Add list literals and list display values.
+- [ ] Add list indexing/mutation, maps, modules, and structured error handling.
 - [ ] Add static type checking and actionable bilingual diagnostics without breaking the interpreter.
 - [ ] Build a Termux-friendly `padma` CLI with run, check, format, test, init, and package commands.
 - [ ] Add a dependency-free standard library for files, text, collections, JSON, HTTP, and process boundaries.

@@ -4,6 +4,8 @@ Padma has one semantic language and two keyword vocabularies. Bengali and Englis
 
 The current executable core supports UTF-8 identifiers, Bengali digits, numbers, strings with `\\n`, `\\t`, escaped quotes, booleans, variable declaration, assignment, output, arithmetic, comparisons, conditional blocks, and bounded `while` loops. Statements are separated by newlines; blocks use braces.
 
+List literals use square brackets and comma-separated expressions, for example `[১, ২, ৩]`. Indexing and collection mutation are planned additions.
+
 | Concept | Bengali | English |
 |---|---|---|
 | Declaration | `ধরি` | `let` |

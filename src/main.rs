@@ -179,6 +179,8 @@ enum TokenKind {
     LeftBrace,
     RightBrace,
     Comma,
+    LeftBracket,
+    RightBracket,
     Newline,
     Eof,
 }
@@ -255,6 +257,8 @@ impl Lexer {
                 '{' => tokens.push(self.token(TokenKind::LeftBrace, position)),
                 '}' => tokens.push(self.token(TokenKind::RightBrace, position)),
                 ',' => tokens.push(self.token(TokenKind::Comma, position)),
+                '[' => tokens.push(self.token(TokenKind::LeftBracket, position)),
+                ']' => tokens.push(self.token(TokenKind::RightBracket, position)),
                 ch if is_digit(ch) => tokens.push(self.number(position)?),
                 ch if is_identifier_start(ch) => tokens.push(self.identifier(position)),
                 ch => return Err(error_for(self.locale, "P1001", position, &ch.to_string())),
@@ -467,6 +471,7 @@ enum Expr {
         arguments: Vec<Expr>,
         position: Position,
     },
+    List(Vec<Expr>),
 }
 
 struct Parser {
@@ -783,6 +788,19 @@ impl Parser {
                     Ok(Expr::Variable(name, token.position))
                 }
             }
+            TokenKind::LeftBracket => {
+                let mut values = Vec::new();
+                if !self.check(|kind| matches!(kind, TokenKind::RightBracket)) {
+                    loop {
+                        values.push(self.expression()?);
+                        if !self.matches(|kind| matches!(kind, TokenKind::Comma)) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(|kind| matches!(kind, TokenKind::RightBracket), "]")?;
+                Ok(Expr::List(values))
+            }
             TokenKind::LeftParen => {
                 let expression = self.expression()?;
                 self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
@@ -885,6 +903,7 @@ enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
+    List(Vec<Value>),
 }
 
 impl Value {
@@ -893,6 +912,7 @@ impl Value {
             Self::Boolean(value) => *value,
             Self::Number(value) => *value != 0.0,
             Self::String(value) => !value.is_empty(),
+            Self::List(value) => !value.is_empty(),
         }
     }
 }
@@ -905,6 +925,16 @@ impl fmt::Display for Value {
             Self::String(value) => write!(formatter, "{value}"),
             Self::Boolean(true) => write!(formatter, "true"),
             Self::Boolean(false) => write!(formatter, "false"),
+            Self::List(values) => {
+                write!(formatter, "[")?;
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        write!(formatter, ", ")?;
+                    }
+                    write!(formatter, "{value}")?;
+                }
+                write!(formatter, "]")
+            }
         }
     }
 }
@@ -1063,6 +1093,11 @@ impl Interpreter {
                 self.return_value = previous_return;
                 Ok(result)
             }
+            Expr::List(expressions) => expressions
+                .iter()
+                .map(|expression| self.evaluate(expression))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::List),
         }
     }
 
@@ -1355,5 +1390,11 @@ mod tests {
             run("function add(a, b) {\n return a + b\n}\nlet result = add(2, 3)\nprint result\n")
                 .unwrap();
         assert_eq!(output, vec!["5"]);
+    }
+
+    #[test]
+    fn evaluates_bengali_list_literal() {
+        let output = run("ধরি সংখ্যা = [১, ২, ৩]\nদেখাও সংখ্যা\n").unwrap();
+        assert_eq!(output, vec!["[1, 2, 3]"]);
     }
 }
