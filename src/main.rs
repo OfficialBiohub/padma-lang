@@ -1515,10 +1515,10 @@ fn format_diagnostic(path: &str, source: &str, error: &PadmaError, locale: Local
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma <file.pd> অথবা padma <run|check|ast> <file.pd>\n\nউদাহরণ:\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma <file.pd> or padma <run|check|ast> <file.pd>\n\nExamples:\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
@@ -1531,6 +1531,10 @@ fn main() {
     }
     if arguments.len() == 2 && matches!(arguments[1].as_str(), "--version" | "-V") {
         println!("padma 0.1.0");
+        return;
+    }
+    if arguments.len() == 2 && matches!(arguments[1].as_str(), "--help" | "-h") {
+        println!("{}", usage(Locale::English));
         return;
     }
     let (command, path) = match arguments.len() {
@@ -1586,7 +1590,8 @@ fn main() {
 }
 
 fn repl() {
-    println!("Padma 0.1.0 REPL — বাংলা/English code লিখুন; বের হতে exit লিখুন।");
+    println!("Padma 0.1.0 (Bangla-English hybrid programming language)");
+    println!("Interactive shell: help, copyright, credits, license; exit with exit() or বের হও.");
     let stdin = io::stdin();
     let mut interpreter = Interpreter::new(Locale::Bangla);
     loop {
@@ -1597,12 +1602,33 @@ fn repl() {
             break;
         }
         let line = line.trim_end();
-        if matches!(line, "exit" | "quit" | "বের হও") {
+        if matches!(line, "exit" | "exit()" | "quit" | "quit()" | "বের হও") {
             break;
         }
-        if matches!(line, "help" | "সাহায্য") {
-            println!("Examples: দেখাও ২ + ৩ | print \"hello\" | ধরি x = 10");
-            continue;
+        match line {
+            "help" | "help()" | "সাহায্য" => {
+                println!("Padma interactive shell commands:");
+                println!("  help / সাহায্য       show this help");
+                println!("  copyright            show copyright information");
+                println!("  credits              show project credits");
+                println!("  license              show the MIT license notice");
+                println!("  exit() / বের হও      leave the shell");
+                println!("Examples: দেখাও ২ + ৩ | print \"hello\" | ধরি x = 10");
+                continue;
+            }
+            "copyright" | "copyright()" => {
+                println!("Copyright (c) 2026 OfficialBiohub and Padma contributors.");
+                continue;
+            }
+            "credits" | "credits()" => {
+                println!("Padma is an open-source Bangla-English language project by OfficialBiohub and its contributors.");
+                continue;
+            }
+            "license" | "license()" => {
+                println!("Padma is released under the MIT License. See LICENSE in the repository.");
+                continue;
+            }
+            _ => {}
         }
         if line.trim().is_empty() {
             continue;

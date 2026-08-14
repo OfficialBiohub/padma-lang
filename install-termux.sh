@@ -24,6 +24,18 @@ install -m755 target/release/padma "$PREFIX/bin/padma"
 export PATH="$PREFIX/bin:$PATH"
 hash -r 2>/dev/null || true
 
+# A script cannot modify the parent shell's environment, so persist the path
+# for the next Termux shell without adding duplicate lines.
+path_line='export PATH="$PREFIX/bin:$PATH"'
+for shell_rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  if [ -f "$shell_rc" ] || [ "${shell_rc##*/}" = ".bashrc" ]; then
+    touch "$shell_rc"
+    if ! grep -Fqx "$path_line" "$shell_rc"; then
+      printf '\n# Padma CLI\n%s\n' "$path_line" >> "$shell_rc"
+    fi
+  fi
+done
+
 if ! python -m pip install --user --upgrade yt-dlp; then
   echo "Warning: yt-dlp install failed. Install later with: python -m pip install --user --upgrade yt-dlp"
 fi
@@ -35,5 +47,7 @@ if ! command -v padma >/dev/null 2>&1; then
 fi
 
 echo "Padma installed: $(command -v padma)"
+echo "Open a new Termux shell, or run: export PATH=\"\$PREFIX/bin:\$PATH\""
+echo "Try the Python-style shell with: padma"
 echo "Try: padma examples/hello-bn.pd"
 echo "Downloader backend installed. Use only URLs and media you are allowed to download."

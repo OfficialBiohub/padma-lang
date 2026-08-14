@@ -26,8 +26,13 @@
 - [ ] Provide a diagnostic command that reports the exact installer failure instead of silently proceeding.
 - [ ] Add `padma --version` and `padma --help` behavior matching Termux CLI expectations.
 - [x] Add `padma` no-argument interactive REPL with Bengali-English input and localized errors.
-- [ ] Add a Termux package recipe so `pkg install padma -y` can be supported through a package repository.
+- [ ] Submit the deterministic Termux package recipe upstream and wait for repository publication before claiming `pkg install padma -y` support.
 - [ ] Add package install, version, REPL, and script execution smoke tests.
+- [x] Match Python-style interactive shell banner and `padma>` prompt behavior.
+- [x] Support REPL commands `help`, `copyright`, `credits`, `license`, `exit()`, `quit()`, and `বের হও`.
+- [x] Add persistent REPL examples and command-level smoke tests.
+- [x] Improve installer PATH detection and print actionable recovery instructions.
+- [ ] Submit and track the Padma recipe in an actual Termux package repository before claiming `pkg install padma -y` availability.
 - [ ] Add safe interoperability paths for Python, JavaScript/TypeScript, C, and shell instead of claiming automatic conversion.
 - [ ] Add package metadata, lockfile, registry-ready layout, reproducible builds, and semantic versioning.
 - [ ] Add security limits, sandbox boundaries, path validation, dependency checks, and supply-chain guidance.

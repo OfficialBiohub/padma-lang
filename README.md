@@ -49,6 +49,31 @@ padma examples/hello-bn.pd
 
 After installation, `padma --version` prints the installed version and `padma` opens an interactive REPL.
 
+### Python-style interactive shell
+
+When you type `padma` without a file, Padma opens an interactive shell. Each complete line is compiled and executed immediately, and variables remain available for later lines:
+
+```text
+$ padma
+Padma 0.1.0 (Bangla-English hybrid programming language)
+Interactive shell: help, copyright, credits, license; exit with exit() or বের হও.
+padma> দেখাও ২ + ৩
+5
+padma> ধরি নাম = "রাফি"
+padma> দেখাও "হ্যালো {নাম}"
+হ্যালো রাফি
+padma> help
+padma> exit()
+```
+
+The shell accepts `help` or `সাহায্য`, `copyright`, `credits`, and `license`. To leave it, use `exit()`, `quit()`, `exit`, or `বের হও`.
+
+### Why `pkg install padma -y` is not available yet
+
+`pkg` and `apt` do not install arbitrary GitHub repositories. They install only signed packages that have been built and published in the Termux repositories configured on the device. The `packaging/termux/packages/padma/build.sh` file is a **recipe for a future Termux submission**; placing a recipe in this repository does not make `padma` appear in `pkg search`.
+
+If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
+
 For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). The current release is an executable interpreter core; functions, collections, modules, and static type checking remain active implementation milestones rather than undocumented claims.
 
 ## Your first Padma program
@@ -169,6 +194,7 @@ Use this only for content you own or are authorized to download and in complianc
 | `padma check <file.pd>` | Check the source syntax without executing it. |
 | `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
 | `padma --version` | Print the installed compiler version. |
+| `padma --help` | Show CLI usage and interactive-shell commands. |
 
 ## Diagnostic language
 
