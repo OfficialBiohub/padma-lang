@@ -4,7 +4,7 @@
 // UTF-8 source, Bangla/English keyword aliases, expressions, variables, print,
 // conditionals, string interpolation, and localized diagnostics.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -163,7 +163,11 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::Bangla, "P1018") => (format!("process চালু করা যায়নি: `{detail}`"), Some("Termux-এ toolটি install আছে কি না পরীক্ষা করুন।".into())),
         (Locale::English, "P1018") => (format!("Could not start process: `{detail}`"), Some("Check that the tool is installed in Termux.".into())),
         (Locale::Bangla, "P1019") => (format!("process ব্যর্থ হয়েছে: `{detail}`"), Some("tool-এর output ও URL পরীক্ষা করুন।".into())),
-        (Locale::English, "P1019") => (format!("Process failed: `{detail}`"), Some("Check the tool output and the URL.".into())),
+        (Locale::English, "P1019") => (format!("Process failed: `{detail}`"), Some("Check the tool output and URL.".into())),
+        (Locale::Bangla, "P1020") => (format!("map-এর key অবশ্যই text হতে হবে: `{detail}`"), Some("উদাহরণ: `map.get(\"নাম\")` ব্যবহার করুন।".into())),
+        (Locale::English, "P1020") => (format!("Map keys must be text: `{detail}`"), Some("Use a string key, for example `map.get(\"name\")`.".into())),
+        (Locale::Bangla, "P1021") => (format!("map-এ `{detail}` key পাওয়া যায়নি"), Some("আগে `map.set` দিয়ে key-টি যোগ করুন।".into())),
+        (Locale::English, "P1021") => (format!("Map key `{detail}` was not found"), Some("Add the key first with `map.set`.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -202,6 +206,7 @@ enum TokenKind {
     RightBrace,
     Comma,
     Dot,
+    Colon,
     LeftBracket,
     RightBracket,
     Newline,
@@ -281,6 +286,7 @@ impl Lexer {
                 '}' => tokens.push(self.token(TokenKind::RightBrace, position)),
                 ',' => tokens.push(self.token(TokenKind::Comma, position)),
                 '.' => tokens.push(self.token(TokenKind::Dot, position)),
+                ':' => tokens.push(self.token(TokenKind::Colon, position)),
                 '[' => tokens.push(self.token(TokenKind::LeftBracket, position)),
                 ']' => tokens.push(self.token(TokenKind::RightBracket, position)),
                 ch if is_digit(ch) => tokens.push(self.number(position)?),
@@ -472,6 +478,16 @@ fn expect_string<'a>(
     }
 }
 
+fn expect_map_key<'a>(
+    value: &'a Value,
+    locale: Locale,
+    position: Position,
+) -> Result<&'a str, PadmaError> {
+    match value {
+        Value::String(value) => Ok(value),
+        other => Err(error_for(locale, "P1020", position, &other.to_string())),
+    }
+}
 #[derive(Clone, Debug)]
 enum Stmt {
     Let {
@@ -479,6 +495,9 @@ enum Stmt {
         value: Expr,
     },
     Print {
+        value: Expr,
+    },
+    Expression {
         value: Expr,
     },
     Assign {
@@ -527,6 +546,7 @@ enum Expr {
         position: Position,
     },
     List(Vec<Expr>),
+    Map(Vec<(Expr, Expr)>),
 }
 
 struct Parser {
@@ -581,13 +601,9 @@ impl Parser {
         {
             return self.assign_statement();
         }
-        let token = self.peek().clone();
-        Err(error_for(
-            self.locale,
-            "P1004",
-            token.position,
-            &display_token(&token.kind),
-        ))
+        let value = self.expression()?;
+        self.consume_statement_end()?;
+        Ok(Stmt::Expression { value })
     }
 
     fn let_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
@@ -871,6 +887,22 @@ impl Parser {
                 self.consume(|kind| matches!(kind, TokenKind::RightBracket), "]")?;
                 Ok(Expr::List(values))
             }
+            TokenKind::LeftBrace => {
+                let mut entries = Vec::new();
+                if !self.check(|kind| matches!(kind, TokenKind::RightBrace)) {
+                    loop {
+                        let key = self.expression()?;
+                        self.consume(|kind| matches!(kind, TokenKind::Colon), ":")?;
+                        let value = self.expression()?;
+                        entries.push((key, value));
+                        if !self.matches(|kind| matches!(kind, TokenKind::Comma)) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(|kind| matches!(kind, TokenKind::RightBrace), "}")?;
+                Ok(Expr::Map(entries))
+            }
             TokenKind::LeftParen => {
                 let expression = self.expression()?;
                 self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
@@ -953,27 +985,13 @@ impl Parser {
     }
 }
 
-fn display_token(kind: &TokenKind) -> String {
-    match kind {
-        TokenKind::Let => "let/ধরি".into(),
-        TokenKind::Print => "print/দেখাও".into(),
-        TokenKind::If => "if/যদি".into(),
-        TokenKind::Else => "else/নইলে".into(),
-        TokenKind::Eof => "end of file".into(),
-        TokenKind::Newline => "new line".into(),
-        TokenKind::Identifier(value) => value.clone(),
-        TokenKind::Number(value) => value.to_string(),
-        TokenKind::String(value) => format!("\"{value}\""),
-        _ => "operator".into(),
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
     List(Vec<Value>),
+    Map(BTreeMap<String, Value>),
 }
 
 impl Value {
@@ -983,6 +1001,7 @@ impl Value {
             Self::Number(value) => *value != 0.0,
             Self::String(value) => !value.is_empty(),
             Self::List(value) => !value.is_empty(),
+            Self::Map(value) => !value.is_empty(),
         }
     }
 }
@@ -1004,6 +1023,16 @@ impl fmt::Display for Value {
                     write!(formatter, "{value}")?;
                 }
                 write!(formatter, "]")
+            }
+            Self::Map(values) => {
+                write!(formatter, "{{")?;
+                for (index, (key, value)) in values.iter().enumerate() {
+                    if index > 0 {
+                        write!(formatter, ", ")?;
+                    }
+                    write!(formatter, "\"{key}\": {value}")?;
+                }
+                write!(formatter, "}}")
             }
         }
     }
@@ -1044,6 +1073,9 @@ impl Interpreter {
             Stmt::Print { value, .. } => {
                 let value = self.evaluate(value)?;
                 self.output.push(value.to_string());
+            }
+            Stmt::Expression { value } => {
+                self.evaluate(value)?;
             }
             Stmt::Assign {
                 name,
@@ -1262,6 +1294,41 @@ impl Interpreter {
                         line.trim_end_matches(['\r', '\n']).to_string(),
                     ));
                 }
+                if let Some(map_name) = name.strip_suffix(".get") {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let key = self.evaluate(&arguments[0])?;
+                    let key = expect_map_key(&key, self.locale, *position)?;
+                    let map = self
+                        .environment
+                        .get(map_name)
+                        .ok_or_else(|| error_for(self.locale, "P1007", *position, map_name))?;
+                    let Value::Map(values) = map else {
+                        return Err(error_for(self.locale, "P1010", *position, "map.get"));
+                    };
+                    return values
+                        .get(key)
+                        .cloned()
+                        .ok_or_else(|| error_for(self.locale, "P1021", *position, key));
+                }
+                if let Some(map_name) = name.strip_suffix(".set") {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let key = self.evaluate(&arguments[0])?;
+                    let key = expect_map_key(&key, self.locale, *position)?.to_owned();
+                    let value = self.evaluate(&arguments[1])?;
+                    let map = self
+                        .environment
+                        .get_mut(map_name)
+                        .ok_or_else(|| error_for(self.locale, "P1007", *position, map_name))?;
+                    let Value::Map(values) = map else {
+                        return Err(error_for(self.locale, "P1010", *position, "map.set"));
+                    };
+                    values.insert(key, value);
+                    return Ok(Value::Boolean(true));
+                }
                 let (parameters, body) = self
                     .functions
                     .get(name)
@@ -1293,6 +1360,15 @@ impl Interpreter {
                 .map(|expression| self.evaluate(expression))
                 .collect::<Result<Vec<_>, _>>()
                 .map(Value::List),
+            Expr::Map(entries) => {
+                let mut values = BTreeMap::new();
+                for (key, value) in entries {
+                    let key = self.evaluate(key)?;
+                    let key = expect_string(&key, self.locale, Position::new(1, 1), "map key")?;
+                    values.insert(key.to_owned(), self.evaluate(value)?);
+                }
+                Ok(Value::Map(values))
+            }
         }
     }
 
@@ -1512,6 +1588,7 @@ fn main() {
 fn repl() {
     println!("Padma 0.1.0 REPL — বাংলা/English code লিখুন; বের হতে exit লিখুন।");
     let stdin = io::stdin();
+    let mut interpreter = Interpreter::new(Locale::Bangla);
     loop {
         print!("padma> ");
         let _ = io::stdout().flush();
@@ -1532,10 +1609,12 @@ fn repl() {
         }
         match compile(&format!("{line}\n")) {
             Ok((program, locale)) => {
-                let mut interpreter = Interpreter::new(locale);
+                interpreter.locale = locale;
+                interpreter.return_value = None;
+                let output_start = interpreter.output.len();
                 match interpreter.run(&program) {
                     Ok(()) => {
-                        for output in interpreter.output {
+                        for output in &interpreter.output[output_start..] {
                             println!("{output}");
                         }
                     }
@@ -1638,5 +1717,36 @@ mod tests {
     fn evaluates_bengali_list_literal() {
         let output = run("ধরি সংখ্যা = [১, ২, ৩]\nদেখাও সংখ্যা\n").unwrap();
         assert_eq!(output, vec!["[1, 2, 3]"]);
+    }
+
+    #[test]
+    fn creates_reads_and_updates_english_map() {
+        let output = run(
+            "let profile = {\"name\": \"Rafi\", \"age\": 12}\nprint profile.get(\"name\")\nprofile.set(\"age\", 13)\nprint profile.get(\"age\")\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["Rafi", "13"]);
+    }
+
+    #[test]
+    fn creates_reads_and_updates_bangla_map() {
+        let output = run(
+            "ধরি প্রোফাইল = {\"নাম\": \"রাফি\", \"শ্রেণি\": ৬}\nদেখাও প্রোফাইল.get(\"নাম\")\nপ্রোফাইল.set(\"শ্রেণি\", ৭)\nদেখাও প্রোফাইল.get(\"শ্রেণি\")\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["রাফি", "7"]);
+    }
+
+    #[test]
+    fn reports_missing_map_key() {
+        let error =
+            run("let profile = {\"name\": \"Rafi\"}\nprint profile.get(\"age\")\n").unwrap_err();
+        assert_eq!(error.code, "P1021");
+    }
+
+    #[test]
+    fn rejects_non_string_map_key() {
+        let error = run("let profile = {\"name\": \"Rafi\"}\nprint profile.get(1)\n").unwrap_err();
+        assert_eq!(error.code, "P1020");
     }
 }

@@ -17,6 +17,7 @@ Padma allows Bengali and English keywords to represent the **same internal synta
 | Number, string, arithmetic, comparison | Yes | Yes |
 | String interpolation | `"নাম: {নাম}"` | `"Name: {name}"` |
 | Bengali digits | `০`–`৯` | `0`–`9` |
+| Maps/dictionaries | Text-key maps with `.get()` and `.set()` | Text-key maps with `.get()` and `.set()` |
 | Localized diagnostics | Bengali source → Bengali error | English source → English error |
 
 ## Quick start
@@ -102,6 +103,26 @@ Functions accept parameters and return a value:
 }
 ধরি ফল = যোগ(২, ৩)
 দেখাও ফল
+```
+
+### Maps / dictionaries
+
+Padma maps use text keys. Read a value with `.get(key)` and update or add a value with `.set(key, value)`:
+
+```padma
+let profile = {"name": "Rafi", "class": 6}
+print profile.get("name")
+profile.set("class", 7)
+print profile.get("class")
+```
+
+The Bengali and mixed forms work the same way:
+
+```padma
+ধরি তথ্য = {"নাম": "রাফি", "বিষয়": "Padma"}
+দেখাও তথ্য.get("নাম")
+তথ্য.set("স্তর", ৬)
+দেখাও তথ্য.get("স্তর")
 ```
 
 ### Interactive input

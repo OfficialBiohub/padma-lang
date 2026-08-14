@@ -5,7 +5,8 @@
 - [ ] Define and document the stable Padma language specification for Bengali, English, and mixed source.
 - [x] Add first-class functions, parameters, calls, return values, blocks, and loops.
 - [x] Add list literals and list display values.
-- [ ] Add list indexing/mutation, maps, modules, and structured error handling.
+- [ ] Add list indexing/mutation, modules, and structured error handling.
+- [x] Add maps/dictionaries with text keys and `map.get`/`map.set`.
 - [ ] Add static type checking and actionable bilingual diagnostics without breaking the interpreter.
 - [ ] Build a Termux-friendly `padma` CLI with run, check, format, test, init, and package commands.
 - [ ] Add dependency-free standard library for files, text, collections, JSON, HTTP, and process boundaries.

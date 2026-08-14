@@ -1,0 +1,5 @@
+# Maps use text keys and can be updated with map.set.
+let profile = {"name": "Rafi", "class": 6}
+print profile.get("name")
+profile.set("class", 7)
+print profile.get("class")
