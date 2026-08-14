@@ -4,8 +4,7 @@ TERMUX_PKG_LICENSE="MIT"
 TERMUX_PKG_MAINTAINER="OfficialBiohub"
 TERMUX_PKG_VERSION=0.1.0
 TERMUX_PKG_SRCURL="https://github.com/OfficialBiohub/padma-lang/archive/refs/tags/v${TERMUX_PKG_VERSION}.tar.gz"
-# Replace this placeholder with the SHA256 of the immutable v${TERMUX_PKG_VERSION} archive before submitting upstream.
-TERMUX_PKG_SHA256=REPLACE_WITH_RELEASE_SHA256
+TERMUX_PKG_SHA256=06b90b992e59a5304753c675fd21f78a0c63d1ca615bb43cb26b8e3d7806683a
 TERMUX_PKG_DEPENDS="libc++"
 TERMUX_PKG_BUILD_DEPENDS="rust"
 TERMUX_PKG_BUILD_IN_SRC=true
