@@ -21,6 +21,12 @@
 - [ ] Make the minimal downloader example runnable from any working directory with one `padma file.pd` command.
 - [ ] Verify installer behavior on a fresh Termux shell and ensure `$PREFIX/bin/padma` is on PATH.
 - [ ] Add a clear post-install command check and recovery message for `padma: command not found`.
+- [ ] Add a Termux fallback that runs Padma directly from `~/padma-lang/target/release/padma` when `$PREFIX/bin` installation is unavailable.
+- [ ] Provide a diagnostic command that reports the exact installer failure instead of silently proceeding.
+- [ ] Add `padma --version` and `padma --help` behavior matching Termux CLI expectations.
+- [x] Add `padma` no-argument interactive REPL with Bengali-English input and localized errors.
+- [ ] Add a Termux package recipe so `pkg install padma -y` can be supported through a package repository.
+- [ ] Add package install, version, REPL, and script execution smoke tests.
 - [ ] Add safe interoperability paths for Python, JavaScript/TypeScript, C, and shell instead of claiming automatic conversion.
 - [ ] Add package metadata, lockfile, registry-ready layout, reproducible builds, and semantic versioning.
 - [ ] Add security limits, sandbox boundaries, path validation, dependency checks, and supply-chain guidance.

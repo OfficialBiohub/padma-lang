@@ -1449,6 +1449,10 @@ fn usage(locale: Locale) -> &'static str {
 
 fn main() {
     let arguments: Vec<String> = env::args().collect();
+    if arguments.len() == 1 {
+        repl();
+        return;
+    }
     if arguments.len() == 2 && matches!(arguments[1].as_str(), "--version" | "-V") {
         println!("padma 0.1.0");
         return;
@@ -1501,6 +1505,44 @@ fn main() {
         _ => {
             eprintln!("{}", usage(locale));
             process::exit(64);
+        }
+    }
+}
+
+fn repl() {
+    println!("Padma 0.1.0 REPL — বাংলা/English code লিখুন; বের হতে exit লিখুন।");
+    let stdin = io::stdin();
+    loop {
+        print!("padma> ");
+        let _ = io::stdout().flush();
+        let mut line = String::new();
+        if stdin.read_line(&mut line).unwrap_or(0) == 0 {
+            break;
+        }
+        let line = line.trim_end();
+        if matches!(line, "exit" | "quit" | "বের হও") {
+            break;
+        }
+        if matches!(line, "help" | "সাহায্য") {
+            println!("Examples: দেখাও ২ + ৩ | print \"hello\" | ধরি x = 10");
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        match compile(&format!("{line}\n")) {
+            Ok((program, locale)) => {
+                let mut interpreter = Interpreter::new(locale);
+                match interpreter.run(&program) {
+                    Ok(()) => {
+                        for output in interpreter.output {
+                            println!("{output}");
+                        }
+                    }
+                    Err(error) => eprintln!("{}", error.message),
+                }
+            }
+            Err(error) => eprintln!("{}", error.message),
         }
     }
 }

@@ -43,8 +43,10 @@ From Termux, the repository includes a reproducible installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh | bash
-padma run examples/hello-bn.pd
+padma examples/hello-bn.pd
 ```
+
+After installation, `padma --version` prints the installed version and `padma` opens an interactive REPL.
 
 For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). The current release is an executable interpreter core; functions, collections, modules, and static type checking remain active implementation milestones rather than undocumented claims.
 
@@ -141,6 +143,7 @@ Use this only for content you own or are authorized to download and in complianc
 | Command | Purpose |
 |---|---|
 | `padma <file.pd>` | Parse and interpret a Padma source file, like `python file.py`. |
+| `padma` | Open the interactive Padma REPL. |
 | `padma run <file.pd>` | Backward-compatible explicit run form. |
 | `padma check <file.pd>` | Check the source syntax without executing it. |
 | `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
