@@ -1,0 +1,15 @@
+# Padma Language Specification Draft
+
+Padma has one semantic language and two keyword vocabularies. Bengali and English keywords are aliases, not separate dialects. A source file may use either vocabulary or mix them deliberately; diagnostics follow the detected source locale unless `# padma:locale=bn` or `# padma:locale=en` overrides it.
+
+The current executable core supports UTF-8 identifiers, Bengali digits, numbers, strings with `\\n`, `\\t`, escaped quotes, booleans, variable declaration, assignment, output, arithmetic, comparisons, conditional blocks, and bounded `while` loops. Statements are separated by newlines; blocks use braces.
+
+| Concept | Bengali | English |
+|---|---|---|
+| Declaration | `ধরি` | `let` |
+| Output | `দেখাও` | `print` |
+| Conditional | `যদি` / `নইলে` | `if` / `else` |
+| Loop | `যতক্ষণ` | `while` |
+| Boolean | `সত্য` / `মিথ্যা` | `true` / `false` |
+
+The specification is versioned with the compiler. A syntax change requires a test, an example, and a documented compatibility decision before it is considered stable.

@@ -36,6 +36,17 @@ cargo build --release
 ./target/release/padma check examples/mixed.pd
 ```
 
+### Install directly in Termux
+
+From Termux, the repository includes a reproducible installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh | bash
+padma run examples/hello-bn.pd
+```
+
+For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). The current release is an executable interpreter core; functions, collections, modules, and static type checking remain active implementation milestones rather than undocumented claims.
+
 ## Your first Padma program
 
 ```padma
