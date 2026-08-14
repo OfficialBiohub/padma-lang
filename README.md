@@ -26,14 +26,14 @@ The compiler is written in Rust. Install a stable Rust toolchain, clone this rep
 ```bash
 git clone https://github.com/OfficialBiohub/padma-lang.git
 cd padma-lang
-cargo run -- run examples/hello-bn.pd
+cargo run -- examples/hello-bn.pd
 ```
 
 For an optimized binary:
 
 ```bash
 cargo build --release
-./target/release/padma run examples/hello-en.pd
+./target/release/padma examples/hello-en.pd
 ./target/release/padma check examples/mixed.pd
 ```
 
@@ -102,11 +102,27 @@ Functions accept parameters and return a value:
 দেখাও ফল
 ```
 
+### Interactive input
+
+Termux scripts can read a line from the user with the built-in `input()` function:
+
+```padma
+ধরি url = input("ভিডিও URL দিন: ")
+দেখাও "আপনি দিয়েছেন: {url}"
+```
+
+Run it in the Python-style form:
+
+```bash
+padma examples/input-demo.pd
+```
+
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `padma run <file.pd>` | Parse and interpret a Padma source file. |
+| `padma <file.pd>` | Parse and interpret a Padma source file, like `python file.py`. |
+| `padma run <file.pd>` | Backward-compatible explicit run form. |
 | `padma check <file.pd>` | Check the source syntax without executing it. |
 | `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
 | `padma --version` | Print the installed compiler version. |
@@ -159,7 +175,7 @@ The MVP has no third-party compiler dependencies. Unit tests cover Bengali, Engl
 | Release | Planned outcome |
 |---|---|
 | `v0.1` | Interpreter MVP: variables, output, arithmetic, conditions, diagnostics. |
-| `v0.2` | Functions, lists, maps, modules, formatter, stronger type errors. |
+| `v0.2` | Functions, lists, interactive input, maps, modules, formatter, stronger type errors. |
 | `v0.3` | TypeScript code generator, browser playground, Node.js package bridge. |
 | `v0.4` | Python bridge for data/AI workflows, project manifest and lockfile. |
 | `v0.5` | VS Code extension, Tree-sitter grammar, language server. |

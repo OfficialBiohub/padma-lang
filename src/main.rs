@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs;
+use std::io::{self, Write};
 use std::process;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1067,6 +1068,23 @@ impl Interpreter {
                 arguments,
                 position,
             } => {
+                if name == "input" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let prompt = self.evaluate(&arguments[0])?;
+                    print!("{prompt}");
+                    io::stdout()
+                        .flush()
+                        .map_err(|_| error_for(self.locale, "P1013", *position, "input"))?;
+                    let mut line = String::new();
+                    io::stdin()
+                        .read_line(&mut line)
+                        .map_err(|_| error_for(self.locale, "P1013", *position, "input"))?;
+                    return Ok(Value::String(
+                        line.trim_end_matches(['\r', '\n']).to_string(),
+                    ));
+                }
                 let (parameters, body) = self
                     .functions
                     .get(name)
@@ -1244,10 +1262,10 @@ fn format_diagnostic(path: &str, source: &str, error: &PadmaError, locale: Local
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma <run|check|ast> <file.pd>\n\nউদাহরণ:\n  padma run examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma <file.pd> অথবা padma <run|check|ast> <file.pd>\n\nউদাহরণ:\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma <run|check|ast> <file.pd>\n\nExamples:\n  padma run examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma <file.pd> or padma <run|check|ast> <file.pd>\n\nExamples:\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
@@ -1258,13 +1276,18 @@ fn main() {
         println!("padma 0.1.0");
         return;
     }
-    if arguments.len() != 3 {
+    let (command, path) = match arguments.len() {
+        2 if arguments[1].ends_with(".pd") => ("run", arguments[1].as_str()),
+        3 => (arguments[1].as_str(), arguments[2].as_str()),
+        _ => {
+            eprintln!("{}", usage(Locale::Bangla));
+            process::exit(64);
+        }
+    };
+    if path.is_empty() {
         eprintln!("{}", usage(Locale::Bangla));
         process::exit(64);
     }
-
-    let command = &arguments[1];
-    let path = &arguments[2];
     let source = match fs::read_to_string(path) {
         Ok(source) => source,
         Err(error) => {
@@ -1282,7 +1305,7 @@ fn main() {
         }
     };
 
-    match command.as_str() {
+    match command {
         "check" => match locale {
             Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো syntax error পাওয়া যায়নি।"),
             Locale::English => println!("ok: no syntax errors found in `{path}`."),
