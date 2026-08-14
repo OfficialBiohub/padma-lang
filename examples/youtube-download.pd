@@ -1,0 +1,4 @@
+# Download media you own or are authorized to save.
+ধরি url = input("YouTube URL দিন: ")
+ধরি result = media.download(url, "downloads/%(title)s.%(ext)s")
+দেখাও "Downloader output: {result}"

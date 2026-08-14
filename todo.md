@@ -11,7 +11,10 @@
 - [ ] Add dependency-free standard library for files, text, collections, JSON, HTTP, and process boundaries.
 - [x] Make `padma file.pd` the primary CLI invocation, with `padma run file.pd` retained only as a compatibility alias.
 - [x] Add interactive `input`.
-- [ ] Add safe file writing, and explicit process execution APIs.
+- [ ] Add safe file read/write APIs with validated relative output paths.
+- [ ] Add argument-safe process execution, timeout, stdout/stderr capture, and exit-code values.
+- [x] Add HTTP GET with bounded timeout and localized network errors.
+- [x] Add `media.download(url, output)` wrapper backed by an installed `yt-dlp` executable.
 - [ ] Add an authorized media-download wrapper with clear platform-terms and ownership boundaries.
 - [ ] Add Python-versus-Padma downloader examples and Termux smoke tests.
 - [ ] Add safe interoperability paths for Python, JavaScript/TypeScript, C, and shell instead of claiming automatic conversion.

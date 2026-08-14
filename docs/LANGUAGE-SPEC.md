@@ -6,6 +6,8 @@ The current executable core supports UTF-8 identifiers, Bengali digits, numbers,
 
 List literals use square brackets and comma-separated expressions, for example `[১, ২, ৩]`. Indexing and collection mutation are planned additions.
 
+The first runtime builtins are `input(prompt)`, `file.write(relative_path, content)`, `http.get(url)`, `process.run(program, arguments...)`, and `media.download(url, relative_output_template)`. Process execution is allowlisted and arguments are passed without a shell. Output paths must be relative to the current directory and cannot contain `..`; downloader use remains subject to authorization and platform terms.
+
 | Concept | Bengali | English |
 |---|---|---|
 | Declaration | `ধরি` | `let` |

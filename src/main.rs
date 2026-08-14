@@ -145,6 +145,26 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
             "The loop exceeded the configured iteration limit".into(),
             Some("Check the condition and update the loop variable.".into()),
         ),
+        (Locale::Bangla, "P1014") => (
+            format!("নিরাপত্তার কারণে output path অনুমোদিত নয়: `{detail}`"),
+            Some("বর্তমান folder-এর ভেতরের relative path ব্যবহার করুন; `..` বা absolute path ব্যবহার করবেন না।".into()),
+        ),
+        (Locale::English, "P1014") => (
+            format!("Output path is not allowed for safety: `{detail}`"),
+            Some("Use a relative path inside the current folder; do not use `..` or an absolute path.".into()),
+        ),
+        (Locale::Bangla, "P1015") => (format!("file লেখা যায়নি: `{detail}`"), Some("folder ও permission পরীক্ষা করুন।".into())),
+        (Locale::English, "P1015") => (format!("Could not write file: `{detail}`"), Some("Check the folder and permissions.".into())),
+        (Locale::Bangla, "P1016") => (format!("URL অনুমোদিত নয়: `{detail}`"), Some("http:// অথবা https:// URL ব্যবহার করুন।".into())),
+        (Locale::English, "P1016") => (format!("URL is not allowed: `{detail}`"), Some("Use an http:// or https:// URL.".into())),
+        (Locale::Bangla, "P1017") => (format!("এই process অনুমোদিত নয়: `{detail}`"), Some("শুধু অনুমোদিত downloader/tool ব্যবহার করুন।".into())),
+        (Locale::English, "P1017") => (format!("This process is not allowed: `{detail}`"), Some("Use only an approved downloader/tool.".into())),
+        (Locale::Bangla, "P1018") => (format!("process চালু করা যায়নি: `{detail}`"), Some("Termux-এ toolটি install আছে কি না পরীক্ষা করুন।".into())),
+        (Locale::English, "P1018") => (format!("Could not start process: `{detail}`"), Some("Check that the tool is installed in Termux.".into())),
+        (Locale::Bangla, "P1019") => (format!("process ব্যর্থ হয়েছে: `{detail}`"), Some("tool-এর output ও URL পরীক্ষা করুন।".into())),
+        (Locale::English, "P1019") => (format!("Process failed: `{detail}`"), Some("Check the tool output and the URL.".into())),
+        (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
+        (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
     };
     PadmaError::new(code, message, hint, position)
@@ -180,6 +200,7 @@ enum TokenKind {
     LeftBrace,
     RightBrace,
     Comma,
+    Dot,
     LeftBracket,
     RightBracket,
     Newline,
@@ -258,6 +279,7 @@ impl Lexer {
                 '{' => tokens.push(self.token(TokenKind::LeftBrace, position)),
                 '}' => tokens.push(self.token(TokenKind::RightBrace, position)),
                 ',' => tokens.push(self.token(TokenKind::Comma, position)),
+                '.' => tokens.push(self.token(TokenKind::Dot, position)),
                 '[' => tokens.push(self.token(TokenKind::LeftBracket, position)),
                 ']' => tokens.push(self.token(TokenKind::RightBracket, position)),
                 ch if is_digit(ch) => tokens.push(self.number(position)?),
@@ -416,6 +438,26 @@ fn is_identifier_start(character: char) -> bool {
 
 fn is_identifier_continue(character: char) -> bool {
     is_identifier_start(character) || character.is_ascii_digit() || is_digit(character)
+}
+
+fn validate_output_path(path: &str) -> Result<(), ()> {
+    let candidate = std::path::Path::new(path);
+    if path.is_empty() || candidate.is_absolute() || path.split('/').any(|part| part == "..") {
+        return Err(());
+    }
+    Ok(())
+}
+
+fn expect_string<'a>(
+    value: &'a Value,
+    locale: Locale,
+    position: Position,
+    label: &str,
+) -> Result<&'a str, PadmaError> {
+    match value {
+        Value::String(value) => Ok(value),
+        _ => Err(error_for(locale, "P1010", position, label)),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -769,6 +811,21 @@ impl Parser {
             TokenKind::True => Ok(Expr::Literal(Value::Boolean(true), token.position)),
             TokenKind::False => Ok(Expr::Literal(Value::Boolean(false), token.position)),
             TokenKind::Identifier(name) => {
+                let name = if self.matches(|kind| matches!(kind, TokenKind::Dot)) {
+                    match self.advance().clone().kind {
+                        TokenKind::Identifier(member) => format!("{name}.{member}"),
+                        _ => {
+                            return Err(error_for(
+                                self.locale,
+                                "P1003",
+                                token.position,
+                                "member name",
+                            ))
+                        }
+                    }
+                } else {
+                    name
+                };
                 if self.matches(|kind| matches!(kind, TokenKind::LeftParen)) {
                     let mut arguments = Vec::new();
                     if !self.check(|kind| matches!(kind, TokenKind::RightParen)) {
@@ -1068,6 +1125,106 @@ impl Interpreter {
                 arguments,
                 position,
             } => {
+                if name == "file.write" {
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if values.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = match &values[0] {
+                        Value::String(value) => value,
+                        _ => return Err(error_for(self.locale, "P1010", *position, "path")),
+                    };
+                    let content = match &values[1] {
+                        Value::String(value) => value,
+                        _ => return Err(error_for(self.locale, "P1010", *position, "content")),
+                    };
+                    validate_output_path(path)
+                        .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
+                    fs::write(path, content)
+                        .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "http.get" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let url = self.evaluate(&arguments[0])?;
+                    let url = expect_string(&url, self.locale, *position, "url")?;
+                    if !(url.starts_with("https://") || url.starts_with("http://")) {
+                        return Err(error_for(self.locale, "P1016", *position, url));
+                    }
+                    let result = process::Command::new("curl")
+                        .args([
+                            "--fail",
+                            "--silent",
+                            "--show-error",
+                            "--location",
+                            "--max-time",
+                            "30",
+                            "--",
+                            url,
+                        ])
+                        .output()
+                        .map_err(|_| error_for(self.locale, "P1018", *position, "curl"))?;
+                    if !result.status.success() {
+                        return Err(error_for(self.locale, "P1019", *position, "curl"));
+                    }
+                    return Ok(Value::String(
+                        String::from_utf8_lossy(&result.stdout).to_string(),
+                    ));
+                }
+                if name == "process.run" || name == "media.download" {
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let (program, args) = if name == "media.download" {
+                        if values.len() != 2 {
+                            return Err(error_for(self.locale, "P1009", *position, name));
+                        }
+                        let url = expect_string(&values[0], self.locale, *position, "url")?;
+                        let output = expect_string(&values[1], self.locale, *position, "output")?;
+                        if !(url.starts_with("https://") || url.starts_with("http://")) {
+                            return Err(error_for(self.locale, "P1016", *position, url));
+                        }
+                        validate_output_path(output)
+                            .map_err(|_| error_for(self.locale, "P1014", *position, output))?;
+                        (
+                            "yt-dlp".to_string(),
+                            vec!["-o".to_string(), output.to_string(), url.to_string()],
+                        )
+                    } else {
+                        if values.is_empty() {
+                            return Err(error_for(self.locale, "P1009", *position, name));
+                        }
+                        let program = expect_string(&values[0], self.locale, *position, "program")?;
+                        let args = values[1..]
+                            .iter()
+                            .map(|value| {
+                                expect_string(value, self.locale, *position, "argument")
+                                    .map(str::to_string)
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        (program.to_string(), args)
+                    };
+                    let allowed = ["yt-dlp", "curl", "ffmpeg", "python", "python3"];
+                    if !allowed.contains(&program.as_str()) {
+                        return Err(error_for(self.locale, "P1017", *position, &program));
+                    }
+                    let result = process::Command::new(&program)
+                        .args(&args)
+                        .output()
+                        .map_err(|_| error_for(self.locale, "P1018", *position, &program))?;
+                    if !result.status.success() {
+                        return Err(error_for(self.locale, "P1019", *position, &program));
+                    }
+                    return Ok(Value::String(
+                        String::from_utf8_lossy(&result.stdout).trim().to_string(),
+                    ));
+                }
                 if name == "input" {
                     if arguments.len() != 1 {
                         return Err(error_for(self.locale, "P1009", *position, name));

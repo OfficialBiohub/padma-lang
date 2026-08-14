@@ -117,6 +117,25 @@ Run it in the Python-style form:
 padma examples/input-demo.pd
 ```
 
+### Padma media downloader
+
+Padma can call an installed `yt-dlp` backend through a restricted, argument-safe builtin. The URL and output path are passed as separate arguments; shell interpolation is not used.
+
+```padma
+ধরি url = input("YouTube URL দিন: ")
+ধরি result = media.download(url, "downloads/%(title)s.%(ext)s")
+দেখাও result
+```
+
+Run it from the repository directory:
+
+```bash
+mkdir -p downloads
+padma examples/youtube-download.pd
+```
+
+Use this only for content you own or are authorized to download and in compliance with the source platform's terms. Padma does not bypass DRM or access controls. If `yt-dlp` is missing, the program returns a localized process-start error instead of executing an arbitrary command.
+
 ## Commands
 
 | Command | Purpose |
