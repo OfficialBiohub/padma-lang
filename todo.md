@@ -64,10 +64,11 @@
 - [x] Add a safe static Bangla-English LSP completion catalogue with regression tests.
 - [x] Add UTF-16-aware static LSP hover help for Bangla-English keywords and selected builtins.
 - [x] Add a Bangla Termux-first guide for installation, Nano editing, project capability review, diagnostics, formatting, linting, and Android storage boundaries.
-- [ ] Add LSP definitions, completion, hover, rename, extension packaging/sample-workspace validation, and fuller mobile editor guidance.
+- [x] Add conservative same-document LSP definitions, dynamic local completion, and Bangla-English hover help.
+- [ ] Add LSP rename, extension packaging/sample-workspace validation, and fuller mobile editor guidance.
 - [ ] Build a parser-backed document symbol index that records lexical scopes, declarations, references, and UTF-16 locations without executing code.
 - [x] Build a tested non-executing local declaration index with lexical scope depth and UTF-16 declaration positions.
-- [ ] Add scope-aware go-to-definition and dynamic in-document completion from the symbol index, with Bangla-English regression fixtures.
+- [x] Add scope-aware go-to-definition and dynamic in-document completion from the symbol index, with Bangla-English regression fixtures.
 - [x] Add dynamic in-document completion for visible local declarations with Bangla-English regression fixtures.
 - [x] Add conservative same-document go-to-definition for the nearest visible local declaration, with shadowing regression tests.
 - [ ] Add conservative rename preparation and edits only for unambiguous local symbols, rejecting imports, public exports, and shadowed names until cross-file analysis exists.
