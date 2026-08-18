@@ -11,6 +11,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Locale {
@@ -210,6 +211,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1026") => (format!("Collection index must be a non-negative whole number: `{detail}`"), Some("Use an index such as `items[0]` or `items.get(0)`.".into())),
         (Locale::Bangla, "P1027") => (format!("collection index সীমার বাইরে: `{detail}`"), Some("তালিকার দৈর্ঘ্যের চেয়ে ছোট index ব্যবহার করুন।".into())),
         (Locale::English, "P1027") => (format!("Collection index is out of bounds: `{detail}`"), Some("Use an index smaller than the list length.".into())),
+        (Locale::Bangla, "P1028") => (format!("file পড়া যায়নি: `{detail}`"), Some("File name, folder এবং permission পরীক্ষা করুন।".into())),
+        (Locale::English, "P1028") => (format!("Could not read file: `{detail}`"), Some("Check the file name, folder, and permissions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -539,6 +542,18 @@ fn expect_string<'a>(
 ) -> Result<&'a str, PadmaError> {
     match value {
         Value::String(value) => Ok(value),
+        _ => Err(error_for(locale, "P1010", position, label)),
+    }
+}
+
+fn expect_number(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+    label: &str,
+) -> Result<f64, PadmaError> {
+    match value {
+        Value::Number(value) if value.is_finite() => Ok(*value),
         _ => Err(error_for(locale, "P1010", position, label)),
     }
 }
@@ -1582,6 +1597,147 @@ impl Interpreter {
                             .collect(),
                     ));
                 }
+                if matches!(
+                    name.as_str(),
+                    "text.len" | "text.trim" | "text.upper" | "text.lower"
+                ) {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let text = expect_string(&value, self.locale, *position, "text")?;
+                    return Ok(match name.as_str() {
+                        "text.len" => Value::Number(text.chars().count() as f64),
+                        "text.trim" => Value::String(text.trim().to_string()),
+                        "text.upper" => Value::String(text.to_uppercase()),
+                        "text.lower" => Value::String(text.to_lowercase()),
+                        _ => unreachable!("checked text builtin"),
+                    });
+                }
+                if matches!(
+                    name.as_str(),
+                    "text.contains" | "text.split" | "text.replace"
+                ) {
+                    let expected = if name == "text.replace" { 3 } else { 2 };
+                    if arguments.len() != expected {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let text = expect_string(&values[0], self.locale, *position, "text")?;
+                    let search = expect_string(&values[1], self.locale, *position, "text")?;
+                    return Ok(match name.as_str() {
+                        "text.contains" => Value::Boolean(text.contains(search)),
+                        "text.split" => Value::List(
+                            text.split(search)
+                                .map(|part| Value::String(part.to_string()))
+                                .collect(),
+                        ),
+                        "text.replace" => Value::String(text.replace(
+                            search,
+                            expect_string(&values[2], self.locale, *position, "text")?,
+                        )),
+                        _ => unreachable!("checked text builtin"),
+                    });
+                }
+                if name == "text.join" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let Value::List(items) = &values[0] else {
+                        return Err(error_for(self.locale, "P1010", *position, "text.join"));
+                    };
+                    let separator = expect_string(&values[1], self.locale, *position, "separator")?;
+                    let joined = items
+                        .iter()
+                        .map(|item| {
+                            expect_string(item, self.locale, *position, "text").map(str::to_string)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                        .join(separator);
+                    return Ok(Value::String(joined));
+                }
+                if matches!(
+                    name.as_str(),
+                    "math.abs" | "math.round" | "math.floor" | "math.ceil"
+                ) {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let number = expect_number(&value, self.locale, *position, name)?;
+                    return Ok(Value::Number(match name.as_str() {
+                        "math.abs" => number.abs(),
+                        "math.round" => number.round(),
+                        "math.floor" => number.floor(),
+                        "math.ceil" => number.ceil(),
+                        _ => unreachable!("checked math builtin"),
+                    }));
+                }
+                if name == "math.min" || name == "math.max" {
+                    if arguments.is_empty() {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mut numbers = values
+                        .iter()
+                        .map(|value| expect_number(value, self.locale, *position, name))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter();
+                    let first = numbers.next().expect("non-empty arguments checked above");
+                    let result = if name == "math.min" {
+                        numbers.fold(first, f64::min)
+                    } else {
+                        numbers.fold(first, f64::max)
+                    };
+                    return Ok(Value::Number(result));
+                }
+                if name == "time.now" {
+                    if !arguments.is_empty() {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let seconds = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_err(|_| error_for(self.locale, "P1010", *position, "time.now"))?
+                        .as_secs_f64();
+                    return Ok(Value::Number(seconds));
+                }
+                if name == "time.sleep" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let seconds = expect_number(&value, self.locale, *position, "time.sleep")?;
+                    if !(0.0..=60.0).contains(&seconds) {
+                        return Err(error_for(self.locale, "P1012", *position, "sleep limit"));
+                    }
+                    std::thread::sleep(Duration::from_secs_f64(seconds));
+                    return Ok(Value::Null);
+                }
+                if name == "file.read" || name == "file.exists" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&value, self.locale, *position, "path")?;
+                    let resolved_path = resolve_output_path(path)
+                        .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
+                    if name == "file.exists" {
+                        return Ok(Value::Boolean(resolved_path.is_file()));
+                    }
+                    let contents = fs::read_to_string(&resolved_path)
+                        .map_err(|_| error_for(self.locale, "P1028", *position, path))?;
+                    return Ok(Value::String(contents));
+                }
                 if name == "file.write" {
                     let values = arguments
                         .iter()
@@ -2448,6 +2604,40 @@ mod tests {
     fn function_without_return_produces_null() {
         let output = run("function work() {\n print \"done\"\n}\nprint work()\n").unwrap();
         assert_eq!(output, vec!["done", "none"]);
+    }
+
+    #[test]
+    fn provides_unicode_text_and_deterministic_math_builtins() {
+        let output = run(
+            "print text.len(\"abc\")\nprint text.trim(\"  padma \")\nprint text.upper(\"padma\")\nprint text.lower(\"PADMA\")\nprint text.contains(\"বাংলা Padma\", \"Padma\")\nprint text.replace(\"a-b\", \"-\", \"+\")\nprint text.join(text.split(\"a,b,c\", \",\"), \"-\")\nprint math.abs(-4)\nprint math.round(2.6)\nprint math.floor(2.9)\nprint math.ceil(2.1)\nprint math.min(7, 2, 5)\nprint math.max(7, 2, 5)\n",
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "3", "padma", "PADMA", "padma", "true", "a+b", "a-b-c", "4", "3", "2", "3", "2",
+                "7"
+            ]
+        );
+    }
+
+    #[test]
+    fn provides_safe_file_read_exists_and_bounded_time_builtins() {
+        let path = format!("target/padma-stdlib-test-{}.txt", process::id());
+        let source = format!(
+            "print file.exists(\"{path}\")\nfile.write(\"{path}\", \"hello\")\nprint file.exists(\"{path}\")\nprint file.read(\"{path}\")\nprint time.now() > 0\nprint time.sleep(0)\n"
+        );
+        let output = run(&source).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert_eq!(output, vec!["false", "true", "hello", "true", "none"]);
+    }
+
+    #[test]
+    fn blocks_unsafe_or_missing_file_reads() {
+        let unsafe_error = run("print file.read(\"../secret.txt\")\n").unwrap_err();
+        assert_eq!(unsafe_error.code, "P1014");
+        let missing_error = run("print file.read(\"missing-padma-file.txt\")\n").unwrap_err();
+        assert_eq!(missing_error.code, "P1028");
     }
 
     #[test]

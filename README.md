@@ -20,6 +20,7 @@ Padma allows Bengali and English keywords to represent the **same internal synta
 | Bengali digits | `০`–`৯` | `0`–`9` |
 | Lists | Indexing plus `.get()`, `.set()`, `.push()`, `.remove()`, `.len()`, and `.contains()` | Same APIs |
 | Maps/dictionaries | Text-key maps with `.get()` and `.set()` | Text-key maps with `.get()` and `.set()` |
+| Standard library | `text.*`, `math.*`, bounded `time.*`, and safe `file.*` helpers | Same APIs in Bangla source |
 | Localized diagnostics | Bengali source → Bengali error | English source → English error |
 
 ## Quick start
@@ -78,7 +79,7 @@ For a multi-line `if`, `while`, or function block, continue entering lines after
 
 If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
 
-For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core; functions, collections, modules, and static type checking remain active implementation milestones rather than undocumented claims.
+For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, modules, and initial standard-library APIs. Static checking and package tooling remain active implementation milestones rather than undocumented claims.
 
 ## Your first Padma program
 
@@ -188,6 +189,23 @@ Use `for item in collection` or `প্রতি item মধ্যে collection
 ```
 
 Iteration is bounded to one million items, matching Padma's existing loop-safety policy.
+
+### Standard library
+
+Padma includes useful no-import helpers for phone scripting. Text APIs include `text.split`, `text.join`, `text.trim`, `text.upper`, `text.lower`, `text.replace`, and `text.contains`. Math APIs include `math.abs`, `math.round`, `math.floor`, `math.ceil`, `math.min`, and `math.max`. Time includes `time.now()` and safety-bounded `time.sleep(seconds)`. File APIs include safe relative-path `file.read`, `file.write`, and `file.exists`.
+
+```padma
+ধরি শব্দ = text.split("Padma,বাংলা,Termux", ",")
+দেখাও text.join(শব্দ, " | ")
+দেখাও math.max(৩, ৮, ৫)
+
+file.write("notes.txt", "Padma works on Termux")
+যদি file.exists("notes.txt") {
+  দেখাও file.read("notes.txt")
+}
+```
+
+Read the complete API and safety reference in [`docs/STANDARD-LIBRARY.md`](docs/STANDARD-LIBRARY.md). A runnable program is in `examples/standard-library.pd`.
 
 The same collection APIs work in Bangla source code:
 

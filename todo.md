@@ -2,10 +2,10 @@
 
 - [x] Audit current compiler, WASM wrapper, playground additions, tests, and repository layout.
 - [x] Expose the existing compiler core through the reusable `src/lib.rs` API used by the WASM wrapper.
-- [ ] Define and document the stable Padma language specification for Bengali, English, and mixed source.
+- [x] Define and document the stable Padma language specification for Bengali, English, and mixed source.
 - [x] Add first-class functions, parameters, calls, return values, blocks, and loops.
 - [x] Add list literals and list display values.
-- [ ] Add list indexing/mutation, modules, and structured error handling.
+- [x] Add list indexing/mutation, modules, and structured error handling.
 - [x] Add maps/dictionaries with text keys and `map.get`/`map.set`.
 - [x] Add safe `import` / `ইমপোর্ট` modules with relative `.pd` path validation.
 - [x] Prevent module traversal, duplicate loading, and import cycles with localized diagnostics.
@@ -14,11 +14,11 @@
 
 ## Production-readiness roadmap
 
-- [ ] Publish a versioned production-readiness definition with supported platforms, compatibility guarantees, and explicit non-goals.
+- [x] Publish a versioned production-readiness definition with supported platforms, compatibility guarantees, and explicit non-goals.
 - [x] Add richer locale detection and a complete bilingual diagnostics catalogue.
 - [x] Preserve source file, source line, and locale context for imported-module diagnostics.
 - [x] Add parser recovery so `padma check` reports multiple independent syntax errors in one run.
-- [ ] Implement null values, indexing, slicing, list mutation, iteration, and collection utility APIs.
+- [x] Implement null values, indexing, slicing, list mutation, iteration, and collection utility APIs.
 - [x] Add `none` / `কিছুইনা` null values with stable truthiness and display semantics.
 - [x] Add list indexing syntax, bounds diagnostics, and a zero-based non-negative index policy.
 - [x] Add zero-based bounded list slices with inclusive start and exclusive end semantics.
@@ -28,7 +28,8 @@
 - [x] Add `for item in collection` / `প্রতি item মধ্যে collection` iteration with bounded execution.
 - [x] Add safe `range` generation and deterministic iteration order for list, map, and text values.
 - [x] Define loop-variable scope and error behavior, with Bengali-English regression tests and examples.
-- [ ] Add a documented safe standard library for text, math, random, time, filesystem, JSON, and URL handling.
+- [ ] Add JSON, URL, safe path operations, formatting, and documented non-cryptographic randomness to the standard library.
+- [x] Add text, deterministic math, bounded time, and safe relative-file read/write/exists standard-library APIs.
 - [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.
 - [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.
 - [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
@@ -42,7 +43,7 @@
 - [ ] Add dependency-free standard library for files, text, collections, JSON, HTTP, and process boundaries.
 - [x] Make `padma file.pd` the primary CLI invocation, with `padma run file.pd` retained only as a compatibility alias.
 - [x] Add interactive `input`.
-- [ ] Add safe file read/write APIs with validated relative output paths.
+- [x] Add safe file read/write APIs with validated relative output paths.
 - [ ] Add argument-safe process execution, timeout, stdout/stderr capture, and exit-code values.
 - [x] Add HTTP GET with bounded timeout and localized network errors.
 - [x] Add `media.download(url, output)` wrapper backed by an installed `yt-dlp` executable.
