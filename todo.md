@@ -46,7 +46,7 @@
 - [x] Enforce capability grants for project file access, HTTP, process execution, and media download.
 - [x] Add `padma capabilities <project>` to inspect declared grants without executing project code.
 - [x] Add capability-denied diagnostics, negative security tests, and Bangla-English Termux examples.
-- [ ] Define audited capability escalation and Android shared-storage boundaries before enabling broader permissions.
+- [x] Define audited capability escalation and Android shared-storage boundaries before enabling broader permissions.
 - [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
 - [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.

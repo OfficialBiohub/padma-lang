@@ -73,6 +73,8 @@ Direct single-file execution such as `padma script.pd` preserves the existing co
 
 > Capability declarations do not grant Android storage permission, unrestricted paths, shell access, background execution, or remote package installation. Android shared-storage access and audited escalation remain future milestones.
 
+Read [`CAPABILITY-SECURITY.md`](CAPABILITY-SECURITY.md) for the enforced project-root boundary, the auditable escalation protocol, and the requirements before any Android shared-storage capability is added.
+
 ## Modules, aliases, and exports
 
 An ordinary import keeps the established shared-module behavior:

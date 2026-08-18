@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, and the first enforceable M5 capability-security increment are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, standard-library utilities, manifest-driven `padma .` execution, rejected untrusted dependencies, namespace aliases, public exports, explicit grants, capability-denied diagnostics, and a no-execution `padma capabilities` audit command. The remaining M5 work is audited escalation and Android shared-storage boundaries; M6 then adds static checks, formatting, linting, and JSON diagnostics.
+**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, and M5 capability security are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, standard-library utilities, manifest-driven `padma .` execution, rejected untrusted dependencies, namespace aliases, public exports, explicit grants, canonical project-root filesystem scope, capability-denied diagnostics, a no-execution `padma capabilities` audit command, and a published audited-escalation/Android shared-storage boundary. The next active milestone is **M6 developer workflow**: static checks, formatting, linting, and JSON diagnostics.
 
 ## 7. Security and release references
 
