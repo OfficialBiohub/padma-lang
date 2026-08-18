@@ -90,6 +90,22 @@ impl Server {
                 }
             }))
     }
+
+    fn completion(&self, uri: &str, position: &Value) -> Value {
+        let source = self.documents.get(uri).map(String::as_str).unwrap_or("");
+        let line = position["line"].as_u64().unwrap_or(usize::MAX as u64) as usize;
+        let scope_depth = scope_depth_at(source, line);
+        let mut items = completion_items().as_array().cloned().unwrap_or_default();
+        for symbol in document_symbols(source)
+            .into_iter()
+            .filter(|symbol| symbol.line <= line && symbol.scope_depth <= scope_depth)
+        {
+            if !items.iter().any(|item| item["label"] == symbol.name) {
+                items.push(json!({ "label": symbol.name, "detail": symbol.kind }));
+            }
+        }
+        Value::Array(items)
+    }
 }
 
 fn word_at(source: &str, position: &Value) -> Option<String> {
@@ -308,7 +324,8 @@ fn main() -> io::Result<()> {
             }
             "textDocument/completion" => {
                 if let Some(id) = id {
-                    write_message(&mut output, &response(id, completion_items()))?;
+                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+                    write_message(&mut output, &response(id, server.completion(uri, &params["position"])))?;
                 }
             }
             "textDocument/hover" => {
@@ -387,5 +404,14 @@ mod tests {
         server.documents.insert(uri.to_string(), "let name = 1\nif true {\n  ধরি নাম = 2\n  দেখাও নাম\n}\n".to_string());
         let location = server.definition(uri, &json!({ "line": 3, "character": 9 }));
         assert_eq!(location["range"]["start"]["line"], 2);
+    }
+
+    #[test]
+    fn completes_visible_local_declarations() {
+        let mut server = Server::new();
+        let uri = "file:///demo.pd";
+        server.documents.insert(uri.to_string(), "ধরি নাম = 1\nদেখাও নাম\n".to_string());
+        let items = server.completion(uri, &json!({ "line": 1, "character": 0 }));
+        assert!(items.as_array().unwrap().iter().any(|item| item["label"] == "নাম"));
     }
 }

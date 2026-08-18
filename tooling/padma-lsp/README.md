@@ -14,6 +14,8 @@ The server now also builds a non-executing local declaration index with lexical 
 
 `textDocument/definition` now uses that index for conservative same-document lookup. It returns the nearest declaration visible at the request position and deliberately returns no result for imported symbols, public exports, ambiguous malformed blocks, or cross-file references.
 
+Completion now supplements the static catalogue with local declarations visible before the request position in the current lexical brace scope. Imported, exported, and cross-file names remain intentionally absent until a parser-backed project symbol graph exists.
+
 Diagnostics are generated through the public `padma_lang::check_source_json` API, so their codes, Bangla-English messages, and ranges agree with `padma check --json`. The server converts columns to LSP UTF-16 positions before publishing diagnostics.
 
 Run it during development with:
