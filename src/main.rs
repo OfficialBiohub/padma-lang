@@ -4,12 +4,12 @@
 // UTF-8 source, Bangla/English keyword aliases, expressions, variables, print,
 // conditionals, string interpolation, and localized diagnostics.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -168,6 +168,14 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1020") => (format!("Map keys must be text: `{detail}`"), Some("Use a string key, for example `map.get(\"name\")`.".into())),
         (Locale::Bangla, "P1021") => (format!("map-এ `{detail}` key পাওয়া যায়নি"), Some("আগে `map.set` দিয়ে key-টি যোগ করুন।".into())),
         (Locale::English, "P1021") => (format!("Map key `{detail}` was not found"), Some("Add the key first with `map.set`.".into())),
+        (Locale::Bangla, "P1022") => (format!("নিরাপদ module path নয়: `{detail}`"), Some("বর্তমান folder-এর ভেতরের `.pd` file ব্যবহার করুন; `..` বা absolute path ব্যবহার করা যাবে না।".into())),
+        (Locale::English, "P1022") => (format!("Unsafe module path: `{detail}`"), Some("Use a `.pd` file inside the current folder; `..` and absolute paths are not allowed.".into())),
+        (Locale::Bangla, "P1023") => (format!("module পড়া যায়নি: `{detail}`"), Some("File name ও relative path পরীক্ষা করুন।".into())),
+        (Locale::English, "P1023") => (format!("Could not read module: `{detail}`"), Some("Check the file name and relative path.".into())),
+        (Locale::Bangla, "P1024") => (format!("circular module import পাওয়া গেছে: `{detail}`"), Some("একটি module-কে নিজের মাধ্যমে আবার import করবেন না।".into())),
+        (Locale::English, "P1024") => (format!("Circular module import detected: `{detail}`"), Some("Do not import a module again through itself.".into())),
+        (Locale::Bangla, "P1025") => (format!("module-এ error আছে: `{detail}`"), Some("module file-এর code ও syntax পরীক্ষা করুন।".into())),
+        (Locale::English, "P1025") => (format!("Module contains an error: `{detail}"), Some("Check the module code and syntax.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -184,6 +192,7 @@ enum TokenKind {
     While,
     Function,
     Return,
+    Import,
     True,
     False,
     Identifier(String),
@@ -407,6 +416,7 @@ impl Lexer {
             "যতক্ষণ" | "while" => TokenKind::While,
             "ফাংশন" | "function" | "fn" => TokenKind::Function,
             "ফেরত" | "return" => TokenKind::Return,
+            "ইমপোর্ট" | "import" => TokenKind::Import,
             "সত্য" | "true" => TokenKind::True,
             "মিথ্যা" | "false" => TokenKind::False,
             _ => TokenKind::Identifier(word),
@@ -466,6 +476,21 @@ fn resolve_output_path(path: &str) -> Result<PathBuf, ()> {
     Ok(PathBuf::from(path))
 }
 
+fn resolve_import_path(importer: &Path, requested: &str) -> Result<PathBuf, ()> {
+    let candidate = Path::new(requested);
+    if requested.is_empty()
+        || !requested.ends_with(".pd")
+        || candidate.is_absolute()
+        || candidate
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(());
+    }
+    let base = importer.parent().unwrap_or_else(|| Path::new("."));
+    Ok(base.join(candidate))
+}
+
 fn expect_string<'a>(
     value: &'a Value,
     locale: Locale,
@@ -522,6 +547,10 @@ enum Stmt {
     },
     Return {
         value: Option<Expr>,
+    },
+    Import {
+        path: String,
+        position: Position,
     },
 }
 
@@ -593,6 +622,9 @@ impl Parser {
         if self.matches(|kind| matches!(kind, TokenKind::Return)) {
             return self.return_statement(self.previous().position);
         }
+        if self.matches(|kind| matches!(kind, TokenKind::Import)) {
+            return self.import_statement(self.previous().position);
+        }
         if self.check(|kind| matches!(kind, TokenKind::Identifier(_)))
             && self
                 .tokens
@@ -633,6 +665,25 @@ impl Parser {
         self.consume_statement_end()?;
         let _ = position;
         Ok(Stmt::Print { value })
+    }
+
+    fn import_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let path = match self.advance().clone() {
+            Token {
+                kind: TokenKind::String(path),
+                ..
+            } => path,
+            token => {
+                return Err(error_for(
+                    self.locale,
+                    "P1003",
+                    token.position,
+                    "module path text",
+                ))
+            }
+        };
+        self.consume_statement_end()?;
+        Ok(Stmt::Import { path, position })
     }
 
     fn assign_statement(&mut self) -> Result<Stmt, PadmaError> {
@@ -1044,16 +1095,26 @@ struct Interpreter {
     return_value: Option<Value>,
     output: Vec<String>,
     locale: Locale,
+    current_source: PathBuf,
+    loaded_modules: HashSet<PathBuf>,
+    active_modules: HashSet<PathBuf>,
 }
 
 impl Interpreter {
     fn new(locale: Locale) -> Self {
+        Self::with_source_path(locale, PathBuf::from("repl.pd"))
+    }
+
+    fn with_source_path(locale: Locale, current_source: PathBuf) -> Self {
         Self {
             environment: HashMap::new(),
             functions: HashMap::new(),
             return_value: None,
             output: Vec::new(),
             locale,
+            current_source,
+            loaded_modules: HashSet::new(),
+            active_modules: HashSet::new(),
         }
     }
 
@@ -1130,8 +1191,48 @@ impl Interpreter {
                     None => Value::String(String::new()),
                 });
             }
+            Stmt::Import { path, position } => self.import_module(path, *position)?,
         }
         Ok(())
+    }
+
+    fn import_module(&mut self, requested: &str, position: Position) -> Result<(), PadmaError> {
+        let relative_path = resolve_import_path(&self.current_source, requested)
+            .map_err(|_| error_for(self.locale, "P1022", position, requested))?;
+        let path = fs::canonicalize(&relative_path)
+            .map_err(|_| error_for(self.locale, "P1023", position, requested))?;
+        if self.loaded_modules.contains(&path) {
+            return Ok(());
+        }
+        if !self.active_modules.insert(path.clone()) {
+            return Err(error_for(self.locale, "P1024", position, requested));
+        }
+
+        let result = (|| {
+            let source = fs::read_to_string(&path)
+                .map_err(|_| error_for(self.locale, "P1023", position, requested))?;
+            let (program, module_locale) = compile(&source).map_err(|error| {
+                error_for(
+                    self.locale,
+                    "P1025",
+                    position,
+                    &format!("{requested}: {}", error.message),
+                )
+            })?;
+            let previous_source = std::mem::replace(&mut self.current_source, path.clone());
+            let previous_locale = self.locale;
+            self.locale = module_locale;
+            let run_result = self.run(&program);
+            self.current_source = previous_source;
+            self.locale = previous_locale;
+            run_result
+        })();
+
+        self.active_modules.remove(&path);
+        if result.is_ok() {
+            self.loaded_modules.insert(path);
+        }
+        result
     }
 
     fn evaluate(&mut self, expression: &Expr) -> Result<Value, PadmaError> {
@@ -1573,7 +1674,7 @@ fn main() {
         },
         "ast" => println!("{program:#?}"),
         "run" => {
-            let mut interpreter = Interpreter::new(locale);
+            let mut interpreter = Interpreter::with_source_path(locale, PathBuf::from(path));
             if let Err(error) = interpreter.run(&program) {
                 eprintln!("{}", format_diagnostic(path, &source, &error, locale));
                 process::exit(1);
@@ -1655,6 +1756,24 @@ fn repl() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn module_fixture_dir(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = env::temp_dir().join(format!("padma-{label}-{}-{nonce}", process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn run_file(path: &Path) -> Result<Vec<String>, PadmaError> {
+        let source = fs::read_to_string(path).unwrap();
+        let (program, locale) = compile(&source)?;
+        let mut interpreter = Interpreter::with_source_path(locale, path.to_path_buf());
+        interpreter.run(&program)?;
+        Ok(interpreter.output)
+    }
 
     fn run(source: &str) -> Result<Vec<String>, PadmaError> {
         let (program, locale) = compile(source)?;
@@ -1774,5 +1893,90 @@ mod tests {
     fn rejects_non_string_map_key() {
         let error = run("let profile = {\"name\": \"Rafi\"}\nprint profile.get(1)\n").unwrap_err();
         assert_eq!(error.code, "P1020");
+    }
+
+    #[test]
+    fn imports_english_module_functions_and_values() {
+        let directory = module_fixture_dir("english-import");
+        let module = directory.join("math.pd");
+        let main = directory.join("main.pd");
+        fs::write(
+            &module,
+            "function double(value) {\n  return value * 2\n}\nlet course = \"Padma\"\n",
+        )
+        .unwrap();
+        fs::write(
+            &main,
+            "import \"math.pd\"\nprint double(21)\nprint course\n",
+        )
+        .unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["42", "Padma"]);
+    }
+
+    #[test]
+    fn imports_bangla_module_functions() {
+        let directory = module_fixture_dir("bangla-import");
+        let module = directory.join("বার্তা.pd");
+        let main = directory.join("main.pd");
+        fs::write(&module, "ফাংশন অভিবাদন(নাম) {\n  ফেরত \"হ্যালো {নাম}\"\n}\n").unwrap();
+        fs::write(&main, "ইমপোর্ট \"বার্তা.pd\"\nদেখাও অভিবাদন(\"রাফি\")\n").unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["হ্যালো রাফি"]);
+    }
+
+    #[test]
+    fn loads_each_module_only_once() {
+        let directory = module_fixture_dir("duplicate-import");
+        let module = directory.join("notice.pd");
+        let main = directory.join("main.pd");
+        fs::write(&module, "print \"loaded\"\n").unwrap();
+        fs::write(
+            &main,
+            "import \"notice.pd\"\nimport \"notice.pd\"\nprint \"done\"\n",
+        )
+        .unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["loaded", "done"]);
+    }
+
+    #[test]
+    fn imports_nested_modules_relative_to_their_importer() {
+        let directory = module_fixture_dir("nested-import");
+        let helpers = directory.join("helpers");
+        fs::create_dir_all(&helpers).unwrap();
+        let base = helpers.join("base.pd");
+        let tools = helpers.join("tools.pd");
+        let main = directory.join("main.pd");
+        fs::write(
+            &base,
+            "function square(value) {\n  return value * value\n}\n",
+        )
+        .unwrap();
+        fs::write(&tools, "import \"base.pd\"\n").unwrap();
+        fs::write(&main, "import \"helpers/tools.pd\"\nprint square(5)\n").unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["25"]);
+    }
+
+    #[test]
+    fn rejects_module_path_traversal_and_import_cycles() {
+        let directory = module_fixture_dir("unsafe-import");
+        let unsafe_main = directory.join("unsafe.pd");
+        fs::write(&unsafe_main, "import \"../secret.pd\"\n").unwrap();
+        let unsafe_error = run_file(&unsafe_main).unwrap_err();
+        assert_eq!(unsafe_error.code, "P1022");
+
+        let module_a = directory.join("a.pd");
+        let module_b = directory.join("b.pd");
+        fs::write(&module_a, "import \"b.pd\"\n").unwrap();
+        fs::write(&module_b, "import \"a.pd\"\n").unwrap();
+        let cycle_error = run_file(&module_a).unwrap_err();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(cycle_error.code, "P1024");
     }
 }

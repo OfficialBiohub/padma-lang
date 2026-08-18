@@ -1,0 +1,5 @@
+# Run from this folder: padma main.pd
+import "math.pd"
+
+print "module: {module_name}"
+print double(21)

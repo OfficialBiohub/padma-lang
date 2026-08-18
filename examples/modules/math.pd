@@ -1,0 +1,6 @@
+# Reusable English module
+function double(value) {
+  return value * 2
+}
+
+let module_name = "math"

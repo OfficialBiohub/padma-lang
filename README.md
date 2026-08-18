@@ -150,6 +150,31 @@ The Bengali and mixed forms work the same way:
 দেখাও তথ্য.get("স্তর")
 ```
 
+### Reusable modules
+
+Split a larger Padma program into nearby `.pd` files. Use `import "file.pd"` or `ইমপোর্ট "file.pd"`; imported variables and functions become available to the current file. A module is loaded only once, even if it is imported repeatedly.
+
+```padma
+# math.pd
+function double(value) {
+  return value * 2
+}
+```
+
+```padma
+# main.pd, in the same folder
+import "math.pd"
+print double(21)
+```
+
+For safety, module paths must remain relative to the current folder tree, must end in `.pd`, and cannot use `..` or absolute paths. Circular imports are rejected with a localized diagnostic. Run the English and Bangla examples with:
+
+```bash
+cd examples/modules
+padma main.pd
+padma মডিউল-demo.pd
+```
+
 ### Interactive input
 
 Termux scripts can read a line from the user with the built-in `input()` function:

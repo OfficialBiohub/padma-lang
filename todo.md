@@ -7,6 +7,10 @@
 - [x] Add list literals and list display values.
 - [ ] Add list indexing/mutation, modules, and structured error handling.
 - [x] Add maps/dictionaries with text keys and `map.get`/`map.set`.
+- [x] Add safe `import` / `ইমপোর্ট` modules with relative `.pd` path validation.
+- [x] Prevent module traversal, duplicate loading, and import cycles with localized diagnostics.
+- [x] Add English, Bengali, nested-module, and invalid-import regression tests.
+- [x] Document reusable Padma modules with runnable Termux examples.
 - [ ] Add static type checking and actionable bilingual diagnostics without breaking the interpreter.
 - [ ] Build a Termux-friendly `padma` CLI with run, check, format, test, init, and package commands.
 - [ ] Add dependency-free standard library for files, text, collections, JSON, HTTP, and process boundaries.
