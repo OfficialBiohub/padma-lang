@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use serde_json::Value as JsonValue;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Locale {
     Bangla,
@@ -213,6 +215,10 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1027") => (format!("Collection index is out of bounds: `{detail}`"), Some("Use an index smaller than the list length.".into())),
         (Locale::Bangla, "P1028") => (format!("file পড়া যায়নি: `{detail}`"), Some("File name, folder এবং permission পরীক্ষা করুন।".into())),
         (Locale::English, "P1028") => (format!("Could not read file: `{detail}`"), Some("Check the file name, folder, and permissions.".into())),
+        (Locale::Bangla, "P1029") => (format!("JSON মান পড়া বা তৈরি করা যায়নি: `{detail}`"), Some("সঠিক JSON text এবং Padma-এর number, text, list, map, true/false, none value ব্যবহার করুন।".into())),
+        (Locale::English, "P1029") => (format!("Could not parse or create JSON: `{detail}`"), Some("Use valid JSON text and Padma number, text, list, map, true/false, or none values.".into())),
+        (Locale::Bangla, "P1030") => (format!("সঠিক URL নয়: `{detail}`"), Some("পূর্ণ URL দিন, যেমন `https://example.com/path`।".into())),
+        (Locale::English, "P1030") => (format!("Invalid URL: `{detail}`"), Some("Provide a complete URL such as `https://example.com/path`.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1224,6 +1230,122 @@ enum Value {
     Map(BTreeMap<String, Value>),
 }
 
+fn value_from_json(value: JsonValue) -> Result<Value, String> {
+    match value {
+        JsonValue::Null => Ok(Value::Null),
+        JsonValue::Bool(value) => Ok(Value::Boolean(value)),
+        JsonValue::Number(value) => value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .map(Value::Number)
+            .ok_or_else(|| "number is outside Padma's finite number range".to_string()),
+        JsonValue::String(value) => Ok(Value::String(value)),
+        JsonValue::Array(values) => values
+            .into_iter()
+            .map(value_from_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::List),
+        JsonValue::Object(values) => values
+            .into_iter()
+            .map(|(key, value)| value_from_json(value).map(|value| (key, value)))
+            .collect::<Result<BTreeMap<_, _>, _>>()
+            .map(Value::Map),
+    }
+}
+
+fn value_to_json(value: &Value) -> Result<JsonValue, String> {
+    match value {
+        Value::Null => Ok(JsonValue::Null),
+        Value::Boolean(value) => Ok(JsonValue::Bool(*value)),
+        Value::Number(value) => serde_json::Number::from_f64(*value)
+            .map(JsonValue::Number)
+            .ok_or_else(|| "number is outside JSON's finite number range".to_string()),
+        Value::String(value) => Ok(JsonValue::String(value.clone())),
+        Value::List(values) => values
+            .iter()
+            .map(value_to_json)
+            .collect::<Result<Vec<_>, _>>()
+            .map(JsonValue::Array),
+        Value::Map(values) => values
+            .iter()
+            .map(|(key, value)| value_to_json(value).map(|value| (key.clone(), value)))
+            .collect::<Result<serde_json::Map<_, _>, _>>()
+            .map(JsonValue::Object),
+    }
+}
+
+#[derive(Debug)]
+struct ParsedUrl {
+    normalized: String,
+    scheme: String,
+    host: String,
+    path: String,
+    query: Option<String>,
+    fragment: Option<String>,
+    port: Option<u16>,
+}
+
+fn parse_http_url(text: &str) -> Result<ParsedUrl, String> {
+    if text.is_empty()
+        || text
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err("URL must not be empty or contain whitespace".into());
+    }
+    let (scheme, remainder) = text
+        .split_once("://")
+        .ok_or_else(|| "URL needs an http:// or https:// scheme".to_string())?;
+    if !matches!(scheme, "http" | "https") {
+        return Err("only http and https URLs are supported".into());
+    }
+    let (without_fragment, fragment) = match remainder.split_once('#') {
+        Some((value, fragment)) => (value, Some(fragment.to_string())),
+        None => (remainder, None),
+    };
+    let (authority_and_path, query) = match without_fragment.split_once('?') {
+        Some((value, query)) => (value, Some(query.to_string())),
+        None => (without_fragment, None),
+    };
+    let (authority, path) = match authority_and_path.split_once('/') {
+        Some((authority, path)) => (authority, format!("/{path}")),
+        None => (authority_and_path, "/".to_string()),
+    };
+    if authority.is_empty() || authority.contains('@') {
+        return Err("URL host is missing or contains unsupported credentials".into());
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, candidate))
+            if !host.is_empty()
+                && candidate
+                    .chars()
+                    .all(|character| character.is_ascii_digit()) =>
+        {
+            let port = candidate
+                .parse::<u16>()
+                .map_err(|_| "URL port is outside 0-65535".to_string())?;
+            (host, Some(port))
+        }
+        _ => (authority, None),
+    };
+    if host.is_empty()
+        || host
+            .chars()
+            .any(|character| matches!(character, '/' | ':' | '?' | '#'))
+    {
+        return Err("URL host is invalid".into());
+    }
+    Ok(ParsedUrl {
+        normalized: text.to_string(),
+        scheme: scheme.to_string(),
+        host: host.to_string(),
+        path,
+        query,
+        fragment,
+        port,
+    })
+}
+
 impl Value {
     fn truthy(&self) -> bool {
         match self {
@@ -1711,6 +1833,68 @@ impl Interpreter {
                         .as_secs_f64();
                     return Ok(Value::Number(seconds));
                 }
+                if name == "json.parse" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = match &arguments[0] {
+                        Expr::Literal(Value::String(text), _) => Value::String(text.clone()),
+                        argument => self.evaluate(argument)?,
+                    };
+                    let text = expect_string(&value, self.locale, *position, "JSON text")?;
+                    let json = serde_json::from_str(text).map_err(|error| {
+                        error_for(self.locale, "P1029", *position, &error.to_string())
+                    })?;
+                    return value_from_json(json)
+                        .map_err(|detail| error_for(self.locale, "P1029", *position, &detail));
+                }
+                if name == "json.stringify" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let json = value_to_json(&value)
+                        .map_err(|detail| error_for(self.locale, "P1029", *position, &detail))?;
+                    return serde_json::to_string(&json)
+                        .map(Value::String)
+                        .map_err(|error| {
+                            error_for(self.locale, "P1029", *position, &error.to_string())
+                        });
+                }
+                if name == "url.is_valid" || name == "url.parse" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let text = expect_string(&value, self.locale, *position, "URL text")?;
+                    let parsed = parse_http_url(text);
+                    if name == "url.is_valid" {
+                        return Ok(Value::Boolean(parsed.is_ok()));
+                    }
+                    let parsed =
+                        parsed.map_err(|_| error_for(self.locale, "P1030", *position, text))?;
+                    let mut result = BTreeMap::new();
+                    result.insert("url".into(), Value::String(parsed.normalized));
+                    result.insert("scheme".into(), Value::String(parsed.scheme));
+                    result.insert("host".into(), Value::String(parsed.host));
+                    result.insert("path".into(), Value::String(parsed.path));
+                    result.insert(
+                        "query".into(),
+                        parsed.query.map(Value::String).unwrap_or(Value::Null),
+                    );
+                    result.insert(
+                        "fragment".into(),
+                        parsed.fragment.map(Value::String).unwrap_or(Value::Null),
+                    );
+                    result.insert(
+                        "port".into(),
+                        parsed
+                            .port
+                            .map(|port| Value::Number(port as f64))
+                            .unwrap_or(Value::Null),
+                    );
+                    return Ok(Value::Map(result));
+                }
                 if name == "time.sleep" {
                     if arguments.len() != 1 {
                         return Err(error_for(self.locale, "P1009", *position, name));
@@ -2104,7 +2288,14 @@ impl Interpreter {
                 }
                 variable.push(candidate);
             }
-            if !closed || variable.trim().is_empty() {
+            let name = variable.trim();
+            let valid_identifier = name
+                .chars()
+                .next()
+                .map(is_identifier_start)
+                .unwrap_or(false)
+                && name.chars().all(is_identifier_continue);
+            if !closed || !valid_identifier {
                 result.push('{');
                 result.push_str(&variable);
                 if closed {
@@ -2112,7 +2303,6 @@ impl Interpreter {
                 }
                 continue;
             }
-            let name = variable.trim();
             let value = self
                 .environment
                 .get(name)
@@ -2630,6 +2820,49 @@ mod tests {
         let output = run(&source).unwrap();
         fs::remove_file(&path).unwrap();
         assert_eq!(output, vec!["false", "true", "hello", "true", "none"]);
+    }
+
+    #[test]
+    fn parses_and_serializes_json_values() {
+        let output = run(
+            "let data = json.parse(\"{\\\"name\\\":\\\"Rafi\\\",\\\"scores\\\":[1,2],\\\"active\\\":true,\\\"note\\\":null}\")\nprint data[\"name\"]\nprint data[\"scores\"][1]\nprint data[\"note\"]\nprint json.stringify(data)\n",
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "Rafi",
+                "2",
+                "none",
+                "{\"active\":true,\"name\":\"Rafi\",\"note\":null,\"scores\":[1.0,2.0]}",
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_safe_http_urls_and_rejects_invalid_json_and_urls() {
+        let output = run(
+            "let info = url.parse(\"https://example.com:8443/api?q=padma#docs\")\nprint info[\"scheme\"]\nprint info[\"host\"]\nprint info[\"path\"]\nprint info[\"query\"]\nprint info[\"fragment\"]\nprint info[\"port\"]\nprint url.is_valid(\"ftp://example.com\")\n",
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "https",
+                "example.com",
+                "/api",
+                "q=padma",
+                "docs",
+                "8443",
+                "false"
+            ]
+        );
+
+        let json_error = run("print json.parse(\"{bad}\")\n").unwrap_err();
+        assert_eq!(json_error.code, "P1029");
+        let url_error = run("দেখাও url.parse(\"ftp://example.com\")\n").unwrap_err();
+        assert_eq!(url_error.code, "P1030");
+        assert_eq!(url_error.locale, Locale::Bangla);
     }
 
     #[test]

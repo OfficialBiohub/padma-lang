@@ -13,3 +13,12 @@ if file.exists("notes.txt") {
 # Seconds since the Unix epoch; sleep is limited to 60 seconds per call.
 print time.now() > 0
 time.sleep(0)
+
+# JSON and HTTP/HTTPS URL inspection
+let account = json.parse("{\"name\":\"Rafi\",\"skills\":[\"Padma\",\"Termux\"]}")
+print account["skills"][0]
+print json.stringify(account)
+
+let address = url.parse("https://example.com:8443/api?q=padma#docs")
+print address["host"]
+print address["path"]

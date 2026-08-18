@@ -28,7 +28,8 @@
 - [x] Add `for item in collection` / `প্রতি item মধ্যে collection` iteration with bounded execution.
 - [x] Add safe `range` generation and deterministic iteration order for list, map, and text values.
 - [x] Define loop-variable scope and error behavior, with Bengali-English regression tests and examples.
-- [ ] Add JSON, URL, safe path operations, formatting, and documented non-cryptographic randomness to the standard library.
+- [ ] Add safe path operations, formatting, and documented non-cryptographic randomness to the standard library.
+- [x] Add deterministic JSON conversion and safe HTTP/HTTPS URL inspection APIs.
 - [x] Add text, deterministic math, bounded time, and safe relative-file read/write/exists standard-library APIs.
 - [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.
 - [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.

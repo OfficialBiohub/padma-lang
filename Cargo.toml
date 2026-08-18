@@ -18,3 +18,4 @@ lto = true
 strip = true
 
 [dependencies]
+serde_json = "1.0.145"

@@ -32,6 +32,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1026 | Type | Collection index is not a non-negative whole number. |
 | P1027 | Runtime | Collection index is outside the list bounds. |
 | P1028 | Runtime | Safe file path could not be read. |
+| P1029 | Runtime | JSON text could not be parsed, or a Padma value could not be represented as JSON. |
+| P1030 | Safety/type | URL is not a supported absolute HTTP or HTTPS URL. |
 
 ## Example
 
