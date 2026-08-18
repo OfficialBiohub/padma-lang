@@ -33,6 +33,8 @@ impl Locale {
             "যদি",
             "নইলে",
             "যতক্ষণ",
+            "প্রতি",
+            "মধ্যে",
             "ফাংশন",
             "ফেরত",
             "ইমপোর্ট",
@@ -43,7 +45,8 @@ impl Locale {
         .map(|word| source.matches(word).count())
         .sum::<usize>();
         let english = [
-            "let", "print", "if", "else", "while", "function", "return", "import", "true", "false",
+            "let", "print", "if", "else", "while", "for", "in", "function", "return", "import",
+            "true", "false",
         ]
         .iter()
         .map(|word| source.matches(word).count())
@@ -221,6 +224,8 @@ enum TokenKind {
     If,
     Else,
     While,
+    For,
+    In,
     Function,
     Return,
     Import,
@@ -446,6 +451,8 @@ impl Lexer {
             "যদি" | "if" => TokenKind::If,
             "নইলে" | "else" => TokenKind::Else,
             "যতক্ষণ" | "while" => TokenKind::While,
+            "প্রতি" | "for" => TokenKind::For,
+            "মধ্যে" | "in" => TokenKind::In,
             "ফাংশন" | "function" | "fn" => TokenKind::Function,
             "ফেরত" | "return" => TokenKind::Return,
             "ইমপোর্ট" | "import" => TokenKind::Import,
@@ -587,6 +594,12 @@ enum Stmt {
         body: Vec<Stmt>,
         position: Position,
     },
+    For {
+        name: String,
+        collection: Expr,
+        body: Vec<Stmt>,
+        position: Position,
+    },
     Function {
         name: String,
         params: Vec<String>,
@@ -624,6 +637,12 @@ enum Expr {
     Index {
         target: Box<Expr>,
         index: Box<Expr>,
+        position: Position,
+    },
+    Slice {
+        target: Box<Expr>,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
         position: Position,
     },
     List(Vec<Expr>),
@@ -684,6 +703,9 @@ impl Parser {
         }
         if self.matches(|kind| matches!(kind, TokenKind::While)) {
             return self.while_statement(self.previous().position);
+        }
+        if self.matches(|kind| matches!(kind, TokenKind::For)) {
+            return self.for_statement(self.previous().position);
         }
         if self.matches(|kind| matches!(kind, TokenKind::Function)) {
             return self.function_statement();
@@ -796,6 +818,33 @@ impl Parser {
         let body = self.block()?;
         Ok(Stmt::While {
             condition,
+            body,
+            position,
+        })
+    }
+
+    fn for_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let name = match self.advance().clone() {
+            Token {
+                kind: TokenKind::Identifier(name),
+                ..
+            } => name,
+            token => {
+                return Err(error_for(
+                    self.locale,
+                    "P1003",
+                    token.position,
+                    "loop variable name",
+                ))
+            }
+        };
+        self.consume(|kind| matches!(kind, TokenKind::In), "in")?;
+        let collection = self.expression()?;
+        self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
+        let body = self.block()?;
+        Ok(Stmt::For {
+            name,
+            collection,
             body,
             position,
         })
@@ -955,7 +1004,27 @@ impl Parser {
         let mut expression = self.primary()?;
         while self.matches(|kind| matches!(kind, TokenKind::LeftBracket)) {
             let position = self.previous().position;
-            let index = self.expression()?;
+            let start = if self.check(|kind| matches!(kind, TokenKind::Colon)) {
+                None
+            } else {
+                Some(self.expression()?)
+            };
+            if self.matches(|kind| matches!(kind, TokenKind::Colon)) {
+                let end = if self.check(|kind| matches!(kind, TokenKind::RightBracket)) {
+                    None
+                } else {
+                    Some(self.expression()?)
+                };
+                self.consume(|kind| matches!(kind, TokenKind::RightBracket), "]")?;
+                expression = Expr::Slice {
+                    target: Box::new(expression),
+                    start: start.map(Box::new),
+                    end: end.map(Box::new),
+                    position,
+                };
+                continue;
+            }
+            let index = start.ok_or_else(|| error_for(self.locale, "P1003", position, "index"))?;
             self.consume(|kind| matches!(kind, TokenKind::RightBracket), "]")?;
             expression = Expr::Index {
                 target: Box::new(expression),
@@ -1218,6 +1287,9 @@ impl Interpreter {
     fn run(&mut self, program: &[Stmt]) -> Result<(), PadmaError> {
         for statement in program {
             self.execute(statement)?;
+            if self.return_value.is_some() {
+                break;
+            }
         }
         Ok(())
     }
@@ -1276,7 +1348,52 @@ impl Interpreter {
                         ));
                     }
                     self.run(body)?;
+                    if self.return_value.is_some() {
+                        break;
+                    }
                 }
+            }
+            Stmt::For {
+                name,
+                collection,
+                body,
+                position,
+            } => {
+                let collection = self.evaluate(collection)?;
+                let values = match collection {
+                    Value::List(values) => values,
+                    Value::Map(values) => values.into_keys().map(Value::String).collect::<Vec<_>>(),
+                    Value::String(value) => value
+                        .chars()
+                        .map(|character| Value::String(character.to_string()))
+                        .collect::<Vec<_>>(),
+                    _ => return Err(error_for(self.locale, "P1010", *position, "for")),
+                };
+                if values.len() > 1_000_000 {
+                    return Err(error_for(
+                        self.locale,
+                        "P1012",
+                        *position,
+                        "loop iteration limit",
+                    ));
+                }
+                let previous_value = self.environment.remove(name);
+                let result = (|| {
+                    for value in values {
+                        self.environment.insert(name.clone(), value);
+                        self.run(body)?;
+                        if self.return_value.is_some() {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Some(value) = previous_value {
+                    self.environment.insert(name.clone(), value);
+                } else {
+                    self.environment.remove(name);
+                }
+                result?;
             }
             Stmt::Function { name, params, body } => {
                 self.functions
@@ -1365,6 +1482,40 @@ impl Interpreter {
                     _ => Err(error_for(self.locale, "P1010", *position, "index")),
                 }
             }
+            Expr::Slice {
+                target,
+                start,
+                end,
+                position,
+            } => {
+                let target = self.evaluate(target)?;
+                let Value::List(values) = target else {
+                    return Err(error_for(self.locale, "P1010", *position, "slice"));
+                };
+                let start = match start {
+                    Some(expression) => {
+                        let value = self.evaluate(expression)?;
+                        expect_collection_index(&value, self.locale, *position)?
+                    }
+                    None => 0,
+                };
+                let end = match end {
+                    Some(expression) => {
+                        let value = self.evaluate(expression)?;
+                        expect_collection_index(&value, self.locale, *position)?
+                    }
+                    None => values.len(),
+                };
+                if start > end || end > values.len() {
+                    return Err(error_for(
+                        self.locale,
+                        "P1027",
+                        *position,
+                        &format!("{start}:{end}"),
+                    ));
+                }
+                Ok(Value::List(values[start..end].to_vec()))
+            }
             Expr::Unary {
                 operator,
                 right,
@@ -1389,6 +1540,48 @@ impl Interpreter {
                 arguments,
                 position,
             } => {
+                if name == "range" || name == "পরিসর" {
+                    if arguments.len() != 1 && arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let (start, end) = if values.len() == 1 {
+                        (
+                            0,
+                            expect_collection_index(&values[0], self.locale, *position)?,
+                        )
+                    } else {
+                        (
+                            expect_collection_index(&values[0], self.locale, *position)?,
+                            expect_collection_index(&values[1], self.locale, *position)?,
+                        )
+                    };
+                    if end < start {
+                        return Err(error_for(
+                            self.locale,
+                            "P1027",
+                            *position,
+                            &format!("{start}:{end}"),
+                        ));
+                    }
+                    let length = end - start;
+                    if length > 1_000_000 {
+                        return Err(error_for(
+                            self.locale,
+                            "P1012",
+                            *position,
+                            "range iteration limit",
+                        ));
+                    }
+                    return Ok(Value::List(
+                        (start..end)
+                            .map(|number| Value::Number(number as f64))
+                            .collect(),
+                    ));
+                }
                 if name == "file.write" {
                     let values = arguments
                         .iter()
@@ -2173,6 +2366,54 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, vec!["20", "3", "true", "20", "30"]);
+    }
+
+    #[test]
+    fn slices_lists_with_optional_zero_based_bounds() {
+        let output = run(
+            "let values = [10, 20, 30, 40]\nprint values[1:3]\nprint values[:2]\nprint values[2:]\nদেখাও values[1:1]\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["[20, 30]", "[10, 20]", "[30, 40]", "[]"]);
+    }
+
+    #[test]
+    fn rejects_invalid_list_slice_bounds() {
+        let reversed = run("let values = [1, 2]\nprint values[2:1]\n").unwrap_err();
+        assert_eq!(reversed.code, "P1027");
+        let too_large = run("ধরি মান = [১]\nদেখাও মান[:২]\n").unwrap_err();
+        assert_eq!(too_large.code, "P1027");
+        assert_eq!(too_large.locale, Locale::Bangla);
+    }
+
+    #[test]
+    fn iterates_english_lists_text_maps_and_ranges() {
+        let output = run(
+            "let total = 0\nfor number in range(1, 4) {\n  total = total + number\n}\nprint total\nlet letters = \"\"\nfor letter in \"ab\" {\n  letters = letters + letter\n}\nprint letters\nlet profile = {\"name\": \"Rafi\", \"class\": 6}\nfor key in profile {\n  print key\n}\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["6", "ab", "class", "name"]);
+    }
+
+    #[test]
+    fn iterates_bangla_range_and_restores_loop_variable_scope() {
+        let output = run(
+            "ধরি যোগফল = ০\nধরি মান = ৯৯\nপ্রতি মান মধ্যে পরিসর(৩) {\n  যোগফল = যোগফল + মান\n}\nদেখাও যোগফল\nদেখাও মান\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["3", "99"]);
+    }
+
+    #[test]
+    fn propagates_return_from_a_for_loop_and_rejects_non_collections() {
+        let output = run(
+            "function first(values) {\n  for value in values {\n    return value\n  }\n  return none\n}\nprint first([7, 8])\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["7"]);
+
+        let error = run("for item in 1 {\n  print item\n}\n").unwrap_err();
+        assert_eq!(error.code, "P1010");
     }
 
     #[test]

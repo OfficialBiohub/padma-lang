@@ -21,9 +21,13 @@
 - [ ] Implement null values, indexing, slicing, list mutation, iteration, and collection utility APIs.
 - [x] Add `none` / `কিছুইনা` null values with stable truthiness and display semantics.
 - [x] Add list indexing syntax, bounds diagnostics, and a zero-based non-negative index policy.
+- [x] Add zero-based bounded list slices with inclusive start and exclusive end semantics.
 - [x] Add list mutation APIs (`push`, `set`, `remove`) with type and bounds validation.
 - [x] Add collection length and membership APIs for lists and maps.
 - [x] Add collection regression tests, Bengali-English examples, and specification updates.
+- [x] Add `for item in collection` / `প্রতি item মধ্যে collection` iteration with bounded execution.
+- [x] Add safe `range` generation and deterministic iteration order for list, map, and text values.
+- [x] Define loop-variable scope and error behavior, with Bengali-English regression tests and examples.
 - [ ] Add a documented safe standard library for text, math, random, time, filesystem, JSON, and URL handling.
 - [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.
 - [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.

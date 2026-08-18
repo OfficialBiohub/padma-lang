@@ -166,11 +166,28 @@ tasks.set(0, "study")
 print tasks[0]                       # study
 print tasks.len()                    # 3
 print tasks.contains("practice")    # true
-print tasks.remove(1)                # practice
+print tasks.remove(1)      # practice
+print tasks[0:2]           # slice: start included, end excluded
 
 let profile = {"name": "Rafi"}
 print profile["name"]
 ```
+
+List slices use zero-based, non-negative bounds. The start is included and the end is excluded: `items[1:3]`, `items[:2]`, and `items[2:]`. A reversed or out-of-range slice ends safely with a localized error.
+
+### Collection iteration
+
+Use `for item in collection` or `প্রতি item মধ্যে collection` to process each list item, text character, or map key. Map keys are yielded in stable text order. `range(end)` creates `0` through `end - 1`; `range(start, end)` excludes `end`. The loop variable is temporary: a pre-existing variable with the same name is restored after the loop.
+
+```padma
+ধরি যোগফল = ০
+প্রতি মান মধ্যে পরিসর(১, ৪) {
+  যোগফল = যোগফল + মান
+}
+দেখাও যোগফল  # 6
+```
+
+Iteration is bounded to one million items, matching Padma's existing loop-safety policy.
 
 The same collection APIs work in Bangla source code:
 

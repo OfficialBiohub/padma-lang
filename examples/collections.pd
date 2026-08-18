@@ -7,6 +7,7 @@ print tasks[0]
 print tasks.len()
 print tasks.contains("practice")
 print tasks.remove(1)
+print tasks[0:2]
 
 let profile = {"name": "Rafi", "class": 6}
 print profile["name"]
