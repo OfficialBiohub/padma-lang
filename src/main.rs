@@ -9,6 +9,7 @@ use std::env;
 use std::fmt;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -4073,13 +4074,75 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma lint examples/mixed.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma lint examples/mixed.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma examples/hello-en.pd\n"
         }
     }
 }
+fn write_local_server_response(stream: &mut TcpStream, status: &str, body: &str) -> io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn serve_local_project(directory: &Path) -> Result<(), String> {
+    let (manifest, _) = load_project_manifest(directory)?;
+    if !manifest.capabilities.contains("server:local") {
+        let locale = if manifest.locale == "bn" {
+            Locale::Bangla
+        } else {
+            Locale::English
+        };
+        let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "server:local");
+        return Err(format!(
+            "{}: {}\n  = {}: {}",
+            diagnostic.code,
+            diagnostic.message,
+            if locale == Locale::Bangla {
+                "পরামর্শ"
+            } else {
+                "help"
+            },
+            diagnostic.hint.unwrap_or_default()
+        ));
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:8080")
+        .map_err(|error| format!("cannot bind loopback server: {error}"))?;
+    println!(
+        "Padma local server for `{}`: http://127.0.0.1:8080/health",
+        manifest.name
+    );
+    for incoming in listener.incoming() {
+        let mut stream = match incoming {
+            Ok(stream) => stream,
+            Err(_) => continue,
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let mut request = [0u8; 8192];
+        let read = stream.read(&mut request).unwrap_or(0);
+        let first_line = std::str::from_utf8(&request[..read])
+            .ok()
+            .and_then(|text| text.lines().next())
+            .unwrap_or("");
+        let (status, body) =
+            if first_line.starts_with("GET /health ") || first_line.starts_with("HEAD /health ") {
+                (
+                    "200 OK",
+                    serde_json::json!({"status":"ok", "project":manifest.name}).to_string(),
+                )
+            } else {
+                ("404 Not Found", "{\"error\":\"not found\"}".to_string())
+            };
+        let _ = write_local_server_response(&mut stream, status, &body);
+    }
+    Ok(())
+}
+
 fn main() {
     let arguments: Vec<String> = env::args().collect();
     if arguments.len() == 1 {
@@ -4092,6 +4155,21 @@ fn main() {
     }
     if arguments.len() == 2 && matches!(arguments[1].as_str(), "--help" | "-h") {
         println!("{}", usage(Locale::English));
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("serve") {
+        let directory = arguments
+            .get(2)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        if arguments.len() > 3 {
+            eprintln!("{}", usage(Locale::English));
+            process::exit(64);
+        }
+        if let Err(error) = serve_local_project(&directory) {
+            eprintln!("{error}");
+            process::exit(1);
+        }
         return;
     }
     if arguments.get(1).map(String::as_str) == Some("init") {
@@ -4727,6 +4805,21 @@ mod tests {
         .unwrap();
         assert!(approved.capabilities.contains("network:ai"));
         assert!(approved.capabilities.contains("server:local"));
+    }
+
+    #[test]
+    fn local_server_rejects_projects_without_explicit_server_capability() {
+        let root = module_fixture_dir("local-server-denied");
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"denied-server\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\n",
+        )
+        .unwrap();
+        let error = serve_local_project(&root).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("server:local"));
+        assert!(error.contains("[capabilities]"));
     }
 
     #[test]
