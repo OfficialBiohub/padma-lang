@@ -8,6 +8,8 @@ List literals use square brackets and comma-separated expressions, for example `
 
 The first runtime builtins are `input(prompt)`, `file.write(relative_path, content)`, `http.get(url)`, `process.run(program, arguments...)`, and `media.download(url, relative_output_template)`. Process execution is allowlisted and arguments are passed without a shell. Direct files use validated relative paths; manifest-run projects additionally resolve declared filesystem operations under their canonical project root and reject `..`, symlink escapes, and `@downloads`. Downloader use remains subject to authorization and platform terms.
 
+`padma fmt file.pd` is an idempotent source-layout command for syntactically valid files. Its initial stable policy trims outer whitespace from non-empty lines, uses four spaces per brace-delimited block, removes trailing blank lines, and writes one final newline. `padma fmt --check file.pd` performs the same comparison without changing the file.
+
 | Concept | Bengali | English |
 |---|---|---|
 | Declaration | `ধরি` | `let` |

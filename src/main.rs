@@ -3157,13 +3157,44 @@ fn check_json(path: &str, source: &str) -> String {
     }
 }
 
+fn format_source(source: &str) -> String {
+    let mut formatted_lines = Vec::new();
+    let mut indentation = 0isize;
+    for raw_line in source.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            formatted_lines.push(String::new());
+            continue;
+        }
+        let line_indentation = if line.starts_with('}') {
+            (indentation - 1).max(0)
+        } else {
+            indentation.max(0)
+        };
+        formatted_lines.push(format!(
+            "{}{}",
+            "    ".repeat(line_indentation as usize),
+            line
+        ));
+        indentation = (indentation + brace_delta(line)).max(0);
+    }
+    while formatted_lines.last().is_some_and(String::is_empty) {
+        formatted_lines.pop();
+    }
+    if formatted_lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", formatted_lines.join("\n"))
+    }
+}
+
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
@@ -3273,14 +3304,20 @@ fn main() {
         }
         return;
     }
-    let (command, path, json_diagnostics) = match arguments.as_slice() {
-        [_, path] if path.ends_with(".pd") => ("run", path.as_str(), false),
-        [_, command, path] => (command.as_str(), path.as_str(), false),
+    let (command, path, json_diagnostics, format_check) = match arguments.as_slice() {
+        [_, path] if path.ends_with(".pd") => ("run", path.as_str(), false, false),
+        [_, command, path] => (command.as_str(), path.as_str(), false, false),
         [_, command, flag, path] if command == "check" && flag == "--json" => {
-            ("check", path.as_str(), true)
+            ("check", path.as_str(), true, false)
         }
         [_, command, path, flag] if command == "check" && flag == "--json" => {
-            ("check", path.as_str(), true)
+            ("check", path.as_str(), true, false)
+        }
+        [_, command, flag, path] if command == "fmt" && flag == "--check" => {
+            ("fmt", path.as_str(), false, true)
+        }
+        [_, command, path, flag] if command == "fmt" && flag == "--check" => {
+            ("fmt", path.as_str(), false, true)
         }
         _ => {
             eprintln!("{}", usage(Locale::Bangla));
@@ -3320,6 +3357,29 @@ fn main() {
                 process::exit(1);
             }
         }
+        return;
+    }
+    if command == "fmt" {
+        if let Err(errors) = check_source(&source) {
+            for error in errors {
+                eprintln!("{}", format_diagnostic(path, &source, &error));
+            }
+            process::exit(1);
+        }
+        let formatted = format_source(&source);
+        if format_check {
+            if formatted == source {
+                println!("ok: `{path}` is already formatted.");
+                return;
+            }
+            eprintln!("formatting required: `{path}`");
+            process::exit(1);
+        }
+        if let Err(error) = fs::write(path, formatted) {
+            eprintln!("Cannot write `{path}`: {error}");
+            process::exit(73);
+        }
+        println!("formatted: `{path}`");
         return;
     }
     let compiled = compile(&source);
@@ -3488,6 +3548,16 @@ mod tests {
         let value: JsonValue = serde_json::from_str(&output).unwrap();
         assert_eq!(value["status"], "ok");
         assert_eq!(value["diagnostics"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn formatter_is_idempotent_and_ignores_braces_inside_strings() {
+        let source =
+            "function greeting() {\nprint \"{name}\"   \nif true {\nprint \"ok\"\n}\n}\n\n";
+        let expected = "function greeting() {\n    print \"{name}\"\n    if true {\n        print \"ok\"\n    }\n}\n";
+        let formatted = format_source(source);
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted), formatted);
     }
 
     fn run_file(path: &Path) -> Result<Vec<String>, PadmaError> {

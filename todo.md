@@ -49,7 +49,7 @@
 - [x] Define audited capability escalation and Android shared-storage boundaries before enabling broader permissions.
 - [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
 - [x] Add stable JSON diagnostic output through `padma check --json <file.pd>` for editors and CI.
-- [ ] Add an idempotent `padma fmt` formatter with newline/indentation golden tests.
+- [x] Add an idempotent `padma fmt` formatter with newline/indentation golden tests.
 - [ ] Add `padma lint` with documented rule identifiers, warning exit policy, and manifest-configurable rule selection.
 - [ ] Extend `padma check` from parser recovery to non-executing static semantic checks.
 - [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
