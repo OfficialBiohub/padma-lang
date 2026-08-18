@@ -3188,13 +3188,208 @@ fn format_source(source: &str) -> String {
     }
 }
 
+#[derive(Clone, Debug)]
+struct LintWarning {
+    code: &'static str,
+    message: String,
+    hint: String,
+    position: Position,
+    locale: Locale,
+}
+
+fn lint_warning(
+    locale: Locale,
+    code: &'static str,
+    position: Position,
+    message: &str,
+    hint: &str,
+) -> LintWarning {
+    LintWarning {
+        code,
+        message: message.to_string(),
+        hint: hint.to_string(),
+        position,
+        locale,
+    }
+}
+
+fn source_has_keyword(source: &str, keyword: &str) -> bool {
+    source.lines().any(|line| {
+        let mut code = String::new();
+        let mut in_string = false;
+        let mut escaped = false;
+        for character in line.chars() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            if in_string && character == '\\' {
+                escaped = true;
+                continue;
+            }
+            if character == '"' {
+                in_string = !in_string;
+                continue;
+            }
+            if !in_string && character == '#' {
+                break;
+            }
+            if !in_string {
+                code.push(character);
+            }
+        }
+        if !keyword.is_ascii() {
+            code.contains(keyword)
+        } else {
+            code.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+                .any(|token| token == keyword)
+        }
+    })
+}
+
+fn lint_source(source: &str) -> (Locale, Vec<LintWarning>) {
+    let locale = Locale::from_source(source);
+    let mut warnings = Vec::new();
+    for (index, raw_line) in source.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed_end = raw_line.trim_end_matches([' ', '\t']);
+        if trimmed_end.len() != raw_line.len() {
+            let column = trimmed_end.chars().count() + 1;
+            let (message, hint) = match locale {
+                Locale::Bangla => (
+                    "লাইনের শেষে অপ্রয়োজনীয় ফাঁকা স্থান আছে",
+                    "লাইনের শেষের space বা tab সরান।",
+                ),
+                Locale::English => (
+                    "line has trailing whitespace",
+                    "remove spaces or tabs from the end of the line.",
+                ),
+            };
+            warnings.push(lint_warning(
+                locale,
+                "L1001",
+                Position::new(line_number, column),
+                message,
+                hint,
+            ));
+        }
+        if let Some(column) = raw_line
+            .chars()
+            .take_while(|character| character.is_whitespace())
+            .position(|character| character == '\t')
+        {
+            let (message, hint) = match locale {
+                Locale::Bangla => (
+                    "indentation-এ tab ব্যবহার করা হয়েছে",
+                    "সামঞ্জস্যপূর্ণ indentation-এর জন্য চারটি space ব্যবহার করুন।",
+                ),
+                Locale::English => (
+                    "indentation uses a tab character",
+                    "use four spaces for consistent indentation.",
+                ),
+            };
+            warnings.push(lint_warning(
+                locale,
+                "L1002",
+                Position::new(line_number, column + 1),
+                message,
+                hint,
+            ));
+        }
+    }
+    let bangla_keywords = [
+        "ধরি",
+        "দেখাও",
+        "যদি",
+        "নইলে",
+        "যতক্ষণ",
+        "প্রতি",
+        "মধ্যে",
+        "ফাংশন",
+        "ফেরত",
+        "ইমপোর্ট",
+    ];
+    let english_keywords = [
+        "let", "print", "if", "else", "while", "for", "in", "function", "return", "import",
+    ];
+    if bangla_keywords
+        .iter()
+        .any(|keyword| source_has_keyword(source, keyword))
+        && english_keywords
+            .iter()
+            .any(|keyword| source_has_keyword(source, keyword))
+    {
+        let (message, hint) = match locale {
+            Locale::Bangla => (
+                "Bangla এবং English keyword একসঙ্গে ব্যবহার করা হয়েছে",
+                "একটি ফাইলে একটি keyword style বেছে নিন, অথবা এই warning অনুমোদন করুন।",
+            ),
+            Locale::English => (
+                "Bangla and English keywords are mixed in this file",
+                "choose one keyword style per file, or explicitly allow this warning.",
+            ),
+        };
+        warnings.push(lint_warning(
+            locale,
+            "L1003",
+            Position::new(1, 1),
+            message,
+            hint,
+        ));
+    }
+    (locale, warnings)
+}
+
+fn format_lint_warning(path: &str, warning: &LintWarning) -> String {
+    let label = match warning.locale {
+        Locale::Bangla => "সতর্কতা",
+        Locale::English => "warning",
+    };
+    let hint_label = match warning.locale {
+        Locale::Bangla => "পরামর্শ",
+        Locale::English => "help",
+    };
+    format!(
+        "{label}[{}]: {}\n  --> {}:{}:{}\n   = {hint_label}: {}\n",
+        warning.code,
+        warning.message,
+        path,
+        warning.position.line,
+        warning.position.column,
+        warning.hint
+    )
+}
+
+fn lint_json(path: &str, source: &str) -> String {
+    let (locale, warnings) = lint_source(source);
+    let locale = match locale {
+        Locale::Bangla => "bn",
+        Locale::English => "en",
+    };
+    serde_json::json!({
+        "status": if warnings.is_empty() { "ok" } else { "warning" },
+        "path": path,
+        "locale": locale,
+        "warnings": warnings.iter().map(|warning| serde_json::json!({
+            "code": warning.code,
+            "message": warning.message,
+            "hint": warning.hint,
+            "range": {
+                "start": { "line": warning.position.line, "column": warning.position.column },
+                "end": { "line": warning.position.line, "column": warning.position.column + 1 }
+            }
+        })).collect::<Vec<_>>()
+    })
+    .to_string()
+}
+
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma lint examples/mixed.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma fmt examples/hello-en.pd\n  padma lint examples/mixed.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
@@ -3304,20 +3499,26 @@ fn main() {
         }
         return;
     }
-    let (command, path, json_diagnostics, format_check) = match arguments.as_slice() {
-        [_, path] if path.ends_with(".pd") => ("run", path.as_str(), false, false),
-        [_, command, path] => (command.as_str(), path.as_str(), false, false),
+    let (command, path, json_diagnostics, format_check, json_lint) = match arguments.as_slice() {
+        [_, path] if path.ends_with(".pd") => ("run", path.as_str(), false, false, false),
+        [_, command, path] => (command.as_str(), path.as_str(), false, false, false),
         [_, command, flag, path] if command == "check" && flag == "--json" => {
-            ("check", path.as_str(), true, false)
+            ("check", path.as_str(), true, false, false)
         }
         [_, command, path, flag] if command == "check" && flag == "--json" => {
-            ("check", path.as_str(), true, false)
+            ("check", path.as_str(), true, false, false)
         }
         [_, command, flag, path] if command == "fmt" && flag == "--check" => {
-            ("fmt", path.as_str(), false, true)
+            ("fmt", path.as_str(), false, true, false)
         }
         [_, command, path, flag] if command == "fmt" && flag == "--check" => {
-            ("fmt", path.as_str(), false, true)
+            ("fmt", path.as_str(), false, true, false)
+        }
+        [_, command, flag, path] if command == "lint" && flag == "--json" => {
+            ("lint", path.as_str(), false, false, true)
+        }
+        [_, command, path, flag] if command == "lint" && flag == "--json" => {
+            ("lint", path.as_str(), false, false, true)
         }
         _ => {
             eprintln!("{}", usage(Locale::Bangla));
@@ -3356,6 +3557,31 @@ fn main() {
                 }
                 process::exit(1);
             }
+        }
+        return;
+    }
+    if command == "lint" {
+        if let Err(errors) = check_source(&source) {
+            for error in errors {
+                eprintln!("{}", format_diagnostic(path, &source, &error));
+            }
+            process::exit(1);
+        }
+        let (locale, warnings) = lint_source(&source);
+        if json_lint {
+            println!("{}", lint_json(path, &source));
+        } else if warnings.is_empty() {
+            match locale {
+                Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো lint warning পাওয়া যায়নি।"),
+                Locale::English => println!("ok: no lint warnings found in `{path}`."),
+            }
+        } else {
+            for warning in &warnings {
+                eprintln!("{}", format_lint_warning(path, warning));
+            }
+        }
+        if !warnings.is_empty() {
+            process::exit(1);
         }
         return;
     }
@@ -3558,6 +3784,26 @@ mod tests {
         let formatted = format_source(source);
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted), formatted);
+    }
+
+    #[test]
+    fn lints_layout_and_mixed_keywords_without_reading_strings_or_comments() {
+        let source = "\tlet name = \"Rafi\"   \nদেখাও name\n";
+        let (_, warnings) = lint_source(source);
+        let codes = warnings
+            .iter()
+            .map(|warning| warning.code)
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"L1001"));
+        assert!(codes.contains(&"L1002"));
+        assert!(codes.contains(&"L1003"));
+
+        let (_, warnings) = lint_source("print \"ধরি let\"\n# দেখাও\n");
+        assert!(!warnings.iter().any(|warning| warning.code == "L1003"));
+
+        let json: JsonValue = serde_json::from_str(&lint_json("mixed.pd", source)).unwrap();
+        assert_eq!(json["status"], "warning");
+        assert_eq!(json["warnings"][0]["code"], "L1001");
     }
 
     fn run_file(path: &Path) -> Result<Vec<String>, PadmaError> {

@@ -317,6 +317,8 @@ Use this only for content you own or are authorized to download and in complianc
 | `padma check --json <file.pd>` | Emit one machine-readable diagnostic report for editors and CI. |
 | `padma fmt <file.pd>` | Format a syntactically valid source file in place. |
 | `padma fmt --check <file.pd>` | Exit non-zero when formatting changes would be needed, without modifying the file. |
+| `padma lint <file.pd>` | Report non-executing source-style warnings; warnings exit non-zero for CI. |
+| `padma lint --json <file.pd>` | Emit one machine-readable lint report. |
 | `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
 | `padma --version` | Print the installed compiler version. |
 | `padma --help` | Show CLI usage and interactive-shell commands. |
