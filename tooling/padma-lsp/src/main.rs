@@ -72,6 +72,24 @@ impl Server {
         };
         message.map_or(Value::Null, |value| json!({ "contents": { "kind": "markdown", "value": value } }))
     }
+
+    fn definition(&self, uri: &str, position: &Value) -> Value {
+        let source = self.documents.get(uri).map(String::as_str).unwrap_or("");
+        let word = word_at(source, position).unwrap_or_default();
+        let line = position["line"].as_u64().unwrap_or(0) as usize;
+        let scope_depth = scope_depth_at(source, line);
+        document_symbols(source)
+            .into_iter()
+            .filter(|symbol| symbol.name == word && symbol.line <= line && symbol.scope_depth <= scope_depth)
+            .max_by_key(|symbol| (symbol.scope_depth, symbol.line))
+            .map_or(Value::Null, |symbol| json!({
+                "uri": uri,
+                "range": {
+                    "start": { "line": symbol.line, "character": symbol.character },
+                    "end": { "line": symbol.line, "character": symbol.character + symbol.name.encode_utf16().count() }
+                }
+            }))
+    }
 }
 
 fn word_at(source: &str, position: &Value) -> Option<String> {
@@ -124,6 +142,12 @@ fn document_symbols(source: &str) -> Vec<DocumentSymbol> {
         depth = depth.saturating_sub(line.matches('}').count());
     }
     symbols
+}
+
+fn scope_depth_at(source: &str, target_line: usize) -> usize {
+    source.lines().take(target_line).fold(0usize, |depth, line| {
+        depth.saturating_add(line.matches('{').count()).saturating_sub(line.matches('}').count())
+    })
 }
 
 fn lsp_diagnostic(source: &str, diagnostic: &Value) -> Value {
@@ -234,7 +258,8 @@ fn main() -> io::Result<()> {
                             "textDocumentSync": 1,
                             "documentFormattingProvider": true,
                             "completionProvider": { "triggerCharacters": ["."] },
-                            "hoverProvider": true
+                            "hoverProvider": true,
+                            "definitionProvider": true
                         },
                         "serverInfo": { "name": "padma-lsp", "version": "0.1.0" }
                     })))?;
@@ -292,6 +317,12 @@ fn main() -> io::Result<()> {
                     write_message(&mut output, &response(id, server.hover(uri, &params["position"])))?;
                 }
             }
+            "textDocument/definition" => {
+                if let Some(id) = id {
+                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+                    write_message(&mut output, &response(id, server.definition(uri, &params["position"])))?;
+                }
+            }
             _ if id.is_some() => {
                 write_message(&mut output, &json!({
                     "jsonrpc": "2.0",
@@ -347,5 +378,14 @@ mod tests {
         assert_eq!(symbols[1].name, "ভিতর");
         assert_eq!(symbols[1].scope_depth, 1);
         assert_eq!(symbols[2].kind, "function");
+    }
+
+    #[test]
+    fn resolves_the_nearest_visible_local_declaration() {
+        let mut server = Server::new();
+        let uri = "file:///demo.pd";
+        server.documents.insert(uri.to_string(), "let name = 1\nif true {\n  ধরি নাম = 2\n  দেখাও নাম\n}\n".to_string());
+        let location = server.definition(uri, &json!({ "line": 3, "character": 9 }));
+        assert_eq!(location["range"]["start"]["line"], 2);
     }
 }
