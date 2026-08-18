@@ -130,3 +130,16 @@
 - [ ] Add unit, integration, golden diagnostic, fuzz, and Termux smoke tests.
 - [ ] Document Android/Termux installation, examples, contribution rules, and release process.
 - [ ] Remove or isolate non-core playground artifacts if they distract from the language repository.
+
+## M9 — Application Platform and Distribution
+
+- [ ] Deliver the remaining production platform capabilities through independently shippable, security-reviewed milestones; do not expose unrestricted servers, databases, package installs, credentials, deployment credentials, device permissions, or browser control by default.
+- [ ] Add a Termux-first local web server framework with fixed listen policy, explicit `server` capability grant, bounded request sizes, safe route matching, JSON responses, and graceful shutdown.
+- [ ] Add a local SQLite persistence layer with project-root database paths, prepared statements, typed JSON rows, explicit `database` capability grant, migrations, and transaction safety; do not create a raw SQL string-evaluation API.
+- [ ] Add a signed package registry client and deterministic package lock workflow with integrity verification, version resolution, package-root isolation, offline cache, and explicit trust policy.
+- [ ] Add an optional identity/session layer using password hashing, signed expiring sessions, CSRF controls, secure cookie defaults, and secret names sourced from environment variables rather than source code.
+- [ ] Add deployment manifests and dry-run adapters before any remote deployment integration; preserve clear ownership, secret isolation, build reproducibility, rollback metadata, and explicit user confirmation for remote actions.
+- [ ] Define GUI/mobile application bridges as opt-in adapter contracts with no automatic Android permission elevation, then validate a small Termux-friendly renderer example.
+- [ ] Add provider-neutral AI workflow helpers for structured responses and local model adapters, bounded by explicit network/process capabilities and never executing model output as code.
+- [ ] Add bounded browser automation using reviewed action plans, domain allowlists, confirmation before side effects, redaction of sensitive fields, and no CAPTCHA or login bypass behavior.
+- [ ] Add Bangla-English diagnostics, negative security tests, Termux copy-paste examples, and release gates for every M9 component before marking it stable.
