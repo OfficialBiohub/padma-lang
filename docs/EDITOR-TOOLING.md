@@ -17,9 +17,9 @@ The grammar follows the Tree-sitter conventions of an intuitive `source_file` ro
 
 The first increment is complete: `tooling/tree-sitter-padma` contains an ABI-15 Tree-sitter grammar, generated parser artifacts, corpus fixtures, highlighting queries, pinned CLI dependency, and CI coverage. The second baseline is also complete: `tooling/vscode-padma` associates `.pd` files, provides Bangla-English TextMate highlighting and language configuration, and supplies explicit run/check/format/lint commands. Its check command renders the stable `padma check --json` diagnostics in VS Code's Problems panel.
 
-The initial language-server baseline is now complete in `tooling/padma-lsp`: it uses standard LSP JSON-RPC on stdin/stdout, publishes diagnostics generated from the public CLI-compatible JSON API, converts Padma source positions to LSP UTF-16 columns, and returns full-document formatter edits. The VS Code extension starts it only through an explicit user command.
+The initial language-server baseline is now complete in `tooling/padma-lsp`: it uses standard LSP JSON-RPC on stdin/stdout, publishes diagnostics generated from the public CLI-compatible JSON API, converts Padma source positions to LSP UTF-16 columns, returns full-document formatter edits, and offers a safe static Bangla-English completion catalogue. The VS Code extension starts it only through an explicit user command.
 
-Definitions, completion, hover, rename, incremental range updates, and semantic document analysis remain later work. The extension must not duplicate those semantic decisions.
+Definitions, hover, rename, dynamic symbol completion, incremental range updates, and semantic document analysis remain later work. The extension must not duplicate those semantic decisions.
 
 This order matters for Termux-first users: command-line editing and `padma check --json` remain useful even where a desktop editor is unavailable. No editor integration may grant capabilities, execute a `.pd` file, or open an external process without an explicit user command. The initial extension intentionally runs all commands in a visible terminal and only after the user selects a Padma command.
 

@@ -92,6 +92,18 @@ fn end_position(source: &str) -> Value {
     json!({ "line": line, "character": last.encode_utf16().count() })
 }
 
+fn completion_items() -> Value {
+    let items = [
+        ("let", "keyword"), ("ধরি", "keyword"), ("print", "keyword"), ("দেখাও", "keyword"),
+        ("function", "keyword"), ("ফাংশন", "keyword"), ("return", "keyword"), ("ফেরত", "keyword"),
+        ("if", "keyword"), ("যদি", "keyword"), ("else", "keyword"), ("নইলে", "keyword"),
+        ("while", "keyword"), ("যতক্ষণ", "keyword"), ("for", "keyword"), ("প্রতি", "keyword"),
+        ("input", "function"), ("range", "function"), ("পরিসর", "function"), ("text", "module"),
+        ("math", "module"), ("json", "module"), ("file", "module"),
+    ];
+    Value::Array(items.into_iter().map(|(label, detail)| json!({ "label": label, "detail": detail })).collect())
+}
+
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     let mut content_length = None;
     loop {
@@ -143,7 +155,8 @@ fn main() -> io::Result<()> {
                     write_message(&mut output, &response(id, json!({
                         "capabilities": {
                             "textDocumentSync": 1,
-                            "documentFormattingProvider": true
+                            "documentFormattingProvider": true,
+                            "completionProvider": { "triggerCharacters": ["."] }
                         },
                         "serverInfo": { "name": "padma-lsp", "version": "0.1.0" }
                     })))?;
@@ -190,6 +203,11 @@ fn main() -> io::Result<()> {
                     write_message(&mut output, &response(id, server.format_document(uri)))?;
                 }
             }
+            "textDocument/completion" => {
+                if let Some(id) = id {
+                    write_message(&mut output, &response(id, completion_items()))?;
+                }
+            }
             _ if id.is_some() => {
                 write_message(&mut output, &json!({
                     "jsonrpc": "2.0",
@@ -222,5 +240,12 @@ mod tests {
         let output = lsp_diagnostic("print 1 / 0", &diagnostic);
         assert_eq!(output["code"], "P1011");
         assert_eq!(output["severity"], 1);
+    }
+
+    #[test]
+    fn provides_bangla_and_english_static_completion_items() {
+        let items = completion_items();
+        assert!(items.as_array().unwrap().iter().any(|item| item["label"] == "ধরি"));
+        assert!(items.as_array().unwrap().iter().any(|item| item["label"] == "function"));
     }
 }

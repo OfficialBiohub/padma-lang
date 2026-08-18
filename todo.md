@@ -61,6 +61,7 @@
 - [x] Create an independent ABI-15 Tree-sitter grammar with Bangla-English corpus tests, highlight queries, generated artifacts, and CI.
 - [x] Create an initial VS Code extension with `.pd` association, bilingual highlighting, explicit run/check/format/lint commands, and JSON diagnostic rendering.
 - [x] Implement an opt-in stdio Padma language server for diagnostics and document formatting, including UTF-16 position conversion tests.
+- [x] Add a safe static Bangla-English LSP completion catalogue with regression tests.
 - [x] Add a Bangla Termux-first guide for installation, Nano editing, project capability review, diagnostics, formatting, linting, and Android storage boundaries.
 - [ ] Add LSP definitions, completion, hover, rename, extension packaging/sample-workspace validation, and fuller mobile editor guidance.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
