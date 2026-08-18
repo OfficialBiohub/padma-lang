@@ -1,0 +1,7 @@
+# Only declarations marked export are visible through an alias import.
+export let title = "Padma Module"
+let internal_note = "This stays private."
+
+export function greeting(name) {
+  return "{title}: hello {name}"
+}

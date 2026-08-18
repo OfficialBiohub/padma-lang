@@ -243,6 +243,7 @@ enum TokenKind {
     Function,
     Return,
     Import,
+    Export,
     True,
     False,
     Null,
@@ -470,6 +471,7 @@ impl Lexer {
             "ফাংশন" | "function" | "fn" => TokenKind::Function,
             "ফেরত" | "return" => TokenKind::Return,
             "ইমপোর্ট" | "import" => TokenKind::Import,
+            "রপ্তানি" | "export" => TokenKind::Export,
             "সত্য" | "true" => TokenKind::True,
             "মিথ্যা" | "false" => TokenKind::False,
             "কিছুইনা" | "none" => TokenKind::Null,
@@ -723,8 +725,30 @@ enum Stmt {
     },
     Import {
         path: String,
+        alias: Option<String>,
         position: Position,
     },
+    Export(Box<Stmt>),
+}
+
+fn exported_symbol_names(program: &[Stmt]) -> (HashSet<String>, HashSet<String>) {
+    let mut values = HashSet::new();
+    let mut functions = HashSet::new();
+    for statement in program {
+        match statement {
+            Stmt::Export(inner) => match inner.as_ref() {
+                Stmt::Let { name, .. } => {
+                    values.insert(name.clone());
+                }
+                Stmt::Function { name, .. } => {
+                    functions.insert(name.clone());
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    (values, functions)
 }
 
 #[derive(Clone, Debug)]
@@ -829,6 +853,9 @@ impl Parser {
         if self.matches(|kind| matches!(kind, TokenKind::Import)) {
             return self.import_statement(self.previous().position);
         }
+        if self.matches(|kind| matches!(kind, TokenKind::Export)) {
+            return self.export_statement(self.previous().position);
+        }
         if self.check(|kind| matches!(kind, TokenKind::Identifier(_)))
             && self
                 .tokens
@@ -886,8 +913,46 @@ impl Parser {
                 ))
             }
         };
+        let alias = if self.check(
+            |kind| matches!(kind, TokenKind::Identifier(name) if name == "as" || name == "হিসেবে"),
+        ) {
+            self.advance();
+            match self.advance().clone().kind {
+                TokenKind::Identifier(alias) => Some(alias),
+                _ => {
+                    return Err(error_for(
+                        self.locale,
+                        "P1003",
+                        self.previous().position,
+                        "module alias",
+                    ))
+                }
+            }
+        } else {
+            None
+        };
         self.consume_statement_end()?;
-        Ok(Stmt::Import { path, position })
+        Ok(Stmt::Import {
+            path,
+            alias,
+            position,
+        })
+    }
+
+    fn export_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
+        let declaration = if self.matches(|kind| matches!(kind, TokenKind::Let)) {
+            self.let_statement(self.previous().position)?
+        } else if self.matches(|kind| matches!(kind, TokenKind::Function)) {
+            self.function_statement()?
+        } else {
+            return Err(error_for(
+                self.locale,
+                "P1003",
+                position,
+                "exported let or function declaration",
+            ));
+        };
+        Ok(Stmt::Export(Box::new(declaration)))
     }
 
     fn assign_statement(&mut self) -> Result<Stmt, PadmaError> {
@@ -1484,6 +1549,13 @@ impl fmt::Display for Value {
     }
 }
 
+#[derive(Clone)]
+struct ModuleNamespace {
+    environment: HashMap<String, Value>,
+    functions: HashMap<String, (Vec<String>, Vec<Stmt>)>,
+    modules: HashMap<String, ModuleNamespace>,
+}
+
 struct Interpreter {
     environment: HashMap<String, Value>,
     functions: HashMap<String, (Vec<String>, Vec<Stmt>)>,
@@ -1493,6 +1565,8 @@ struct Interpreter {
     current_source: PathBuf,
     loaded_modules: HashSet<PathBuf>,
     active_modules: HashSet<PathBuf>,
+    modules: HashMap<String, ModuleNamespace>,
+    module_cache: HashMap<PathBuf, ModuleNamespace>,
 }
 
 impl Interpreter {
@@ -1510,6 +1584,8 @@ impl Interpreter {
             current_source,
             loaded_modules: HashSet::new(),
             active_modules: HashSet::new(),
+            modules: HashMap::new(),
+            module_cache: HashMap::new(),
         }
     }
 
@@ -1634,7 +1710,15 @@ impl Interpreter {
                     None => Value::Null,
                 });
             }
-            Stmt::Import { path, position } => self.import_module(path, *position)?,
+            Stmt::Import {
+                path,
+                alias,
+                position,
+            } => match alias {
+                Some(alias) => self.import_module_as(path, alias, *position)?,
+                None => self.import_module(path, *position)?,
+            },
+            Stmt::Export(statement) => self.execute(statement)?,
         }
         Ok(())
     }
@@ -1676,17 +1760,80 @@ impl Interpreter {
         result
     }
 
+    fn import_module_as(
+        &mut self,
+        requested: &str,
+        alias: &str,
+        position: Position,
+    ) -> Result<(), PadmaError> {
+        let relative_path = resolve_import_path(&self.current_source, requested)
+            .map_err(|_| error_for(self.locale, "P1022", position, requested))?;
+        let path = fs::canonicalize(&relative_path)
+            .map_err(|_| error_for(self.locale, "P1023", position, requested))?;
+        if let Some(namespace) = self.module_cache.get(&path).cloned() {
+            self.modules.insert(alias.to_string(), namespace);
+            return Ok(());
+        }
+        if !self.active_modules.insert(path.clone()) {
+            return Err(error_for(self.locale, "P1024", position, requested));
+        }
+        let result = (|| {
+            let source = fs::read_to_string(&path)
+                .map_err(|_| error_for(self.locale, "P1023", position, requested))?;
+            let module_locale = Locale::from_source(&source);
+            let (program, module_locale) = compile(&source).map_err(|error| {
+                error.with_source_context(path.clone(), source.clone(), module_locale)
+            })?;
+            let (public_values, public_functions) = exported_symbol_names(&program);
+            let has_explicit_exports = !public_values.is_empty() || !public_functions.is_empty();
+            let mut child = Interpreter::with_source_path(module_locale, path.clone());
+            child.active_modules = self.active_modules.clone();
+            child.run(&program).map_err(|error| {
+                error.with_source_context(path.clone(), source.clone(), module_locale)
+            })?;
+            self.output.extend(child.output);
+            if has_explicit_exports {
+                child
+                    .environment
+                    .retain(|name, _| public_values.contains(name));
+                child
+                    .functions
+                    .retain(|name, _| public_functions.contains(name));
+            }
+            let namespace = ModuleNamespace {
+                environment: child.environment,
+                functions: child.functions,
+                modules: child.modules,
+            };
+            self.module_cache.insert(path.clone(), namespace.clone());
+            self.modules.insert(alias.to_string(), namespace);
+            Ok(())
+        })();
+        self.active_modules.remove(&path);
+        result
+    }
+
     fn evaluate(&mut self, expression: &Expr) -> Result<Value, PadmaError> {
         match expression {
             Expr::Literal(Value::String(value), position) => {
                 Ok(Value::String(self.interpolate(value, *position)?))
             }
             Expr::Literal(value, _) => Ok(value.clone()),
-            Expr::Variable(name, position) => self
-                .environment
-                .get(name)
-                .cloned()
-                .ok_or_else(|| error_for(self.locale, "P1007", *position, name)),
+            Expr::Variable(name, position) => {
+                if let Some((module, member)) = name.split_once('.') {
+                    if let Some(namespace) = self.modules.get(module) {
+                        return namespace
+                            .environment
+                            .get(member)
+                            .cloned()
+                            .ok_or_else(|| error_for(self.locale, "P1007", *position, name));
+                    }
+                }
+                self.environment
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| error_for(self.locale, "P1007", *position, name))
+            }
             Expr::Index {
                 target,
                 index,
@@ -1769,6 +1916,46 @@ impl Interpreter {
                 arguments,
                 position,
             } => {
+                if let Some((module, member)) = name.split_once('.') {
+                    if let Some(namespace) = self.modules.get(module).cloned() {
+                        let (parameters, body) = namespace
+                            .functions
+                            .get(member)
+                            .cloned()
+                            .ok_or_else(|| error_for(self.locale, "P1008", *position, name))?;
+                        if parameters.len() != arguments.len() {
+                            return Err(error_for(self.locale, "P1009", *position, name));
+                        }
+                        let values = arguments
+                            .iter()
+                            .map(|argument| self.evaluate(argument))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let previous_environment =
+                            std::mem::replace(&mut self.environment, namespace.environment);
+                        let previous_functions =
+                            std::mem::replace(&mut self.functions, namespace.functions);
+                        let previous_modules =
+                            std::mem::replace(&mut self.modules, namespace.modules);
+                        let previous_return = self.return_value.take();
+                        for (parameter, value) in parameters.iter().zip(values) {
+                            self.environment.insert(parameter.clone(), value);
+                        }
+                        let run_result = self.run(&body);
+                        let result = self.return_value.take().unwrap_or(Value::Null);
+                        let updated_namespace = ModuleNamespace {
+                            environment: std::mem::replace(
+                                &mut self.environment,
+                                previous_environment,
+                            ),
+                            functions: std::mem::replace(&mut self.functions, previous_functions),
+                            modules: std::mem::replace(&mut self.modules, previous_modules),
+                        };
+                        self.modules.insert(module.to_string(), updated_namespace);
+                        self.return_value = previous_return;
+                        run_result?;
+                        return Ok(result);
+                    }
+                }
                 if name == "range" || name == "পরিসর" {
                     if arguments.len() != 1 && arguments.len() != 2 {
                         return Err(error_for(self.locale, "P1009", *position, name));
@@ -2548,6 +2735,166 @@ fn compile(source: &str) -> Result<(Vec<Stmt>, Locale), PadmaError> {
     Ok((program, locale))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProjectManifest {
+    name: String,
+    version: String,
+    entry: String,
+    locale: String,
+}
+
+fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "padma" && section != "dependencies" {
+                return Err(format!(
+                    "P1032: unsupported manifest section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1032: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        let value = raw_value.trim().trim_matches('"').to_string();
+        if section == "dependencies" || key == "dependencies" {
+            return Err(format!(
+                "P1033: dependencies are not supported yet (line {})",
+                line_number + 1
+            ));
+        }
+        if section != "padma" || !matches!(key, "name" | "version" | "entry" | "locale") {
+            return Err(format!(
+                "P1032: unsupported manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(format!(
+                "P1032: duplicate manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1032: missing `[padma]` field `{key}`"))
+    };
+    let manifest = ProjectManifest {
+        name: required("name")?,
+        version: required("version")?,
+        entry: required("entry")?,
+        locale: fields
+            .get("locale")
+            .cloned()
+            .unwrap_or_else(|| "auto".to_string()),
+    };
+    if !matches!(manifest.locale.as_str(), "auto" | "bn" | "en") {
+        return Err("P1032: `locale` must be `auto`, `bn`, or `en`".to_string());
+    }
+    Ok(manifest)
+}
+
+fn safe_project_relative_path(value: &str) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || path.is_absolute()
+        || !value.ends_with(".pd")
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("P1032: project entry must be a relative `.pd` path without `..`".to_string());
+    }
+    Ok(path.to_path_buf())
+}
+
+fn load_project_manifest(directory: &Path) -> Result<(ProjectManifest, PathBuf), String> {
+    let manifest_path = directory.join("padma.toml");
+    let content = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("P1032: cannot read `{}`: {error}", manifest_path.display()))?;
+    let manifest = parse_project_manifest(&content)?;
+    let entry = directory.join(safe_project_relative_path(&manifest.entry)?);
+    Ok((manifest, entry))
+}
+
+fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
+    if directory.exists() {
+        let mut entries = fs::read_dir(directory)
+            .map_err(|error| format!("P1032: cannot inspect `{}`: {error}", directory.display()))?;
+        if entries.next().is_some() {
+            return Err(format!(
+                "P1032: project directory `{}` is not empty",
+                directory.display()
+            ));
+        }
+    } else {
+        fs::create_dir_all(directory)
+            .map_err(|error| format!("P1032: cannot create `{}`: {error}", directory.display()))?;
+    }
+    let name = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty() && *name != ".")
+        .unwrap_or("padma-project")
+        .to_string();
+    let manifest = ProjectManifest {
+        name,
+        version: "0.1.0".to_string(),
+        entry: "src/main.pd".to_string(),
+        locale: "bn".to_string(),
+    };
+    fs::create_dir_all(directory.join("src"))
+        .map_err(|error| format!("P1032: cannot create project source directory: {error}"))?;
+    fs::write(
+        directory.join("padma.toml"),
+        format!(
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n",
+            manifest.name, manifest.version, manifest.entry, manifest.locale
+        ),
+    )
+    .map_err(|error| format!("P1032: cannot write manifest: {error}"))?;
+    fs::write(
+        directory.join("padma.lock"),
+        format!(
+            "# Padma lockfile v1\nname = \"{}\"\nversion = \"{}\"\n",
+            manifest.name, manifest.version
+        ),
+    )
+    .map_err(|error| format!("P1032: cannot write lockfile: {error}"))?;
+    fs::write(
+        directory.join("src/main.pd"),
+        "# padma:locale=bn\nদেখাও \"পদ্ম project শুরু হয়েছে\"\n",
+    )
+    .map_err(|error| format!("P1032: cannot write starter source: {error}"))?;
+    Ok(manifest)
+}
+
+fn project_source_with_locale(source: String, locale: &str) -> String {
+    match locale {
+        "bn" => format!("# padma:locale=bn\n{source}"),
+        "en" => format!("# padma:locale=en\n{source}"),
+        _ => source,
+    }
+}
+
 fn check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
     let locale = Locale::from_source(source);
     let tokens = Lexer::new(source, locale)
@@ -2600,14 +2947,13 @@ fn format_diagnostic(path: &str, source: &str, error: &PadmaError) -> String {
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
-
 fn main() {
     let arguments: Vec<String> = env::args().collect();
     if arguments.len() == 1 {
@@ -2620,6 +2966,67 @@ fn main() {
     }
     if arguments.len() == 2 && matches!(arguments[1].as_str(), "--help" | "-h") {
         println!("{}", usage(Locale::English));
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("init") {
+        let directory = arguments
+            .get(2)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        if arguments.len() > 3 {
+            eprintln!("{}", usage(Locale::English));
+            process::exit(64);
+        }
+        match initialize_project(&directory) {
+            Ok(manifest) => println!(
+                "Created Padma project `{}`. Run: cd {} && padma .",
+                manifest.name,
+                directory.display()
+            ),
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+    if arguments.len() == 2 && Path::new(&arguments[1]).is_dir() {
+        let directory = Path::new(&arguments[1]);
+        let (manifest, entry_path) = match load_project_manifest(directory) {
+            Ok(project) => project,
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        };
+        let source = match fs::read_to_string(&entry_path) {
+            Ok(source) => project_source_with_locale(source, &manifest.locale),
+            Err(error) => {
+                eprintln!("P1032: cannot read `{}`: {error}", entry_path.display());
+                process::exit(66);
+            }
+        };
+        let (program, locale) = match compile(&source) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    format_diagnostic(&entry_path.to_string_lossy(), &source, &error)
+                );
+                process::exit(1);
+            }
+        };
+        let mut interpreter = Interpreter::with_source_path(locale, entry_path.clone());
+        if let Err(error) = interpreter.run(&program) {
+            eprintln!(
+                "{}",
+                format_diagnostic(&entry_path.to_string_lossy(), &source, &error)
+            );
+            process::exit(1);
+        }
+        for line in interpreter.output {
+            println!("{line}");
+        }
         return;
     }
     let (command, path) = match arguments.len() {
@@ -2815,6 +3222,46 @@ mod tests {
         let mut interpreter = Interpreter::new(locale);
         interpreter.run(&program)?;
         Ok(interpreter.output)
+    }
+
+    #[test]
+    fn initializes_and_runs_a_manifest_project() {
+        let directory = module_fixture_dir("project-init");
+        let project_directory = directory.join("bangla-project");
+        let manifest = initialize_project(&project_directory).unwrap();
+        assert_eq!(manifest.name, "bangla-project");
+        assert!(project_directory.join("padma.toml").is_file());
+        assert!(project_directory.join("padma.lock").is_file());
+
+        let (loaded, entry) = load_project_manifest(&project_directory).unwrap();
+        let source =
+            project_source_with_locale(fs::read_to_string(&entry).unwrap(), &loaded.locale);
+        let (program, locale) = compile(&source).unwrap();
+        let mut interpreter = Interpreter::with_source_path(locale, entry);
+        interpreter.run(&program).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(interpreter.output, vec!["পদ্ম project শুরু হয়েছে"]);
+    }
+
+    #[test]
+    fn rejects_unsafe_or_untrusted_manifest_configuration() {
+        let dependencies = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[dependencies]\nnetwork = \"1\"\n",
+        )
+        .unwrap_err();
+        assert!(dependencies.starts_with("P1033"));
+
+        let unsafe_entry = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"../outside.pd\"\n",
+        )
+        .unwrap();
+        assert!(safe_project_relative_path(&unsafe_entry.entry).is_err());
+
+        let invalid_locale = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"mixed\"\n",
+        )
+        .unwrap_err();
+        assert!(invalid_locale.starts_with("P1032"));
     }
 
     #[test]
@@ -3184,6 +3631,107 @@ mod tests {
         let output = run_file(&main).unwrap();
         fs::remove_dir_all(directory).unwrap();
         assert_eq!(output, vec!["হ্যালো রাফি"]);
+    }
+
+    #[test]
+    fn imports_english_module_into_an_isolated_namespace() {
+        let directory = module_fixture_dir("namespaced-import");
+        let module = directory.join("lesson.pd");
+        let main = directory.join("main.pd");
+        fs::write(
+            &module,
+            "let course = \"Padma\"\nfunction double(value) {\n  return value * 2\n}\nfunction course_name() {\n  return course\n}\nfunction describe(value) {\n  return double(value)\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &main,
+            "import \"lesson.pd\" as lesson\nprint lesson.course\nprint lesson.double(21)\nprint lesson.course_name()\nprint lesson.describe(3)\n",
+        )
+        .unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["Padma", "42", "Padma", "6"]);
+    }
+
+    #[test]
+    fn imports_bangla_module_with_hisabe_namespace_alias() {
+        let directory = module_fixture_dir("bangla-namespaced-import");
+        let module = directory.join("বার্তা.pd");
+        let main = directory.join("main.pd");
+        fs::write(
+            &module,
+            "ধরি শিরোনাম = \"পদ্ম\"\nফাংশন বার্তা(নাম) {\n  ফেরত \"{শিরোনাম}: {নাম}\"\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &main,
+            "ইমপোর্ট \"বার্তা.pd\" হিসেবে লেখা\nদেখাও লেখা.শিরোনাম\nদেখাও লেখা.বার্তা(\"রাফি\")\n",
+        )
+        .unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["পদ্ম", "পদ্ম: রাফি"]);
+    }
+
+    #[test]
+    fn alias_imports_do_not_leak_module_values_to_the_caller() {
+        let directory = module_fixture_dir("namespace-isolation");
+        let module = directory.join("private.pd");
+        let main = directory.join("main.pd");
+        fs::write(&module, "let private_value = 7\n").unwrap();
+        fs::write(
+            &main,
+            "import \"private.pd\" as private\nprint private_value\n",
+        )
+        .unwrap();
+        let error = run_file(&main).unwrap_err();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(error.code, "P1007");
+    }
+
+    #[test]
+    fn explicit_exports_filter_namespaced_module_symbols() {
+        let directory = module_fixture_dir("explicit-exports");
+        let module = directory.join("library.pd");
+        let public_main = directory.join("public-main.pd");
+        let private_main = directory.join("private-main.pd");
+        fs::write(
+            &module,
+            "export let public_name = \"Padma\"\nlet private_name = \"hidden\"\nexport function label() {\n  return public_name\n}\nfunction private_label() {\n  return private_name\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &public_main,
+            "import \"library.pd\" as library\nprint library.public_name\nprint library.label()\n",
+        )
+        .unwrap();
+        let output = run_file(&public_main).unwrap();
+        assert_eq!(output, vec!["Padma", "Padma"]);
+
+        fs::write(
+            &private_main,
+            "import \"library.pd\" as library\nprint library.private_name\n",
+        )
+        .unwrap();
+        let error = run_file(&private_main).unwrap_err();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(error.code, "P1007");
+    }
+
+    #[test]
+    fn supports_bangla_export_declarations() {
+        let directory = module_fixture_dir("bangla-exports");
+        let module = directory.join("বই.pd");
+        let main = directory.join("main.pd");
+        fs::write(
+            &module,
+            "রপ্তানি ধরি নাম = \"পদ্ম\"\nরপ্তানি ফাংশন শিরোনাম() {\n  ফেরত নাম\n}\n",
+        )
+        .unwrap();
+        fs::write(&main, "ইমপোর্ট \"বই.pd\" হিসেবে বই\nদেখাও বই.শিরোনাম()\n").unwrap();
+        let output = run_file(&main).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(output, vec!["পদ্ম"]);
     }
 
     #[test]

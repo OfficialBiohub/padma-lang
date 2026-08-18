@@ -35,6 +35,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1029 | Runtime | JSON text could not be parsed, or a Padma value could not be represented as JSON. |
 | P1030 | Safety/type | URL is not a supported absolute HTTP or HTTPS URL. |
 | P1031 | Runtime | `text.format` placeholder is missing or malformed. |
+| P1032 | Project | Project manifest or entrypoint is invalid or cannot be read. |
+| P1033 | Project safety | Third-party dependencies are not supported until a trusted registry policy exists. |
 
 ## Example
 

@@ -1,0 +1,4 @@
+import "public-library.pd" as library
+
+print library.title
+print library.greeting("Rafi")

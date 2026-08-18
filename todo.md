@@ -35,7 +35,12 @@
 - [x] Add standard-library integration tests, examples, and bilingual documentation for the remaining M3 APIs.
 - [x] Add deterministic JSON conversion and safe HTTP/HTTPS URL inspection APIs.
 - [x] Add text, deterministic math, bounded time, and safe relative-file read/write/exists standard-library APIs.
-- [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.
+- [x] Add module namespaces, public exports, a project manifest, lockfile design, and a no-registry-yet trust policy.
+- [x] Add `padma init` with a minimal `padma.toml`, `padma.lock`, and Bengali-English starter source.
+- [x] Add manifest-driven project execution through `padma .`, with validated relative entrypoints and locale overrides.
+- [x] Define and enforce a no-registry-yet dependency policy that rejects untrusted dependency declarations.
+- [x] Add import aliases and public export rules so modules stop leaking all internal names into callers.
+- [x] Document local module/project layout, lockfile schema, compatibility policy, and future registry trust requirements.
 - [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.
 - [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
 - [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.

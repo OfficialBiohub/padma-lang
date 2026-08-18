@@ -20,7 +20,7 @@ Padma allows Bengali and English keywords to represent the **same internal synta
 | Bengali digits | `০`–`৯` | `0`–`9` |
 | Lists | Indexing plus `.get()`, `.set()`, `.push()`, `.remove()`, `.len()`, and `.contains()` | Same APIs |
 | Maps/dictionaries | Text-key maps with `.get()` and `.set()` | Text-key maps with `.get()` and `.set()` |
-| Standard library | `text.*`, `math.*`, bounded `time.*`, and safe `file.*` helpers | Same APIs in Bangla source |
+| Standard library | `text.*`, `math.*`, `json.*`, `url.*`, `path.*`, bounded `time.*`, safe `file.*`, and non-cryptographic `random.*` helpers | Same APIs in Bangla source |
 | Localized diagnostics | Bengali source → Bengali error | English source → English error |
 
 ## Quick start
@@ -79,7 +79,7 @@ For a multi-line `if`, `while`, or function block, continue entering lines after
 
 If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
 
-For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, modules, and initial standard-library APIs. Static checking and package tooling remain active implementation milestones rather than undocumented claims.
+For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, local-first projects, modules, public exports, and initial standard-library APIs. Static checking, capability grants, and package tooling remain active implementation milestones rather than undocumented claims.
 
 ## Your first Padma program
 
@@ -253,6 +253,20 @@ padma main.pd
 padma মডিউল-demo.pd
 ```
 
+### Projects
+
+Create a local-first Padma project and run the declared entrypoint with one command:
+
+```bash
+padma init my-project
+cd my-project
+padma .
+```
+
+The generated `padma.toml` defines the project name, version, source entrypoint, and diagnostic locale. `padma.lock` is generated for future reproducible dependency resolution. Padma currently rejects remote or third-party dependencies deliberately; it will not download or execute package code until a signed registry and lockfile trust policy exist. Read [`docs/PROJECTS.md`](docs/PROJECTS.md) for the complete manifest schema and safety model.
+
+For larger local projects, `import "module.pd" as library` creates an isolated namespace. Use `export let ...` / `export function ...`—or Bangla `রপ্তানি ধরি ...` / `রপ্তানি ফাংশন ...`—to declare the public interface of a new module. Runnable examples are in `examples/modules/exports-demo.pd`.
+
 ### Interactive input
 
 Termux scripts can read a line from the user with the built-in `input()` function:
@@ -293,6 +307,8 @@ Use this only for content you own or are authorized to download and in complianc
 |---|---|
 | `padma <file.pd>` | Parse and interpret a Padma source file, like `python file.py`. |
 | `padma` | Open the interactive Padma REPL. |
+| `padma .` | Run the manifest entrypoint from a `padma.toml` project directory. |
+| `padma init [folder]` | Create a local Padma project with a manifest, lockfile, and Bangla starter source. |
 | `padma run <file.pd>` | Backward-compatible explicit run form. |
 | `padma check <file.pd>` | Check the source syntax without executing it. |
 | `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
