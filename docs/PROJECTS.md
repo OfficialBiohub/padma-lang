@@ -34,6 +34,9 @@ filesystem = ["read", "write"]
 network = ["http"]
 process = ["git", "yt-dlp"]
 media = ["download"]
+
+[lint]
+disable = []
 ```
 
 | Field | Requirement |
@@ -44,6 +47,8 @@ media = ["download"]
 | `locale` | `bn`, `en`, or `auto`. It controls diagnostic language for the entry source. |
 
 `padma .` reads the manifest from the provided directory, validates the entry path, then runs the entry file. Imports remain relative to the importing file and keep the same path-safety restrictions.
+
+The optional `[lint]` section records reviewed source-style warning suppressions. Its `disable` list accepts only stable rule IDs documented in [`LINTING.md`](LINTING.md); unknown or duplicate IDs are rejected as `P1032`.
 
 ## Capability grants
 

@@ -2820,9 +2820,11 @@ struct ProjectManifest {
     entry: String,
     locale: String,
     capabilities: BTreeSet<String>,
+    lint_disabled: BTreeSet<String>,
 }
 
 const PROCESS_CAPABILITIES: [&str; 6] = ["git", "yt-dlp", "curl", "ffmpeg", "python", "python3"];
+const LINT_RULES: [&str; 3] = ["L1001", "L1002", "L1003"];
 
 fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
     let value = value.trim();
@@ -2886,6 +2888,8 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
     let mut fields = BTreeMap::new();
     let mut capabilities = BTreeSet::new();
     let mut capability_fields = BTreeSet::new();
+    let mut lint_disabled = BTreeSet::new();
+    let mut lint_fields = BTreeSet::new();
     for (line_number, raw_line) in source.lines().enumerate() {
         let line = raw_line.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
@@ -2893,7 +2897,11 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
         }
         if line.starts_with('[') && line.ends_with(']') {
             section = line[1..line.len() - 1].trim().to_string();
-            if section != "padma" && section != "dependencies" && section != "capabilities" {
+            if section != "padma"
+                && section != "dependencies"
+                && section != "capabilities"
+                && section != "lint"
+            {
                 return Err(format!(
                     "P1032: unsupported manifest section `{section}` on line {}",
                     line_number + 1
@@ -2926,6 +2934,35 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
             capabilities.extend(grants);
             continue;
         }
+        if section == "lint" {
+            if key != "disable" {
+                return Err(format!(
+                    "P1032: unsupported lint field `{key}` on line {}",
+                    line_number + 1
+                ));
+            }
+            if !lint_fields.insert(key.to_string()) {
+                return Err(format!(
+                    "P1032: duplicate lint field `{key}` on line {}",
+                    line_number + 1
+                ));
+            }
+            for rule in parse_manifest_string_list(raw_value, line_number + 1)? {
+                if !LINT_RULES.contains(&rule.as_str()) {
+                    return Err(format!(
+                        "P1032: unsupported lint rule `{rule}` on line {}",
+                        line_number + 1
+                    ));
+                }
+                if !lint_disabled.insert(rule.clone()) {
+                    return Err(format!(
+                        "P1032: duplicate disabled lint rule `{rule}` on line {}",
+                        line_number + 1
+                    ));
+                }
+            }
+            continue;
+        }
         let value = raw_value.trim().trim_matches('"').to_string();
         if section != "padma" || !matches!(key, "name" | "version" | "entry" | "locale") {
             return Err(format!(
@@ -2956,6 +2993,7 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
             .cloned()
             .unwrap_or_else(|| "auto".to_string()),
         capabilities,
+        lint_disabled,
     };
     if !matches!(manifest.locale.as_str(), "auto" | "bn" | "en") {
         return Err("P1032: `locale` must be `auto`, `bn`, or `en`".to_string());
@@ -2991,6 +3029,27 @@ fn load_project_manifest(directory: &Path) -> Result<(ProjectManifest, PathBuf),
     Ok((manifest, entry))
 }
 
+fn lint_disabled_rules_for_path(path: &str) -> Result<BTreeSet<String>, String> {
+    let source_path = Path::new(path);
+    let mut directory = source_path.parent().unwrap_or_else(|| Path::new("."));
+    loop {
+        let manifest_path = directory.join("padma.toml");
+        if manifest_path.is_file() {
+            let source = fs::read_to_string(&manifest_path).map_err(|error| {
+                format!("P1032: cannot read `{}`: {error}", manifest_path.display())
+            })?;
+            return parse_project_manifest(&source).map(|manifest| manifest.lint_disabled);
+        }
+        let Some(parent) = directory.parent() else {
+            return Ok(BTreeSet::new());
+        };
+        if parent == directory {
+            return Ok(BTreeSet::new());
+        }
+        directory = parent;
+    }
+}
+
 fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
     if directory.exists() {
         let mut entries = fs::read_dir(directory)
@@ -3017,13 +3076,14 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
         entry: "src/main.pd".to_string(),
         locale: "bn".to_string(),
         capabilities: BTreeSet::new(),
+        lint_disabled: BTreeSet::new(),
     };
     fs::create_dir_all(directory.join("src"))
         .map_err(|error| format!("P1032: cannot create project source directory: {error}"))?;
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\n",
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
             manifest.name, manifest.version, manifest.entry, manifest.locale
         ),
     )
@@ -3449,6 +3509,20 @@ fn lint_source(source: &str) -> (Locale, Vec<LintWarning>) {
     (locale, warnings)
 }
 
+fn lint_source_with_disabled(
+    source: &str,
+    disabled_rules: &BTreeSet<String>,
+) -> (Locale, Vec<LintWarning>) {
+    let (locale, warnings) = lint_source(source);
+    (
+        locale,
+        warnings
+            .into_iter()
+            .filter(|warning| !disabled_rules.contains(warning.code))
+            .collect(),
+    )
+}
+
 fn format_lint_warning(path: &str, warning: &LintWarning) -> String {
     let label = match warning.locale {
         Locale::Bangla => "সতর্কতা",
@@ -3469,8 +3543,8 @@ fn format_lint_warning(path: &str, warning: &LintWarning) -> String {
     )
 }
 
-fn lint_json(path: &str, source: &str) -> String {
-    let (locale, warnings) = lint_source(source);
+fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<String>) -> String {
+    let (locale, warnings) = lint_source_with_disabled(source, disabled_rules);
     let locale = match locale {
         Locale::Bangla => "bn",
         Locale::English => "en",
@@ -3676,9 +3750,19 @@ fn main() {
             }
             process::exit(1);
         }
-        let (locale, warnings) = lint_source(&source);
+        let disabled_rules = match lint_disabled_rules_for_path(path) {
+            Ok(rules) => rules,
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        };
+        let (locale, warnings) = lint_source_with_disabled(&source, &disabled_rules);
         if json_lint {
-            println!("{}", lint_json(path, &source));
+            println!(
+                "{}",
+                lint_json_with_disabled(path, &source, &disabled_rules)
+            );
         } else if warnings.is_empty() {
             match locale {
                 Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো lint warning পাওয়া যায়নি।"),
@@ -3922,7 +4006,12 @@ mod tests {
         let (_, warnings) = lint_source("print \"ধরি let\"\n# দেখাও\n");
         assert!(!warnings.iter().any(|warning| warning.code == "L1003"));
 
-        let json: JsonValue = serde_json::from_str(&lint_json("mixed.pd", source)).unwrap();
+        let json: JsonValue = serde_json::from_str(&lint_json_with_disabled(
+            "mixed.pd",
+            source,
+            &BTreeSet::new(),
+        ))
+        .unwrap();
         assert_eq!(json["status"], "warning");
         assert_eq!(json["warnings"][0]["code"], "L1001");
     }
@@ -3991,6 +4080,23 @@ mod tests {
         assert!(manifest.capabilities.contains("filesystem:read"));
         assert!(manifest.capabilities.contains("process:git"));
         assert_eq!(manifest.capabilities.len(), 6);
+
+        let lint_manifest = parse_project_manifest(
+            "[padma]\nname = \"lint-demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[lint]\ndisable = [\"L1003\"]\n",
+        )
+        .unwrap();
+        assert!(lint_manifest.lint_disabled.contains("L1003"));
+        let (_, warnings) = lint_source_with_disabled(
+            "let name = \"Rafi\"\nদেখাও name\n",
+            &lint_manifest.lint_disabled,
+        );
+        assert!(!warnings.iter().any(|warning| warning.code == "L1003"));
+
+        let unknown_lint_rule = parse_project_manifest(
+            "[padma]\nname = \"lint-demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[lint]\ndisable = [\"L9999\"]\n",
+        )
+        .unwrap_err();
+        assert!(unknown_lint_rule.contains("unsupported lint rule"));
 
         let duplicate = parse_project_manifest(
             "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[capabilities]\nprocess = [\"git\", \"git\"]\n",

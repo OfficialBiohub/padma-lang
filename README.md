@@ -323,6 +323,8 @@ Use this only for content you own or are authorized to download and in complianc
 | `padma --version` | Print the installed compiler version. |
 | `padma --help` | Show CLI usage and interactive-shell commands. |
 
+`padma lint` is non-executing and returns `1` when it finds warnings, making it suitable for CI. Project owners can record a reviewed, narrowly scoped lint suppression in `[lint].disable`; see [`docs/LINTING.md`](docs/LINTING.md).
+
 ## Diagnostic language
 
 Padma detects the source language from its keywords. A Bengali source file receives Bengali diagnostics, while an English source file receives English diagnostics. Add one of the following comments at the top of a file when you need to override automatic detection:

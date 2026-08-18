@@ -17,4 +17,15 @@ Lint exits with status `0` when no warnings are found and `1` when it reports wa
 
 `padma lint --json` writes one JSON object to standard output. Its stable fields are `status`, `path`, `locale`, `warnings[].code`, `warnings[].message`, `warnings[].hint`, and one-based `warnings[].range` positions. Unknown future fields must be ignored by clients.
 
-The first lint release deliberately has a fixed, small rule set. Manifest-level rule selection, warning suppression, severity overrides, and semantic lint rules remain future M6 work; no source comment silently disables a warning today.
+## Reviewed project suppression
+
+For a project source file, Padma searches from that file's directory upward for the nearest `padma.toml`. A project owner can suppress a narrow, known rule only through a reviewed manifest entry:
+
+```toml
+[lint]
+disable = ["L1003"]
+```
+
+Only `L1001`, `L1002`, and `L1003` are accepted. Unknown or duplicate entries fail manifest validation with `P1032`; a source comment cannot silently disable a warning. Run lint against the project source path—for example, `padma lint src/main.pd`—so its nearest project manifest is found.
+
+Severity overrides and semantic lint rules remain future M6 work.
