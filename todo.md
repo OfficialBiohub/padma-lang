@@ -90,7 +90,12 @@
 - [x] Execute bridge programs with fixed argument vectors, project-root-scoped script paths, bounded input/output, captured stderr, and localized failure diagnostics.
 - [x] Add Bangla-English regression tests for successful typed exchange, denied capabilities, invalid JSON, non-zero exit, missing runtime, and unsafe paths.
 - [x] Document a minimal Termux installation and use workflow for optional Python and Node.js bridges, including capability manifest examples and security boundaries.
-- [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
+- [x] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
+- [x] Extend the network library with bounded `http.post` and `http.json` JSON workflows that use validated HTTP(S) URLs, timeouts, response limits, and `network` capability grants.
+- [x] Add provider-neutral `ai.request` with an explicit endpoint, caller-supplied environment variable name instead of literal secrets, and decoded JSON data rather than executable code.
+- [x] Add local backend response and JSON-file automation primitives without exposing a general public server or arbitrary shell command API.
+- [x] Add capability, URL, JSON-boundary, and safe-path regression coverage; stable existing bilingual diagnostics apply to denied access and malformed data.
+- [x] Publish Termux-first HTTP, AI, and automation examples with manifest capability grants, secret-handling guidance, and an explicit warning against embedding API keys in Padma source.
 - [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
 - [ ] Publish Bangla-first tutorials, a reference manual, API documentation, contribution rules, a code of conduct, and maintainership policy.
 - [ ] Add static type checking and actionable bilingual diagnostics without breaking the interpreter.

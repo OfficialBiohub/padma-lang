@@ -579,6 +579,35 @@ fn safe_relative_path(path: &str) -> Result<PathBuf, ()> {
     Ok(normalized)
 }
 
+fn safe_http_url(url: &str) -> bool {
+    if !(url.starts_with("https://") || url.starts_with("http://"))
+        || url.chars().any(char::is_whitespace)
+        || url.contains('@')
+    {
+        return false;
+    }
+    let host = url
+        .split_once("://")
+        .map(|(_, rest)| {
+            rest.split('/')
+                .next()
+                .unwrap_or(rest)
+                .split(':')
+                .next()
+                .unwrap_or(rest)
+        })
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    !host.is_empty()
+        && host != "localhost"
+        && host != "0.0.0.0"
+        && host != "127.0.0.1"
+        && !host.starts_with("127.")
+        && !host.starts_with("10.")
+        && !host.starts_with("192.168.")
+        && !host.starts_with("169.254.")
+}
+
 fn next_non_cryptographic_random() -> u64 {
     let time_seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2603,7 +2632,7 @@ impl Interpreter {
                     let url = self.evaluate(&arguments[0])?;
                     let url = expect_string(&url, self.locale, *position, "url")?;
                     self.require_capability("network:http", name, *position)?;
-                    if !(url.starts_with("https://") || url.starts_with("http://")) {
+                    if !safe_http_url(url) {
                         return Err(error_for(self.locale, "P1016", *position, url));
                     }
                     let result = process::Command::new("curl")
@@ -2625,6 +2654,200 @@ impl Interpreter {
                     return Ok(Value::String(
                         String::from_utf8_lossy(&result.stdout).to_string(),
                     ));
+                }
+                if name == "http.post" || name == "http.json" {
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if values.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let url = expect_string(&values[0], self.locale, *position, "url")?;
+                    if !safe_http_url(url) {
+                        return Err(error_for(self.locale, "P1016", *position, url));
+                    }
+                    self.require_capability("network:http", name, *position)?;
+                    let json =
+                        serde_json::to_string(&value_to_json(&values[1]).map_err(|detail| {
+                            error_for(self.locale, "P1029", *position, &detail)
+                        })?)
+                        .map_err(|_| error_for(self.locale, "P1029", *position, "request data"))?;
+                    if json.len() > 262_144 {
+                        return Err(error_for(self.locale, "P1037", *position, "http request"));
+                    }
+                    let result = process::Command::new("curl")
+                        .args([
+                            "--fail",
+                            "--silent",
+                            "--show-error",
+                            "--location",
+                            "--max-time",
+                            "30",
+                            "--max-filesize",
+                            "262144",
+                            "--request",
+                            "POST",
+                            "--header",
+                            "Content-Type: application/json",
+                            "--data-binary",
+                            &json,
+                            "--",
+                            url,
+                        ])
+                        .output()
+                        .map_err(|_| error_for(self.locale, "P1018", *position, "curl"))?;
+                    if !result.status.success() || result.stdout.len() > 262_144 {
+                        return Err(error_for(self.locale, "P1019", *position, "curl"));
+                    }
+                    if name == "http.json" {
+                        let json: JsonValue =
+                            serde_json::from_slice(&result.stdout).map_err(|_| {
+                                error_for(self.locale, "P1029", *position, "http.json response")
+                            })?;
+                        return value_from_json(json).map_err(|_| {
+                            error_for(self.locale, "P1029", *position, "http.json response")
+                        });
+                    }
+                    return Ok(Value::String(
+                        String::from_utf8_lossy(&result.stdout).to_string(),
+                    ));
+                }
+                if name == "backend.response" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let status = self.evaluate(&arguments[0])?;
+                    let headers = self.evaluate(&arguments[1])?;
+                    let body = self.evaluate(&arguments[2])?;
+                    let Value::Number(status) = status else {
+                        return Err(error_for(self.locale, "P1010", *position, "status"));
+                    };
+                    if !(100.0..=599.0).contains(&status) || status.fract() != 0.0 {
+                        return Err(error_for(self.locale, "P1010", *position, "status"));
+                    }
+                    let Value::Map(headers) = headers else {
+                        return Err(error_for(self.locale, "P1010", *position, "headers"));
+                    };
+                    let mut result = BTreeMap::new();
+                    result.insert("status".into(), Value::Number(status));
+                    result.insert("headers".into(), Value::Map(headers));
+                    result.insert("body".into(), body);
+                    return Ok(Value::Map(result));
+                }
+                if name == "automation.write_json" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&path, self.locale, *position, "path")?;
+                    self.require_capability("filesystem:write", name, *position)?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let json =
+                        serde_json::to_string_pretty(&value_to_json(&value).map_err(|detail| {
+                            error_for(self.locale, "P1029", *position, &detail)
+                        })?)
+                        .map_err(|_| {
+                            error_for(self.locale, "P1029", *position, "automation data")
+                        })?;
+                    let resolved = self
+                        .resolve_file_path(path)
+                        .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
+                    fs::write(resolved, json)
+                        .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "ai.request" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let endpoint = self.evaluate(&arguments[0])?;
+                    let endpoint = expect_string(&endpoint, self.locale, *position, "endpoint")?;
+                    let secret_name = self.evaluate(&arguments[1])?;
+                    let secret_name = expect_string(
+                        &secret_name,
+                        self.locale,
+                        *position,
+                        "secret environment name",
+                    )?;
+                    if !secret_name
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_uppercase() || ch == '_')
+                        || !secret_name
+                            .chars()
+                            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+                    {
+                        return Err(error_for(
+                            self.locale,
+                            "P1010",
+                            *position,
+                            "secret environment name",
+                        ));
+                    }
+                    if !safe_http_url(endpoint) {
+                        return Err(error_for(self.locale, "P1016", *position, endpoint));
+                    }
+                    self.require_capability("network:ai", name, *position)?;
+                    let secret = env::var(secret_name).map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1013",
+                            *position,
+                            "AI secret environment variable",
+                        )
+                    })?;
+                    if secret.is_empty() || secret.chars().any(char::is_control) {
+                        return Err(error_for(
+                            self.locale,
+                            "P1013",
+                            *position,
+                            "AI secret environment variable",
+                        ));
+                    }
+                    let payload = self.evaluate(&arguments[2])?;
+                    let payload =
+                        serde_json::to_string(&value_to_json(&payload).map_err(|detail| {
+                            error_for(self.locale, "P1029", *position, &detail)
+                        })?)
+                        .map_err(|_| error_for(self.locale, "P1029", *position, "AI payload"))?;
+                    if payload.len() > 262_144 {
+                        return Err(error_for(self.locale, "P1037", *position, "AI payload"));
+                    }
+                    let path = env::var_os("PATH")
+                        .ok_or_else(|| error_for(self.locale, "P1018", *position, "curl"))?;
+                    let result = process::Command::new("curl")
+                        .env_clear()
+                        .env("PATH", path)
+                        .args([
+                            "--fail",
+                            "--silent",
+                            "--show-error",
+                            "--location",
+                            "--max-time",
+                            "30",
+                            "--max-filesize",
+                            "262144",
+                            "--request",
+                            "POST",
+                            "--header",
+                            "Content-Type: application/json",
+                            "--header",
+                            &format!("Authorization: Bearer {secret}"),
+                            "--data-binary",
+                            &payload,
+                            "--",
+                            endpoint,
+                        ])
+                        .output()
+                        .map_err(|_| error_for(self.locale, "P1018", *position, "curl"))?;
+                    if !result.status.success() || result.stdout.len() > 262_144 {
+                        return Err(error_for(self.locale, "P1019", *position, "AI request"));
+                    }
+                    let json: JsonValue = serde_json::from_slice(&result.stdout)
+                        .map_err(|_| error_for(self.locale, "P1029", *position, "AI response"))?;
+                    return value_from_json(json)
+                        .map_err(|_| error_for(self.locale, "P1029", *position, "AI response"));
                 }
                 if name == "bridge.call" {
                     if arguments.len() != 3 {

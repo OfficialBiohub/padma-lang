@@ -163,6 +163,39 @@ json.dump({"average": sum(data["scores"]) / len(data["scores"])}, sys.stdout)
 
 `padma capabilities .` দিয়ে `process:python` দেখুন, তারপর `padma .` চালান। JavaScript-এর জন্য `pkg install nodejs -y`, `process = ["node"]`, এবং `bridge.call("javascript", "bridges/helper.js", data)` ব্যবহার করুন। Bridge input ও output JSON data হতে হবে; 256 KiB-এর বেশি data বা 10 সেকেন্ডের বেশি সময় নিলে Padma error দেখাবে।
 
+## ৯. HTTP API এবং AI service
+
+HTTP JSON API ব্যবহার করতে project manifest-এ শুধু দরকারি permission দিন:
+
+```toml
+[capabilities]
+network = ["http"]
+```
+
+```padma
+ধরি উত্তর = http.json("https://api.example.com/tasks", {"name": "Padma"})
+দেখাও উত্তর
+```
+
+AI provider-এর key কখনও `.pd` file, `padma.toml`, screenshot, বা GitHub commit-এ লিখবেন না। Termux shell-এ temporary environment variable দিন:
+
+```bash
+export PADMA_AI_KEY='your-provider-key'
+```
+
+তারপর manifest-এ `network = ["ai"]` দিন এবং explicit endpoint ব্যবহার করুন:
+
+```padma
+ধরি উত্তর = ai.request(
+  "https://provider.example/v1/chat/completions",
+  "PADMA_AI_KEY",
+  {"model": "chosen-model", "messages": [{"role": "user", "content": "বাংলায় উত্তর দাও"}]}
+)
+দেখাও উত্তর
+```
+
+AI output data হিসেবে নিন; সেটি shell command, Padma code, বা Python code হিসেবে automatic চালাবেন না। `backend.response(status, headers, body)` দিয়ে validated response data বানানো এবং `automation.write_json("output/job.json", data)` দিয়ে project-এর ভেতরে JSON result file লেখা যায়। এই milestone-এ Padma নিজে public web server port খোলে না।
+
 ## সাহায্য দরকার হলে
 
 এই command-গুলোর outputসহ issue report করুন:
