@@ -79,7 +79,7 @@ For a multi-line `if`, `while`, or function block, continue entering lines after
 
 If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
 
-For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, local-first projects, modules, public exports, standard-library APIs, manifest capability grants, and JSON parser diagnostics. Formatting, linting, static semantic checks, and package tooling remain active implementation milestones rather than undocumented claims.
+For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, local-first projects, modules, public exports, standard-library APIs, manifest capability grants, JSON diagnostics, formatting, linting, and conservative static semantic checks. Broader static analysis, configurable lint policies, and package tooling remain active implementation milestones rather than undocumented claims.
 
 ## Your first Padma program
 
@@ -313,7 +313,7 @@ Use this only for content you own or are authorized to download and in complianc
 | `padma init [folder]` | Create a local Padma project with a manifest, lockfile, and Bangla starter source. |
 | `padma capabilities [project]` | Print declared project capability grants without running project code. |
 | `padma run <file.pd>` | Backward-compatible explicit run form. |
-| `padma check <file.pd>` | Check the source syntax without executing it. |
+| `padma check <file.pd>` | Check syntax and supported static semantic errors without executing code. |
 | `padma check --json <file.pd>` | Emit one machine-readable diagnostic report for editors and CI. |
 | `padma fmt <file.pd>` | Format a syntactically valid source file in place. |
 | `padma fmt --check <file.pd>` | Exit non-zero when formatting changes would be needed, without modifying the file. |

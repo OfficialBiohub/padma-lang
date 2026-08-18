@@ -53,7 +53,8 @@
 - [ ] Add `padma lint` with documented rule identifiers, warning exit policy, and manifest-configurable rule selection.
 - [x] Add a deterministic `padma lint` CLI with localized `L1001`–`L1003` warnings and JSON output.
 - [ ] Add manifest-configurable lint rule selection, severity overrides, and reviewed suppression syntax.
-- [ ] Extend `padma check` from parser recovery to non-executing static semantic checks.
+- [x] Extend `padma check` from parser recovery to non-executing static semantic checks for provable literal division by zero.
+- [ ] Extend static checks conservatively with scope-aware name resolution, call arity, and safe literal-type rules.
 - [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.

@@ -2,7 +2,7 @@
 
 Padma diagnostics use a stable `P` code, a source position, a localized title, and a practical hint. Bengali source defaults to Bengali diagnostics; English source defaults to English diagnostics. Add `# padma:locale=bn` or `# padma:locale=en` to override automatic detection.
 
-`padma check file.pd` is intended for editing and CI. It recovers at statement boundaries where safe, so it can report multiple independent syntax errors in a single run. Running a file stops at the first runtime error because continuing after a failed side effect could be unsafe.
+`padma check file.pd` is intended for editing and CI. It recovers at statement boundaries where safe, so it can report multiple independent syntax errors in a single run. It also performs non-executing static checks where an error is provable from source alone; the first rule reports literal `number / 0` as `P1011`. Running a file stops at the first runtime error because continuing after a failed side effect could be unsafe.
 
 | Code | Category | Meaning |
 |---|---|---|

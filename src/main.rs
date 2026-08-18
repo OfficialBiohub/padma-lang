@@ -3052,12 +3052,121 @@ fn project_source_with_locale(source: String, locale: &str) -> String {
     }
 }
 
-fn check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
+fn parse_source_recovering(source: &str) -> Result<(Vec<Stmt>, Locale), Vec<PadmaError>> {
     let locale = Locale::from_source(source);
     let tokens = Lexer::new(source, locale)
         .tokenize()
         .map_err(|error| vec![error])?;
-    let (_, errors) = Parser::new(tokens, locale).parse_recovering();
+    let (program, errors) = Parser::new(tokens, locale).parse_recovering();
+    if errors.is_empty() {
+        Ok((program, locale))
+    } else {
+        Err(errors)
+    }
+}
+
+fn static_check_expression(expression: &Expr, locale: Locale, errors: &mut Vec<PadmaError>) {
+    match expression {
+        Expr::Unary { right, .. } => static_check_expression(right, locale, errors),
+        Expr::Binary {
+            left,
+            operator,
+            right,
+            position,
+        } => {
+            static_check_expression(left, locale, errors);
+            static_check_expression(right, locale, errors);
+            if matches!(operator, TokenKind::Slash)
+                && matches!(right.as_ref(), Expr::Literal(Value::Number(value), _) if *value == 0.0)
+            {
+                errors.push(error_for(locale, "P1011", *position, "division"));
+            }
+        }
+        Expr::Call { arguments, .. } => {
+            for argument in arguments {
+                static_check_expression(argument, locale, errors);
+            }
+        }
+        Expr::Index { target, index, .. } => {
+            static_check_expression(target, locale, errors);
+            static_check_expression(index, locale, errors);
+        }
+        Expr::Slice {
+            target, start, end, ..
+        } => {
+            static_check_expression(target, locale, errors);
+            if let Some(start) = start {
+                static_check_expression(start, locale, errors);
+            }
+            if let Some(end) = end {
+                static_check_expression(end, locale, errors);
+            }
+        }
+        Expr::List(values) => {
+            for value in values {
+                static_check_expression(value, locale, errors);
+            }
+        }
+        Expr::Map(entries) => {
+            for (key, value) in entries {
+                static_check_expression(key, locale, errors);
+                static_check_expression(value, locale, errors);
+            }
+        }
+        Expr::Literal(_, _) | Expr::Variable(_, _) => {}
+    }
+}
+
+fn static_check_statements(statements: &[Stmt], locale: Locale, errors: &mut Vec<PadmaError>) {
+    for statement in statements {
+        match statement {
+            Stmt::Let { value, .. } | Stmt::Print { value } | Stmt::Expression { value } => {
+                static_check_expression(value, locale, errors)
+            }
+            Stmt::Assign { value, .. } => static_check_expression(value, locale, errors),
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                static_check_expression(condition, locale, errors);
+                static_check_statements(then_branch, locale, errors);
+                static_check_statements(else_branch, locale, errors);
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                static_check_expression(condition, locale, errors);
+                static_check_statements(body, locale, errors);
+            }
+            Stmt::For {
+                collection, body, ..
+            } => {
+                static_check_expression(collection, locale, errors);
+                static_check_statements(body, locale, errors);
+            }
+            Stmt::Function { body, .. } => static_check_statements(body, locale, errors),
+            Stmt::Return { value } => {
+                if let Some(value) = value {
+                    static_check_expression(value, locale, errors);
+                }
+            }
+            Stmt::Export(inner) => {
+                static_check_statements(std::slice::from_ref(inner), locale, errors)
+            }
+            Stmt::Import { .. } => {}
+        }
+    }
+}
+
+fn syntax_check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
+    parse_source_recovering(source).map(|(_, locale)| locale)
+}
+
+fn check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
+    let (program, locale) = parse_source_recovering(source)?;
+    let mut errors = Vec::new();
+    static_check_statements(&program, locale, &mut errors);
     if errors.is_empty() {
         Ok(locale)
     } else {
@@ -3561,7 +3670,7 @@ fn main() {
         return;
     }
     if command == "lint" {
-        if let Err(errors) = check_source(&source) {
+        if let Err(errors) = syntax_check_source(&source) {
             for error in errors {
                 eprintln!("{}", format_diagnostic(path, &source, &error));
             }
@@ -3586,7 +3695,7 @@ fn main() {
         return;
     }
     if command == "fmt" {
-        if let Err(errors) = check_source(&source) {
+        if let Err(errors) = syntax_check_source(&source) {
             for error in errors {
                 eprintln!("{}", format_diagnostic(path, &source, &error));
             }
@@ -3774,6 +3883,18 @@ mod tests {
         let value: JsonValue = serde_json::from_str(&output).unwrap();
         assert_eq!(value["status"], "ok");
         assert_eq!(value["diagnostics"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn check_reports_static_constant_division_by_zero_without_execution() {
+        let errors = check_source("print 8 / 0\n").unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, "P1011");
+
+        let output = check_json("zero.pd", "print 8 / 0\n");
+        let value: JsonValue = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["diagnostics"][0]["code"], "P1011");
     }
 
     #[test]
