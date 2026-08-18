@@ -10,7 +10,7 @@ Current support is deliberately narrow:
 - `textDocument/completion` returns a safe static Bangla-English keyword, builtin, and standard-library module catalogue.
 - `textDocument/hover` explains supported Bangla-English keywords and selected stable builtins.
 
-The server now also builds a non-executing local declaration index with lexical brace-depth metadata for Bangla-English `let`/`ধরি` and `function`/`ফাংশন` declarations. This is an internal, tested foundation for future scope-aware navigation; it does not yet expose a definition or rename request.
+The server now consumes a compiler-owned, non-executing local declaration API with parser positions and lexical scope metadata for Bangla-English `let`/`ধরি`, `function`/`ফাংশন`, and loop-variable declarations. This replaces text-prefix scanning and is the tested foundation for scope-aware navigation; it does not yet bind identifier references for rename.
 
 `textDocument/definition` now uses that index for conservative same-document lookup. It returns the nearest declaration visible at the request position and deliberately returns no result for imported symbols, public exports, ambiguous malformed blocks, or cross-file references.
 
@@ -24,4 +24,4 @@ Run it during development with:
 cargo run --manifest-path tooling/padma-lsp/Cargo.toml
 ```
 
-Go-to-definition, rename, dynamic symbol completion, and incremental range updates are intentionally deferred until the AST/node and static-analysis contracts are expanded and tested.
+Rename, dynamic symbol completion, and incremental range updates are intentionally deferred until identifier-reference binding and the static-analysis contracts are expanded and tested.

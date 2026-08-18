@@ -132,32 +132,31 @@ fn word_at(source: &str, position: &Value) -> Option<String> {
 }
 
 fn document_symbols(source: &str) -> Vec<DocumentSymbol> {
-    let mut symbols = Vec::new();
-    let mut depth = 0usize;
-    for (line_number, raw_line) in source.lines().enumerate() {
-        let line = raw_line.trim_start();
-        let indent = raw_line.len() - line.len();
-        for (prefix, kind) in [("let ", "variable"), ("ধরি ", "variable"), ("function ", "function"), ("ফাংশন ", "function")] {
-            if let Some(rest) = line.strip_prefix(prefix) {
-                let name: String = rest.chars().take_while(|value| value == &'_' || value.is_alphanumeric() || ('\u{0980}'..='\u{09ff}').contains(value)).collect();
-                if !name.is_empty() {
-                    symbols.push(DocumentSymbol {
-                        character: raw_line[..indent].encode_utf16().count() + prefix.encode_utf16().count(),
-                        name,
-                        kind,
-                        line: line_number,
-                        scope_depth: depth,
-                    });
-                }
-                break;
-            }
-        }
-        // Padma blocks are brace-delimited. This lexical counter intentionally does not
-        // claim semantic scope for malformed syntax; parser diagnostics remain authoritative.
-        depth = depth.saturating_add(line.matches('{').count());
-        depth = depth.saturating_sub(line.matches('}').count());
-    }
-    symbols
+    let report = match padma_lang::local_declarations_json(source) {
+        Ok(Value::Array(items)) => items,
+        _ => return Vec::new(),
+    };
+    report
+        .into_iter()
+        .filter_map(|item| {
+            let name = item["name"].as_str()?.to_string();
+            let kind = match item["kind"].as_str()? {
+                "variable" => "variable",
+                "loop-variable" => "loop variable",
+                "function" => "function",
+                _ => return None,
+            };
+            let one_based_line = item["line"].as_u64()? as usize;
+            let one_based_column = item["column"].as_u64()? as usize;
+            Some(DocumentSymbol {
+                name,
+                kind,
+                line: one_based_line.saturating_sub(1),
+                character: utf16_column(source, one_based_line, one_based_column),
+                scope_depth: item["scopeDepth"].as_u64()? as usize,
+            })
+        })
+        .collect()
 }
 
 fn scope_depth_at(source: &str, target_line: usize) -> usize {

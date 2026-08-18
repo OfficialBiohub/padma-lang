@@ -688,6 +688,7 @@ fn expect_collection_index(
 enum Stmt {
     Let {
         name: String,
+        name_position: Position,
         value: Expr,
     },
     Print {
@@ -713,12 +714,14 @@ enum Stmt {
     },
     For {
         name: String,
+        name_position: Position,
         collection: Expr,
         body: Vec<Stmt>,
         position: Position,
     },
     Function {
         name: String,
+        name_position: Position,
         params: Vec<String>,
         body: Vec<Stmt>,
     },
@@ -872,7 +875,8 @@ impl Parser {
     }
 
     fn let_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
-        let name = match self.advance().clone() {
+        let name_token = self.advance().clone();
+        let name = match name_token.clone() {
             Token {
                 kind: TokenKind::Identifier(name),
                 ..
@@ -890,7 +894,11 @@ impl Parser {
         let value = self.expression()?;
         self.consume_statement_end()?;
         let _ = position;
-        Ok(Stmt::Let { name, value })
+        Ok(Stmt::Let {
+            name,
+            name_position: name_token.position,
+            value,
+        })
     }
 
     fn print_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
@@ -1004,7 +1012,8 @@ impl Parser {
     }
 
     fn for_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
-        let name = match self.advance().clone() {
+        let name_token = self.advance().clone();
+        let name = match name_token.clone() {
             Token {
                 kind: TokenKind::Identifier(name),
                 ..
@@ -1024,6 +1033,7 @@ impl Parser {
         let body = self.block()?;
         Ok(Stmt::For {
             name,
+            name_position: name_token.position,
             collection,
             body,
             position,
@@ -1031,7 +1041,8 @@ impl Parser {
     }
 
     fn function_statement(&mut self) -> Result<Stmt, PadmaError> {
-        let name = match self.advance().clone().kind {
+        let name_token = self.advance().clone();
+        let name = match name_token.clone().kind {
             TokenKind::Identifier(name) => name,
             _token => {
                 return Err(error_for(
@@ -1065,7 +1076,12 @@ impl Parser {
         self.consume(|kind| matches!(kind, TokenKind::RightParen), ")")?;
         self.consume(|kind| matches!(kind, TokenKind::LeftBrace), "{")?;
         let body = self.block()?;
-        Ok(Stmt::Function { name, params, body })
+        Ok(Stmt::Function {
+            name,
+            name_position: name_token.position,
+            params,
+            body,
+        })
     }
 
     fn return_statement(&mut self, position: Position) -> Result<Stmt, PadmaError> {
@@ -1723,6 +1739,7 @@ impl Interpreter {
                 collection,
                 body,
                 position,
+                ..
             } => {
                 let collection = self.evaluate(collection)?;
                 let values = match collection {
@@ -1760,7 +1777,9 @@ impl Interpreter {
                 }
                 result?;
             }
-            Stmt::Function { name, params, body } => {
+            Stmt::Function {
+                name, params, body, ..
+            } => {
                 self.functions
                     .insert(name.clone(), (params.clone(), body.clone()));
             }

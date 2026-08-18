@@ -75,6 +75,10 @@
 - [ ] Bind identifier references to the nearest visible same-document local declaration using lexical scope and UTF-16 ranges.
 - [ ] Implement `textDocument/prepareRename` and `textDocument/rename` only for unambiguous local variable bindings with validated replacement identifiers.
 - [ ] Reject unsafe rename requests for imports, exports, functions, members, unresolved identifiers, shadowed ambiguity, and malformed source; add Bangla-English protocol tests.
+- [ ] Expose a compiler-owned parsed-document analysis API with stable local declaration/reference IDs and UTF-16 ranges for editor consumers.
+- [x] Expose a compiler-owned parsed declaration API with local declaration kind, scope depth, and one-based source positions for editor consumers.
+- [ ] Bind same-document local identifier references to lexical declarations without evaluating source or treating strings/comments as references.
+- [ ] Return LSP rename edits only when every bound local reference is deterministic and the requested replacement is a valid Padma identifier.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
 - [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
