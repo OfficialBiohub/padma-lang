@@ -3299,7 +3299,8 @@ fn capability_grants_for_field(
 ) -> Result<BTreeSet<String>, String> {
     let permitted: &[&str] = match key {
         "filesystem" => &["read", "write"],
-        "network" => &["http"],
+        "network" => &["http", "ai"],
+        "server" => &["local"],
         "process" => &PROCESS_CAPABILITIES,
         "media" => &["download"],
         _ => {
@@ -4719,6 +4720,13 @@ mod tests {
         )
         .unwrap_err();
         assert!(unknown.contains("unsupported"));
+
+        let approved = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[capabilities]\nnetwork = [\"ai\"]\nserver = [\"local\"]\n",
+        )
+        .unwrap();
+        assert!(approved.capabilities.contains("network:ai"));
+        assert!(approved.capabilities.contains("server:local"));
     }
 
     #[test]
