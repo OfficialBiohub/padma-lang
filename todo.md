@@ -11,6 +11,22 @@
 - [x] Prevent module traversal, duplicate loading, and import cycles with localized diagnostics.
 - [x] Add English, Bengali, nested-module, and invalid-import regression tests.
 - [x] Document reusable Padma modules with runnable Termux examples.
+
+## Production-readiness roadmap
+
+- [ ] Publish a versioned production-readiness definition with supported platforms, compatibility guarantees, and explicit non-goals.
+- [ ] Add file-aware source spans, richer locale detection, and a complete bilingual diagnostics catalogue.
+- [x] Add parser recovery so `padma check` reports multiple independent syntax errors in one run.
+- [ ] Implement null values, indexing, slicing, list mutation, iteration, and collection utility APIs.
+- [ ] Add a documented safe standard library for text, math, random, time, filesystem, JSON, and URL handling.
+- [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.
+- [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.
+- [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
+- [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
+- [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
+- [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
+- [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
+- [ ] Publish Bangla-first tutorials, a reference manual, API documentation, contribution rules, a code of conduct, and maintainership policy.
 - [ ] Add static type checking and actionable bilingual diagnostics without breaking the interpreter.
 - [ ] Build a Termux-friendly `padma` CLI with run, check, format, test, init, and package commands.
 - [ ] Add dependency-free standard library for files, text, collections, JSON, HTTP, and process boundaries.

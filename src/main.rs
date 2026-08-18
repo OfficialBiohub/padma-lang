@@ -175,7 +175,7 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::Bangla, "P1024") => (format!("circular module import পাওয়া গেছে: `{detail}`"), Some("একটি module-কে নিজের মাধ্যমে আবার import করবেন না।".into())),
         (Locale::English, "P1024") => (format!("Circular module import detected: `{detail}`"), Some("Do not import a module again through itself.".into())),
         (Locale::Bangla, "P1025") => (format!("module-এ error আছে: `{detail}`"), Some("module file-এর code ও syntax পরীক্ষা করুন।".into())),
-        (Locale::English, "P1025") => (format!("Module contains an error: `{detail}"), Some("Check the module code and syntax.".into())),
+        (Locale::English, "P1025") => (format!("Module contains an error: `{detail}`"), Some("Check the module code and syntax.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -603,6 +603,23 @@ impl Parser {
         Ok(statements)
     }
 
+    fn parse_recovering(mut self) -> (Vec<Stmt>, Vec<PadmaError>) {
+        let mut statements = Vec::new();
+        let mut errors = Vec::new();
+        self.skip_newlines();
+        while !self.is_at_end() {
+            match self.statement() {
+                Ok(statement) => statements.push(statement),
+                Err(error) => {
+                    errors.push(error);
+                    self.synchronize();
+                }
+            }
+            self.skip_newlines();
+        }
+        (statements, errors)
+    }
+
     fn statement(&mut self) -> Result<Stmt, PadmaError> {
         if self.matches(|kind| matches!(kind, TokenKind::Let)) {
             return self.let_statement(self.previous().position);
@@ -995,6 +1012,15 @@ impl Parser {
 
     fn skip_newlines(&mut self) {
         while self.matches(|kind| matches!(kind, TokenKind::Newline)) {}
+    }
+
+    fn synchronize(&mut self) {
+        while !self.is_at_end() {
+            if self.matches(|kind| matches!(kind, TokenKind::Newline | TokenKind::RightBrace)) {
+                return;
+            }
+            self.advance();
+        }
     }
 
     fn matches<F>(&mut self, predicate: F) -> bool
@@ -1584,6 +1610,19 @@ fn compile(source: &str) -> Result<(Vec<Stmt>, Locale), PadmaError> {
     Ok((program, locale))
 }
 
+fn check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
+    let locale = Locale::from_source(source);
+    let tokens = Lexer::new(source, locale)
+        .tokenize()
+        .map_err(|error| vec![error])?;
+    let (_, errors) = Parser::new(tokens, locale).parse_recovering();
+    if errors.is_empty() {
+        Ok(locale)
+    } else {
+        Err(errors)
+    }
+}
+
 fn format_diagnostic(path: &str, source: &str, error: &PadmaError, locale: Locale) -> String {
     let line = source
         .lines()
@@ -1658,6 +1697,21 @@ fn main() {
         }
     };
     let locale = Locale::from_source(&source);
+    if command == "check" {
+        match check_source(&source) {
+            Ok(locale) => match locale {
+                Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো syntax error পাওয়া যায়নি।"),
+                Locale::English => println!("ok: no syntax errors found in `{path}`."),
+            },
+            Err(errors) => {
+                for error in errors {
+                    eprintln!("{}", format_diagnostic(path, &source, &error, locale));
+                }
+                process::exit(1);
+            }
+        }
+        return;
+    }
     let compiled = compile(&source);
     let (program, locale) = match compiled {
         Ok(value) => value,
@@ -1668,10 +1722,6 @@ fn main() {
     };
 
     match command {
-        "check" => match locale {
-            Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো syntax error পাওয়া যায়নি।"),
-            Locale::English => println!("ok: no syntax errors found in `{path}`."),
-        },
         "ast" => println!("{program:#?}"),
         "run" => {
             let mut interpreter = Interpreter::with_source_path(locale, PathBuf::from(path));
@@ -1893,6 +1943,17 @@ mod tests {
     fn rejects_non_string_map_key() {
         let error = run("let profile = {\"name\": \"Rafi\"}\nprint profile.get(1)\n").unwrap_err();
         assert_eq!(error.code, "P1020");
+    }
+
+    #[test]
+    fn check_reports_multiple_syntax_errors_without_stopping_at_the_first() {
+        let english_errors = check_source("let = 1\nprint )\nlet valid = 3\n").unwrap_err();
+        assert_eq!(english_errors.len(), 2);
+        assert!(english_errors.iter().all(|error| error.code == "P1003"));
+
+        let bangla_errors = check_source("ধরি = ১\nদেখাও )\nধরি ঠিক = ৩\n").unwrap_err();
+        assert_eq!(bangla_errors.len(), 2);
+        assert!(bangla_errors.iter().all(|error| error.code == "P1003"));
     }
 
     #[test]

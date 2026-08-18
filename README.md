@@ -266,6 +266,8 @@ The MVP has no third-party compiler dependencies. Unit tests cover Bengali, Engl
 
 ## Scope and roadmap
 
+The full production-readiness plan, release gates, security boundaries, and ordered implementation work are documented in [docs/PRODUCTION-ROADMAP.md](docs/PRODUCTION-ROADMAP.md).
+
 | Release | Planned outcome |
 |---|---|
 | `v0.1` | Interpreter MVP: variables, output, arithmetic, conditions, diagnostics. |
