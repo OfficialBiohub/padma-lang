@@ -28,7 +28,11 @@
 - [x] Add `for item in collection` / `প্রতি item মধ্যে collection` iteration with bounded execution.
 - [x] Add safe `range` generation and deterministic iteration order for list, map, and text values.
 - [x] Define loop-variable scope and error behavior, with Bengali-English regression tests and examples.
-- [ ] Add safe path operations, formatting, and documented non-cryptographic randomness to the standard library.
+- [x] Add safe path operations, formatting, and documented non-cryptographic randomness to the standard library.
+- [x] Add relative-only `path.basename`, `path.extension`, and `path.join` helpers with traversal rejection.
+- [x] Add map-driven `text.format` with explicit placeholder validation.
+- [x] Add bounded, explicitly non-cryptographic `random.int` and `random.pick` helpers with deterministic safety limits.
+- [x] Add standard-library integration tests, examples, and bilingual documentation for the remaining M3 APIs.
 - [x] Add deterministic JSON conversion and safe HTTP/HTTPS URL inspection APIs.
 - [x] Add text, deterministic math, bounded time, and safe relative-file read/write/exists standard-library APIs.
 - [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.

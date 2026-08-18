@@ -46,6 +46,21 @@ Paths cannot be absolute and cannot contain `..`. The `@downloads/` alias remain
 
 `url.parse` deliberately accepts only absolute `http://` and `https://` URLs, rejects whitespace and embedded credentials, and does not perform any network request. It is an inspection utility; `http.get` remains the network API and applies its own network safeguards.
 
+## Paths, formatting, and randomness
+
+| API | Result and boundary |
+|---|---|
+| `path.basename(path)` | Last component of a relative safe path. |
+| `path.extension(path)` | File extension without the dot, or empty text. |
+| `path.join(part, ...)` | Combines one or more safe relative path components using `/`. |
+| `text.format(template, values)` | Replaces `{key}` placeholders with values from a text-key map. Use `{{` for a literal `{`. |
+| `random.int(start, end)` | Non-cryptographic whole number from `start` inclusive to `end` exclusive. The span is limited to one billion. |
+| `random.pick(items)` | Non-cryptographic selection from a non-empty list containing at most one million items. |
+
+Path helpers reject absolute paths, `..`, and the special `@downloads` alias because they describe paths rather than performing output. `text.format` rejects an absent or malformed placeholder instead of leaving a misleading marker in user-facing text.
+
+> `random.int` and `random.pick` are **not cryptographically secure**. Do not use them for passwords, tokens, authentication, lotteries, gambling, or security-sensitive decisions. Cryptographic random generation belongs in a future vetted capability layer.
+
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; and over-limit sleeps use `P1012`. See [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. See [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

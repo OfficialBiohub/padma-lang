@@ -11,9 +11,12 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value as JsonValue;
+
+static RANDOM_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Locale {
@@ -219,6 +222,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1029") => (format!("Could not parse or create JSON: `{detail}`"), Some("Use valid JSON text and Padma number, text, list, map, true/false, or none values.".into())),
         (Locale::Bangla, "P1030") => (format!("সঠিক URL নয়: `{detail}`"), Some("পূর্ণ URL দিন, যেমন `https://example.com/path`।".into())),
         (Locale::English, "P1030") => (format!("Invalid URL: `{detail}`"), Some("Provide a complete URL such as `https://example.com/path`.".into())),
+        (Locale::Bangla, "P1031") => (format!("text.format-এর placeholder পাওয়া যায়নি: `{detail}`"), Some("map-এ একই নামের একটি text key যোগ করুন।".into())),
+        (Locale::English, "P1031") => (format!("text.format placeholder was not found: `{detail}`"), Some("Add a text key with the same name to the map.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -523,6 +528,93 @@ fn resolve_output_path(path: &str) -> Result<PathBuf, ()> {
         return Err(());
     }
     Ok(PathBuf::from(path))
+}
+
+fn safe_relative_path(path: &str) -> Result<PathBuf, ()> {
+    let candidate = Path::new(path);
+    if path.is_empty()
+        || path == "@downloads"
+        || path.starts_with("@downloads/")
+        || candidate.is_absolute()
+        || candidate.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(());
+    }
+    let normalized = candidate
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part),
+            _ => None,
+        })
+        .collect::<PathBuf>();
+    if normalized.as_os_str().is_empty() {
+        return Err(());
+    }
+    Ok(normalized)
+}
+
+fn next_non_cryptographic_random() -> u64 {
+    let time_seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0);
+    let mut state = time_seed
+        ^ (process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ RANDOM_COUNTER
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    state
+}
+
+fn format_from_map(
+    template: &str,
+    values: &BTreeMap<String, Value>,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut output = String::new();
+    let mut characters = template.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '{' {
+            output.push(character);
+            continue;
+        }
+        if characters.peek() == Some(&'{') {
+            characters.next();
+            output.push('{');
+            continue;
+        }
+        let mut key = String::new();
+        let mut closed = false;
+        for candidate in characters.by_ref() {
+            if candidate == '}' {
+                closed = true;
+                break;
+            }
+            key.push(candidate);
+        }
+        let key = key.trim();
+        let valid_key = key.chars().next().map(is_identifier_start).unwrap_or(false)
+            && key.chars().all(is_identifier_continue);
+        if !closed || !valid_key {
+            return Err(error_for(locale, "P1031", position, key));
+        }
+        let value = values
+            .get(key)
+            .ok_or_else(|| error_for(locale, "P1031", position, key))?;
+        output.push_str(&value.to_string());
+    }
+    Ok(output)
 }
 
 fn resolve_import_path(importer: &Path, requested: &str) -> Result<PathBuf, ()> {
@@ -1785,6 +1877,108 @@ impl Interpreter {
                         .join(separator);
                     return Ok(Value::String(joined));
                 }
+                if name == "text.format" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let template = match &arguments[0] {
+                        Expr::Literal(Value::String(text), _) => Value::String(text.clone()),
+                        argument => self.evaluate(argument)?,
+                    };
+                    let values = self.evaluate(&arguments[1])?;
+                    let template = expect_string(&template, self.locale, *position, "template")?;
+                    let Value::Map(values) = values else {
+                        return Err(error_for(self.locale, "P1010", *position, "text.format"));
+                    };
+                    return format_from_map(template, &values, self.locale, *position)
+                        .map(Value::String);
+                }
+                if name == "path.basename" || name == "path.extension" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&value, self.locale, *position, "path")?;
+                    let path = safe_relative_path(path)
+                        .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
+                    let value = if name == "path.basename" {
+                        path.file_name()
+                            .and_then(|part| part.to_str())
+                            .map(str::to_string)
+                            .ok_or_else(|| error_for(self.locale, "P1014", *position, "path"))?
+                    } else {
+                        path.extension()
+                            .and_then(|part| part.to_str())
+                            .map(str::to_string)
+                            .unwrap_or_default()
+                    };
+                    return Ok(Value::String(value));
+                }
+                if name == "path.join" {
+                    if arguments.is_empty() {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let mut result = PathBuf::new();
+                    for argument in arguments {
+                        let value = self.evaluate(argument)?;
+                        let part = expect_string(&value, self.locale, *position, "path")?;
+                        let part = safe_relative_path(part)
+                            .map_err(|_| error_for(self.locale, "P1014", *position, part))?;
+                        result.push(part);
+                    }
+                    let normalized = safe_relative_path(&result.to_string_lossy())
+                        .map_err(|_| error_for(self.locale, "P1014", *position, "path"))?;
+                    return Ok(Value::String(
+                        normalized.to_string_lossy().replace('\\', "/"),
+                    ));
+                }
+                if name == "random.int" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let start = self.evaluate(&arguments[0])?;
+                    let end = self.evaluate(&arguments[1])?;
+                    let start = expect_number(&start, self.locale, *position, "random.int")?;
+                    let end = expect_number(&end, self.locale, *position, "random.int")?;
+                    if start.fract() != 0.0 || end.fract() != 0.0 || start >= end {
+                        return Err(error_for(self.locale, "P1010", *position, "random.int"));
+                    }
+                    let start = start as i64;
+                    let end = end as i64;
+                    let span = end
+                        .checked_sub(start)
+                        .ok_or_else(|| error_for(self.locale, "P1010", *position, "random.int"))?;
+                    if span > 1_000_000_000 {
+                        return Err(error_for(
+                            self.locale,
+                            "P1012",
+                            *position,
+                            "random range limit",
+                        ));
+                    }
+                    return Ok(Value::Number(
+                        start as f64 + (next_non_cryptographic_random() % span as u64) as f64,
+                    ));
+                }
+                if name == "random.pick" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let Value::List(items) = value else {
+                        return Err(error_for(self.locale, "P1010", *position, "random.pick"));
+                    };
+                    if items.is_empty() || items.len() > 1_000_000 {
+                        return Err(error_for(
+                            self.locale,
+                            "P1012",
+                            *position,
+                            "random pick limit",
+                        ));
+                    }
+                    let index = (next_non_cryptographic_random() % items.len() as u64) as usize;
+                    return Ok(items[index].clone());
+                }
                 if matches!(
                     name.as_str(),
                     "math.abs" | "math.round" | "math.floor" | "math.ceil"
@@ -2863,6 +3057,44 @@ mod tests {
         let url_error = run("দেখাও url.parse(\"ftp://example.com\")\n").unwrap_err();
         assert_eq!(url_error.code, "P1030");
         assert_eq!(url_error.locale, Locale::Bangla);
+    }
+
+    #[test]
+    fn formats_from_maps_and_handles_safe_relative_paths() {
+        let output = run(
+            "let details = {\"name\": \"Rafi\", \"class\": 6}\nprint text.format(\"{name} is in class {class}\", details)\nprint path.basename(\"notes/today.txt\")\nprint path.extension(\"notes/today.txt\")\nprint path.join(\"notes\", \"2026\", \"today.txt\")\n",
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "Rafi is in class 6",
+                "today.txt",
+                "txt",
+                "notes/2026/today.txt"
+            ]
+        );
+
+        let placeholder_error = run("print text.format(\"Hello {name}\", {})\n").unwrap_err();
+        assert_eq!(placeholder_error.code, "P1031");
+        let path_error = run("দেখাও path.basename(\"../secret.txt\")\n").unwrap_err();
+        assert_eq!(path_error.code, "P1014");
+        assert_eq!(path_error.locale, Locale::Bangla);
+    }
+
+    #[test]
+    fn generates_bounded_non_cryptographic_random_values() {
+        let output = run(
+            "let number = random.int(5, 8)\nprint number >= 5\nprint number < 8\nlet choice = random.pick([\"a\", \"b\"])\nif choice == \"a\" {\n  print true\n} else {\n  print choice == \"b\"\n}\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["true", "true", "true"]);
+
+        let range_error = run("print random.int(4, 4)\n").unwrap_err();
+        assert_eq!(range_error.code, "P1010");
+        let pick_error = run("দেখাও random.pick([])\n").unwrap_err();
+        assert_eq!(pick_error.code, "P1012");
+        assert_eq!(pick_error.locale, Locale::Bangla);
     }
 
     #[test]

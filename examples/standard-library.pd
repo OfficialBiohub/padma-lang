@@ -22,3 +22,10 @@ print json.stringify(account)
 let address = url.parse("https://example.com:8443/api?q=padma#docs")
 print address["host"]
 print address["path"]
+
+# Relative paths, map formatting, and non-cryptographic random helpers
+print path.join("notes", "2026", "today.txt")
+print text.format("{name} uses {language}", {"name": "Rafi", "language": "Padma"})
+let sample = random.int(1, 10)
+print sample >= 1
+print sample < 10

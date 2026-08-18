@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-**M1 diagnostics and M2 core collections are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, a stable diagnostic registry, null values, safe list/map indexing, mutation, slicing, collection utilities, and bounded deterministic iteration. The active implementation work is **M3 safe standard library**. Its first verified slice provides `text.*`, `math.*`, bounded `time.*`, and safe relative-path `file.read`/`file.write`/`file.exists`; JSON, URL, richer path operations, formatting, and randomness remain next.
+**M1 diagnostics, M2 core collections, and M3 safe standard library are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, a stable diagnostic registry, null values, safe list/map indexing, mutation, slicing, collection utilities, bounded deterministic iteration, Unicode text, deterministic math, bounded time, safe file access, JSON conversion, HTTP/HTTPS URL inspection, relative-path utilities, map-driven formatting, and explicitly non-cryptographic random helpers. The next active milestone is **M4 project and module governance**: namespaces, public exports, manifests, lockfiles, and dependency trust policies.
 
 ## 7. Security and release references
 
