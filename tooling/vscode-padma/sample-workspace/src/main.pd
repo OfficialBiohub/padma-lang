@@ -1,0 +1,10 @@
+# padma:locale=bn
+ধরি greeting = "Padma"
+দেখাও "Hello, {greeting}!"
+
+যদি সত্য {
+    ধরি greeting = "ভেতরের scope"
+    দেখাও greeting
+}
+
+দেখাও greeting

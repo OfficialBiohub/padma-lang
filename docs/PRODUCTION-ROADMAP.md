@@ -120,9 +120,9 @@ Every milestone must retain four principles.
 | Deliverable | Required work | Release gate |
 |---|---|---|
 | Tree-sitter grammar | Independent grammar, corpus tests, highlights, injections where needed | **Baseline complete:** generated ABI-15 parser and corpus CI |
-| VS Code extension | Syntax highlighting, snippets, run/check tasks, diagnostics wiring | **Baseline complete:** `.pd` association, highlighting, explicit commands, JSON check diagnostics, and manifest CI; packaging/sample workspace test remains before distribution |
-| Language server | **Baseline complete:** stdio LSP diagnostics and full-document formatting; later go-to definition, completion, hover, and rename | Protocol smoke tests and LSP conformance-oriented integration tests for advanced features |
-| Termux mobile guide | nano shortcuts, REPL, project folders, backups, troubleshooting | Tested copy-paste commands |
+| VS Code extension | Syntax highlighting, snippets, run/check tasks, diagnostics wiring | `.pd` association, highlighting, explicit commands, JSON check diagnostics, manifest CI, pinned VSIX packaging, and a capability-free sample workspace |
+| Language server | stdio LSP diagnostics, formatting, completion, hover, definition, and conservative local rename | Protocol smoke tests and LSP conformance-oriented integration tests for advanced features |
+| Termux mobile guide | nano shortcuts, REPL, project folders, backups, troubleshooting | Copy-paste workflow and optional VS Code/LSP separation documented |
 
 ### M8 — Interoperability
 

@@ -6,19 +6,48 @@
   "publisher": "officialbiohub",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OfficialBiohub/padma-lang.git",
+    "directory": "tooling/vscode-padma"
+  },
+  "bugs": {
+    "url": "https://github.com/OfficialBiohub/padma-lang/issues"
+  },
+  "homepage": "https://github.com/OfficialBiohub/padma-lang/tree/main/tooling/vscode-padma#readme",
   "type": "commonjs",
+  "files": [
+    "extension.js",
+    "language-configuration.json",
+    "syntaxes/**",
+    "LICENSE"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages", "Linters", "Formatters"],
-  "activationEvents": ["onLanguage:padma", "onCommand:padma.runFile", "onCommand:padma.checkFile", "onCommand:padma.startLanguageServer"],
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:padma",
+    "onCommand:padma.runFile",
+    "onCommand:padma.checkFile",
+    "onCommand:padma.startLanguageServer"
+  ],
   "main": "./extension.js",
   "contributes": {
     "languages": [
       {
         "id": "padma",
-        "aliases": ["Padma", "padma"],
-        "extensions": [".pd"],
+        "aliases": [
+          "Padma",
+          "padma"
+        ],
+        "extensions": [
+          ".pd"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -30,12 +59,30 @@
       }
     ],
     "commands": [
-      { "command": "padma.runFile", "title": "Padma: Run Current File" },
-      { "command": "padma.checkFile", "title": "Padma: Check Current File" },
-      { "command": "padma.formatFile", "title": "Padma: Format Current File" },
-      { "command": "padma.lintFile", "title": "Padma: Lint Current File" },
-      { "command": "padma.startLanguageServer", "title": "Padma: Start Language Server" },
-      { "command": "padma.stopLanguageServer", "title": "Padma: Stop Language Server" }
+      {
+        "command": "padma.runFile",
+        "title": "Padma: Run Current File"
+      },
+      {
+        "command": "padma.checkFile",
+        "title": "Padma: Check Current File"
+      },
+      {
+        "command": "padma.formatFile",
+        "title": "Padma: Format Current File"
+      },
+      {
+        "command": "padma.lintFile",
+        "title": "Padma: Lint Current File"
+      },
+      {
+        "command": "padma.startLanguageServer",
+        "title": "Padma: Start Language Server"
+      },
+      {
+        "command": "padma.stopLanguageServer",
+        "title": "Padma: Stop Language Server"
+      }
     ],
     "configuration": {
       "title": "Padma",
@@ -57,6 +104,11 @@
     "vscode-languageclient": "10.1.0"
   },
   "scripts": {
-    "check": "node --check extension.js"
+    "check": "node --check extension.js",
+    "package": "vsce package --out dist/padma-vscode-0.1.0.vsix",
+    "package:check": "node scripts/validate-package.mjs"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "3.2.1"
   }
 }

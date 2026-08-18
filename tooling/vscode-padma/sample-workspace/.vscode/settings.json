@@ -1,0 +1,7 @@
+{
+  "files.associations": {
+    "*.pd": "padma"
+  },
+  "padma.command": "padma",
+  "padma.languageServer.command": "padma-lsp"
+}

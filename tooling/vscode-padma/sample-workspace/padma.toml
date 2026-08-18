@@ -1,0 +1,15 @@
+[padma]
+name = "padma-vscode-sample"
+version = "0.1.0"
+entry = "src/main.pd"
+locale = "bn"
+
+# This editor sample deliberately requests no sensitive capabilities.
+[capabilities]
+filesystem = []
+network = []
+process = []
+media = []
+
+[lint]
+disable = []

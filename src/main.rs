@@ -1576,6 +1576,7 @@ struct ModuleNamespace {
 
 struct Interpreter {
     environment: HashMap<String, Value>,
+    local_scopes: Vec<HashMap<String, Value>>,
     functions: HashMap<String, (Vec<String>, Vec<Stmt>)>,
     return_value: Option<Value>,
     output: Vec<String>,
@@ -1597,6 +1598,7 @@ impl Interpreter {
     fn with_source_path(locale: Locale, current_source: PathBuf) -> Self {
         Self {
             environment: HashMap::new(),
+            local_scopes: Vec::new(),
             functions: HashMap::new(),
             return_value: None,
             output: Vec::new(),
@@ -1675,11 +1677,54 @@ impl Interpreter {
         Ok(())
     }
 
+    fn run_in_scope(&mut self, program: &[Stmt]) -> Result<(), PadmaError> {
+        self.local_scopes.push(HashMap::new());
+        let result = self.run(program);
+        self.local_scopes.pop();
+        result
+    }
+
+    fn define_variable(&mut self, name: String, value: Value) {
+        if let Some(scope) = self.local_scopes.last_mut() {
+            scope.insert(name, value);
+        } else {
+            self.environment.insert(name, value);
+        }
+    }
+
+    fn variable(&self, name: &str) -> Option<&Value> {
+        self.local_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
+            .or_else(|| self.environment.get(name))
+    }
+
+    fn variable_mut(&mut self, name: &str) -> Option<&mut Value> {
+        let scope_index = self
+            .local_scopes
+            .iter()
+            .rposition(|scope| scope.contains_key(name));
+        if let Some(scope_index) = scope_index {
+            return self.local_scopes[scope_index].get_mut(name);
+        }
+        self.environment.get_mut(name)
+    }
+
+    fn assign_variable(&mut self, name: &str, value: Value) -> bool {
+        if let Some(target) = self.variable_mut(name) {
+            *target = value;
+            true
+        } else {
+            false
+        }
+    }
+
     fn execute(&mut self, statement: &Stmt) -> Result<(), PadmaError> {
         match statement {
             Stmt::Let { name, value, .. } => {
                 let value = self.evaluate(value)?;
-                self.environment.insert(name.clone(), value);
+                self.define_variable(name.clone(), value);
             }
             Stmt::Print { value, .. } => {
                 let value = self.evaluate(value)?;
@@ -1693,11 +1738,10 @@ impl Interpreter {
                 value,
                 position,
             } => {
-                if !self.environment.contains_key(name) {
+                let value = self.evaluate(value)?;
+                if !self.assign_variable(name, value) {
                     return Err(error_for(self.locale, "P1007", *position, name));
                 }
-                let value = self.evaluate(value)?;
-                self.environment.insert(name.clone(), value);
             }
             Stmt::If {
                 condition,
@@ -1710,7 +1754,7 @@ impl Interpreter {
                 } else {
                     else_branch
                 };
-                self.run(branch)?;
+                self.run_in_scope(branch)?;
             }
             Stmt::While {
                 condition,
@@ -1728,7 +1772,7 @@ impl Interpreter {
                             "loop iteration limit",
                         ));
                     }
-                    self.run(body)?;
+                    self.run_in_scope(body)?;
                     if self.return_value.is_some() {
                         break;
                     }
@@ -1759,22 +1803,18 @@ impl Interpreter {
                         "loop iteration limit",
                     ));
                 }
-                let previous_value = self.environment.remove(name);
+                self.local_scopes.push(HashMap::new());
                 let result = (|| {
                     for value in values {
-                        self.environment.insert(name.clone(), value);
-                        self.run(body)?;
+                        self.define_variable(name.clone(), value);
+                        self.run_in_scope(body)?;
                         if self.return_value.is_some() {
                             break;
                         }
                     }
                     Ok(())
                 })();
-                if let Some(value) = previous_value {
-                    self.environment.insert(name.clone(), value);
-                } else {
-                    self.environment.remove(name);
-                }
+                self.local_scopes.pop();
                 result?;
             }
             Stmt::Function {
@@ -1910,8 +1950,7 @@ impl Interpreter {
                             .ok_or_else(|| error_for(self.locale, "P1007", *position, name));
                     }
                 }
-                self.environment
-                    .get(name)
+                self.variable(name)
                     .cloned()
                     .ok_or_else(|| error_for(self.locale, "P1007", *position, name))
             }
@@ -2013,6 +2052,7 @@ impl Interpreter {
                             .collect::<Result<Vec<_>, _>>()?;
                         let previous_environment =
                             std::mem::replace(&mut self.environment, namespace.environment);
+                        let previous_local_scopes = std::mem::take(&mut self.local_scopes);
                         let previous_functions =
                             std::mem::replace(&mut self.functions, namespace.functions);
                         let previous_modules =
@@ -2032,6 +2072,7 @@ impl Interpreter {
                             modules: std::mem::replace(&mut self.modules, previous_modules),
                         };
                         self.modules.insert(module.to_string(), updated_namespace);
+                        self.local_scopes = previous_local_scopes;
                         self.return_value = previous_return;
                         run_result?;
                         return Ok(result);
@@ -2527,8 +2568,7 @@ impl Interpreter {
                 }
                 if let Some(list_name) = name.strip_suffix(".get") {
                     if self
-                        .environment
-                        .get(list_name)
+                        .variable(list_name)
                         .is_some_and(|value| matches!(value, Value::List(_)))
                     {
                         if arguments.len() != 1 {
@@ -2536,7 +2576,7 @@ impl Interpreter {
                         }
                         let index = self.evaluate(&arguments[0])?;
                         let index = expect_collection_index(&index, self.locale, *position)?;
-                        let Value::List(values) = self.environment.get(list_name).unwrap() else {
+                        let Value::List(values) = self.variable(list_name).unwrap() else {
                             unreachable!("list check above guarantees a list")
                         };
                         return values.get(index).cloned().ok_or_else(|| {
@@ -2546,8 +2586,7 @@ impl Interpreter {
                 }
                 if let Some(list_name) = name.strip_suffix(".set") {
                     if self
-                        .environment
-                        .get(list_name)
+                        .variable(list_name)
                         .is_some_and(|value| matches!(value, Value::List(_)))
                     {
                         if arguments.len() != 2 {
@@ -2556,12 +2595,12 @@ impl Interpreter {
                         let index = self.evaluate(&arguments[0])?;
                         let index = expect_collection_index(&index, self.locale, *position)?;
                         let value = self.evaluate(&arguments[1])?;
-                        let Value::List(values) = self.environment.get_mut(list_name).unwrap()
-                        else {
+                        let locale = self.locale;
+                        let Value::List(values) = self.variable_mut(list_name).unwrap() else {
                             unreachable!("list check above guarantees a list")
                         };
                         let slot = values.get_mut(index).ok_or_else(|| {
-                            error_for(self.locale, "P1027", *position, &index.to_string())
+                            error_for(locale, "P1027", *position, &index.to_string())
                         })?;
                         *slot = value;
                         return Ok(Value::Boolean(true));
@@ -2572,10 +2611,10 @@ impl Interpreter {
                         return Err(error_for(self.locale, "P1009", *position, name));
                     }
                     let value = self.evaluate(&arguments[0])?;
+                    let locale = self.locale;
                     let list = self
-                        .environment
-                        .get_mut(list_name)
-                        .ok_or_else(|| error_for(self.locale, "P1007", *position, list_name))?;
+                        .variable_mut(list_name)
+                        .ok_or_else(|| error_for(locale, "P1007", *position, list_name))?;
                     let Value::List(values) = list else {
                         return Err(error_for(self.locale, "P1010", *position, "list.push"));
                     };
@@ -2588,10 +2627,10 @@ impl Interpreter {
                     }
                     let index = self.evaluate(&arguments[0])?;
                     let index = expect_collection_index(&index, self.locale, *position)?;
+                    let locale = self.locale;
                     let list = self
-                        .environment
-                        .get_mut(list_name)
-                        .ok_or_else(|| error_for(self.locale, "P1007", *position, list_name))?;
+                        .variable_mut(list_name)
+                        .ok_or_else(|| error_for(locale, "P1007", *position, list_name))?;
                     let Value::List(values) = list else {
                         return Err(error_for(self.locale, "P1010", *position, "list.remove"));
                     };
@@ -2609,7 +2648,7 @@ impl Interpreter {
                     if !arguments.is_empty() {
                         return Err(error_for(self.locale, "P1009", *position, name));
                     }
-                    let collection = self.environment.get(collection_name).ok_or_else(|| {
+                    let collection = self.variable(collection_name).ok_or_else(|| {
                         error_for(self.locale, "P1007", *position, collection_name)
                     })?;
                     return match collection {
@@ -2623,7 +2662,7 @@ impl Interpreter {
                         return Err(error_for(self.locale, "P1009", *position, name));
                     }
                     let needle = self.evaluate(&arguments[0])?;
-                    let collection = self.environment.get(collection_name).ok_or_else(|| {
+                    let collection = self.variable(collection_name).ok_or_else(|| {
                         error_for(self.locale, "P1007", *position, collection_name)
                     })?;
                     return match collection {
@@ -2647,8 +2686,7 @@ impl Interpreter {
                     let key = self.evaluate(&arguments[0])?;
                     let key = expect_map_key(&key, self.locale, *position)?;
                     let map = self
-                        .environment
-                        .get(map_name)
+                        .variable(map_name)
                         .ok_or_else(|| error_for(self.locale, "P1007", *position, map_name))?;
                     let Value::Map(values) = map else {
                         return Err(error_for(self.locale, "P1010", *position, "map.get"));
@@ -2665,10 +2703,10 @@ impl Interpreter {
                     let key = self.evaluate(&arguments[0])?;
                     let key = expect_map_key(&key, self.locale, *position)?.to_owned();
                     let value = self.evaluate(&arguments[1])?;
+                    let locale = self.locale;
                     let map = self
-                        .environment
-                        .get_mut(map_name)
-                        .ok_or_else(|| error_for(self.locale, "P1007", *position, map_name))?;
+                        .variable_mut(map_name)
+                        .ok_or_else(|| error_for(locale, "P1007", *position, map_name))?;
                     let Value::Map(values) = map else {
                         return Err(error_for(self.locale, "P1010", *position, "map.set"));
                     };
@@ -2688,14 +2726,17 @@ impl Interpreter {
                     .map(|argument| self.evaluate(argument))
                     .collect::<Result<Vec<_>, _>>()?;
                 let previous_environment = std::mem::replace(&mut self.environment, HashMap::new());
+                let previous_local_scopes = std::mem::take(&mut self.local_scopes);
                 let previous_return = self.return_value.take();
                 for (parameter, value) in parameters.iter().zip(values) {
                     self.environment.insert(parameter.clone(), value);
                 }
-                self.run(&body)?;
+                let run_result = self.run(&body);
                 let result = self.return_value.take().unwrap_or(Value::Null);
                 self.environment = previous_environment;
+                self.local_scopes = previous_local_scopes;
                 self.return_value = previous_return;
+                run_result?;
                 Ok(result)
             }
             Expr::List(expressions) => expressions
@@ -2782,8 +2823,7 @@ impl Interpreter {
                 continue;
             }
             let value = self
-                .environment
-                .get(name)
+                .variable(name)
                 .ok_or_else(|| error_for(self.locale, "P1007", position, name))?;
             result.push_str(&value.to_string());
         }
@@ -4310,6 +4350,15 @@ mod tests {
     fn updates_variables_and_runs_bangla_while_loop() {
         let output = run("ধরি i = ০\nযতক্ষণ i < ৩ {\n দেখাও i\n i = i + ১\n}\n").unwrap();
         assert_eq!(output, vec!["0", "1", "2"]);
+    }
+
+    #[test]
+    fn keeps_bangla_block_bindings_lexical_without_breaking_outer_assignment() {
+        let output = run(
+            "ধরি নাম = \"বাইরে\"\nযদি সত্য {\n  ধরি নাম = \"ভেতরে\"\n  দেখাও নাম\n}\nদেখাও নাম\nযদি সত্য {\n  নাম = \"পরিবর্তিত\"\n}\nদেখাও নাম\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["ভেতরে", "বাইরে", "পরিবর্তিত"]);
     }
 
     #[test]

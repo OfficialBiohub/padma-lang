@@ -9,8 +9,10 @@ Current support is deliberately narrow:
 - `textDocument/formatting` returns the idempotent Padma formatter output.
 - `textDocument/completion` returns a safe static Bangla-English keyword, builtin, and standard-library module catalogue.
 - `textDocument/hover` explains supported Bangla-English keywords and selected stable builtins.
+- `textDocument/definition` resolves the nearest visible same-document local declaration.
+- `textDocument/prepareRename` and `textDocument/rename` provide conservative local-variable rename edits.
 
-The server now consumes a compiler-owned, non-executing local declaration API with parser positions and lexical scope metadata for Bangla-English `let`/`ধরি`, `function`/`ফাংশন`, and loop-variable declarations. This replaces text-prefix scanning and is the tested foundation for scope-aware navigation; it does not yet bind identifier references for rename.
+The server consumes compiler-owned, non-executing declaration and reference-binding APIs with parser positions and lexical scope metadata. This replaces text-prefix scanning. Same-document local variable declarations and references have stable binding IDs; nested shadowed names receive distinct IDs.
 
 `textDocument/definition` now uses that index for conservative same-document lookup. It returns the nearest declaration visible at the request position and deliberately returns no result for imported symbols, public exports, ambiguous malformed blocks, or cross-file references.
 
@@ -24,4 +26,4 @@ Run it during development with:
 cargo run --manifest-path tooling/padma-lsp/Cargo.toml
 ```
 
-Rename, dynamic symbol completion, and incremental range updates are intentionally deferred until identifier-reference binding and the static-analysis contracts are expanded and tested.
+Rename is intentionally narrow: it only edits a compiler-resolved same-document local variable binding and rejects keywords, invalid identifiers, same-scope collisions, imports, exports, functions, members, unresolved names, and malformed source. Strings and comments are not parsed as references. Cross-file rename, document symbols, and incremental range updates remain deferred.

@@ -108,7 +108,19 @@ termux-setup-storage
 
 ## ৭. ফোনে editor tooling
 
-Termux-এ `nano` সবচেয়ে সহজ editor। Desktop VS Code ব্যবহার করলে repository-এর `tooling/vscode-padma` extension `.pd` highlighting, explicit Padma commands, এবং opt-in language server দেয়। Mobile editor বা remote desktop ছাড়া এটি Termux-এর প্রয়োজন নয়: `nano`, `padma check`, `padma fmt`, এবং `padma lint` সম্পূর্ণ command-line workflow দেয়।
+Termux-এ `nano` সবচেয়ে সহজ এবং supported editor। Android-এর অন্য কোনো text editor দিয়ে `.pd` file লেখা যায়, কিন্তু Padma চালানো, error দেখা, format করা, এবং lint করার জন্য আবার Termux-এ ফিরে আসতে হবে। তাই phone-only workflow-তে editor-এর বদলে **Termux + nano + Padma CLI**-ই প্রধান পথ:
+
+```bash
+nano hello.pd
+padma check hello.pd
+padma fmt hello.pd
+padma lint hello.pd
+padma hello.pd
+```
+
+Desktop VS Code একটি optional দ্বিতীয় পথ; এটি ফোনে Padma চালানোর প্রয়োজনীয় শর্ত নয়। Computer বা remote desktop থাকলে repository-এর `tooling/vscode-padma` extension install করে `.pd` highlighting, explicit run/check/format/lint command, Problems panel diagnostics, এবং opt-in language server পাওয়া যায়। Language server কখনও file খোলার সময় নিজে চালু হয় না: Command Palette থেকে **Padma: Start Language Server** নির্বাচন করতে হয়।
+
+VS Code যদি `padma` বা `padma-lsp` না পায়, Settings-এ `padma.command` ও `padma.languageServer.command`-এ ওই executable-এর পূর্ণ path দিন। Example workspace `tooling/vscode-padma/sample-workspace/` কোনো sensitive capability চায় না এবং Bangla shadowingসহ local rename পরীক্ষা করার জন্য ব্যবহার করা যায়। Termux-এ mobile-only হলে এই optional setup বাদ দিন; CLI commandগুলো একই Padma diagnostics দেয়।
 
 ## সাহায্য দরকার হলে
 

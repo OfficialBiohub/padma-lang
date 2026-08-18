@@ -82,6 +82,11 @@ jobs:
           python3 -m json.tool tooling/vscode-padma/package.json > /dev/null
           python3 -m json.tool tooling/vscode-padma/language-configuration.json > /dev/null
           python3 -m json.tool tooling/vscode-padma/syntaxes/padma.tmLanguage.json > /dev/null
+      - name: Package VS Code extension
+        working-directory: tooling/vscode-padma
+        run: pnpm run package:check
+      - name: Verify VSIX archive
+        run: unzip -t tooling/vscode-padma/dist/padma-vscode-0.1.0.vsix
 
   language-server:
     name: Test Padma language server

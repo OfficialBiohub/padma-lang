@@ -57,7 +57,7 @@
 - [x] Extend `padma check` from parser recovery to non-executing static semantic checks for provable literal division by zero.
 - [x] Extend static checks conservatively with top-level function and stable builtin call-arity validation.
 - [ ] Add scope-aware name resolution and safe literal-type static rules without guessing about imports or dynamic values.
-- [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
+- [x] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
 - [x] Create an independent ABI-15 Tree-sitter grammar with Bangla-English corpus tests, highlight queries, generated artifacts, and CI.
 - [x] Create an initial VS Code extension with `.pd` association, bilingual highlighting, explicit run/check/format/lint commands, and JSON diagnostic rendering.
 - [x] Implement an opt-in stdio Padma language server for diagnostics and document formatting, including UTF-16 position conversion tests.
@@ -65,10 +65,15 @@
 - [x] Add UTF-16-aware static LSP hover help for Bangla-English keywords and selected builtins.
 - [x] Add a Bangla Termux-first guide for installation, Nano editing, project capability review, diagnostics, formatting, linting, and Android storage boundaries.
 - [x] Add conservative same-document LSP definitions, dynamic local completion, and Bangla-English hover help.
-- [ ] Add extension packaging/sample-workspace validation and fuller mobile editor guidance.
+- [x] Complete VS Code extension packaging, sample-workspace validation, and fuller mobile-editor guidance.
+- [x] Add a minimal safe sample Padma workspace with bilingual source, project manifest, and editor settings for the local LSP command.
+- [x] Add a deterministic extension package validation command and CI check for its produced `.vsix` artifact.
+- [x] Document Android-friendly editing choices and the explicit desktop VS Code LSP setup without treating an editor as a replacement for Termux CLI workflows.
+- [x] Add an end-to-end LSP JSON-RPC smoke test covering capability negotiation and conservative Bangla local rename.
 - [ ] Build a parser-backed document symbol index that records lexical scopes, declarations, references, and UTF-16 locations without executing code.
 - [x] Build a tested non-executing local declaration index with lexical scope depth and UTF-16 declaration positions.
 - [x] Add scope-aware go-to-definition and dynamic in-document completion from the symbol index, with Bangla-English regression fixtures.
+- [x] Make interpreter block-local bindings agree with the compiler’s lexical binding model, including Bangla shadowing and assignment lookup regression tests.
 - [x] Add dynamic in-document completion for visible local declarations with Bangla-English regression fixtures.
 - [x] Add conservative same-document go-to-definition for the nearest visible local declaration, with shadowing regression tests.
 - [x] Add conservative rename preparation and edits for compiler-bound same-document local variables, rejecting imports, public exports, functions, members, unresolved identifiers, malformed source, and invalid replacement identifiers.
