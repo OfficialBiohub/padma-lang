@@ -26,7 +26,7 @@ The project will not claim production readiness until the following guarantees a
 
 ## 2. Current baseline
 
-Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, conditionals, bounded `while` loops, functions, lists, text-key maps, input, safe file output, HTTP GET, constrained process execution, media download integration, an interactive shell, and safe local imports. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include collection indexing, null values, JSON, a standard library, namespaces, static checks, formatting, a manifest, editor tooling, typed bridges, reproducible release artifacts, and a comprehensive security policy.
+Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, conditionals, bounded `while` loops, functions, null values, safely indexed/mutable lists, text-key maps, input, safe file output, HTTP GET, constrained process execution, media download integration, an interactive shell, and safe local imports. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include slicing and iteration, JSON, a standard library, namespaces, static checks, formatting, a manifest, editor tooling, typed bridges, reproducible release artifacts, and a comprehensive security policy.
 
 ## 3. Delivery principles
 
@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-The next code milestone is **M1 diagnostics and source handling**. Two increments are complete: `padma check` continues after a malformed statement and reports multiple independent syntax errors in one run; errors raised from an imported module now render against the original module file, source line, and its detected locale. The remaining M1 work is a documented diagnostic registry and broader `padma check` tests. This comes before new frameworks because a learner cannot effectively use a language that reports errors in the wrong file or with unclear guidance.
+**M1 diagnostics and source handling is complete for the current release line:** `padma check` continues after a malformed statement and reports multiple independent syntax errors in one run; errors raised from an imported module render against the original module file, source line, and detected locale; and the stable diagnostic registry is published. The active implementation work has moved to **M2 core collections**: safe list/map indexing, mutation, membership, length, and null semantics are implemented; slicing and iteration are next.
 
 ## 7. Security and release references
 

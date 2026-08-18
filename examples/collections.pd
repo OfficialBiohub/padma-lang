@@ -11,3 +11,10 @@ print tasks.remove(1)
 let profile = {"name": "Rafi", "class": 6}
 print profile["name"]
 print profile.len()
+
+let optional_note = none
+if optional_note {
+  print optional_note
+} else {
+  print "No note yet"
+}

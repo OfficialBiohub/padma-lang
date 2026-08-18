@@ -14,9 +14,11 @@ Padma allows Bengali and English keywords to represent the **same internal synta
 | Repeating loop and assignment | `যতক্ষণ`, `=` | `while`, `=` |
 | Function and return | `ফাংশন`, `ফেরত` | `function`, `return` |
 | Boolean values | `সত্য` / `মিথ্যা` | `true` / `false` |
+| Empty/null value | `কিছুইনা` | `none` |
 | Number, string, arithmetic, comparison | Yes | Yes |
 | String interpolation | `"নাম: {নাম}"` | `"Name: {name}"` |
 | Bengali digits | `০`–`৯` | `0`–`9` |
+| Lists | Indexing plus `.get()`, `.set()`, `.push()`, `.remove()`, `.len()`, and `.contains()` | Same APIs |
 | Maps/dictionaries | Text-key maps with `.get()` and `.set()` | Text-key maps with `.get()` and `.set()` |
 | Localized diagnostics | Bengali source → Bengali error | English source → English error |
 
@@ -67,6 +69,8 @@ padma> exit()
 ```
 
 The shell accepts `help` or `সাহায্য`, `copyright`, `credits`, and `license`. To leave it, use `exit()`, `quit()`, `exit`, or `বের হও`.
+
+For a multi-line `if`, `while`, or function block, continue entering lines after Padma changes the prompt to `...`; it runs the buffered block after the closing `}`.
 
 ### Why `pkg install padma -y` is not available yet
 
@@ -174,6 +178,19 @@ The same collection APIs work in Bangla source code:
 ধরি সংখ্যা = [১০, ২০, ৩০]
 দেখাও সংখ্যা[২]
 দেখাও সংখ্যা.get(০)
+```
+
+### Empty values
+
+Use `none` in English source or `কিছুইনা` in Bangla source when a value is intentionally absent. It is false in an `if` condition. A function that reaches the end without `return` / `ফেরত` also returns `none`.
+
+```padma
+ধরি নোট = কিছুইনা
+যদি নোট {
+  দেখাও নোট
+} নইলে {
+  দেখাও "এখনো কোনো নোট নেই"
+}
 ```
 
 ### Reusable modules
@@ -288,7 +305,7 @@ cargo test
 cargo build --release
 ```
 
-The MVP has no third-party compiler dependencies. Unit tests cover Bengali, English, mixed syntax, Bengali digits, conditional execution, string interpolation, localization, division-by-zero handling, assignment, while loops, and loop safety limits.
+The MVP has no third-party compiler dependencies. Unit tests cover Bengali, English, mixed syntax, Bengali digits, conditional execution, string interpolation, localization, diagnostics recovery, module loading, null values, safe collection indexing/mutation, assignment, while loops, and loop safety limits.
 
 ## Scope and roadmap
 

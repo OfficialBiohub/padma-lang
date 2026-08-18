@@ -226,6 +226,7 @@ enum TokenKind {
     Import,
     True,
     False,
+    Null,
     Identifier(String),
     Number(f64),
     String(String),
@@ -450,6 +451,7 @@ impl Lexer {
             "ইমপোর্ট" | "import" => TokenKind::Import,
             "সত্য" | "true" => TokenKind::True,
             "মিথ্যা" | "false" => TokenKind::False,
+            "কিছুইনা" | "none" => TokenKind::Null,
             _ => TokenKind::Identifier(word),
         };
         self.token(kind, position)
@@ -971,6 +973,7 @@ impl Parser {
             TokenKind::String(value) => Ok(Expr::Literal(Value::String(value), token.position)),
             TokenKind::True => Ok(Expr::Literal(Value::Boolean(true), token.position)),
             TokenKind::False => Ok(Expr::Literal(Value::Boolean(false), token.position)),
+            TokenKind::Null => Ok(Expr::Literal(Value::Null, token.position)),
             TokenKind::Identifier(name) => {
                 let name = if self.matches(|kind| matches!(kind, TokenKind::Dot)) {
                     match self.advance().clone().kind {
@@ -1132,6 +1135,7 @@ enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
+    Null,
     List(Vec<Value>),
     Map(BTreeMap<String, Value>),
 }
@@ -1140,6 +1144,7 @@ impl Value {
     fn truthy(&self) -> bool {
         match self {
             Self::Boolean(value) => *value,
+            Self::Null => false,
             Self::Number(value) => *value != 0.0,
             Self::String(value) => !value.is_empty(),
             Self::List(value) => !value.is_empty(),
@@ -1156,6 +1161,7 @@ impl fmt::Display for Value {
             Self::String(value) => write!(formatter, "{value}"),
             Self::Boolean(true) => write!(formatter, "true"),
             Self::Boolean(false) => write!(formatter, "false"),
+            Self::Null => write!(formatter, "none"),
             Self::List(values) => {
                 write!(formatter, "[")?;
                 for (index, value) in values.iter().enumerate() {
@@ -1279,7 +1285,7 @@ impl Interpreter {
             Stmt::Return { value, .. } => {
                 self.return_value = Some(match value {
                     Some(expression) => self.evaluate(expression)?,
-                    None => Value::String(String::new()),
+                    None => Value::Null,
                 });
             }
             Stmt::Import { path, position } => self.import_module(path, *position)?,
@@ -1676,10 +1682,7 @@ impl Interpreter {
                     self.environment.insert(parameter.clone(), value);
                 }
                 self.run(&body)?;
-                let result = self
-                    .return_value
-                    .take()
-                    .unwrap_or(Value::String(String::new()));
+                let result = self.return_value.take().unwrap_or(Value::Null);
                 self.environment = previous_environment;
                 self.return_value = previous_return;
                 Ok(result)
@@ -1948,24 +1951,57 @@ fn main() {
     }
 }
 
+fn brace_delta(line: &str) -> isize {
+    let mut delta = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in line.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_string && character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string {
+            match character {
+                '#' => break,
+                '{' => delta += 1,
+                '}' => delta -= 1,
+                _ => {}
+            }
+        }
+    }
+    delta
+}
+
 fn repl() {
     println!("Padma 0.1.0 (Bangla-English hybrid programming language)");
     println!("Interactive shell: help, copyright, credits, license; exit with exit() or বের হও.");
+    println!("Use `{{` blocks across lines; Padma shows `...` until the block is complete.");
     let stdin = io::stdin();
     let mut interpreter = Interpreter::new(Locale::Bangla);
+    let mut buffer = String::new();
+    let mut open_braces = 0isize;
     loop {
-        print!("padma> ");
+        print!("{}", if buffer.is_empty() { "padma> " } else { "... " });
         let _ = io::stdout().flush();
         let mut line = String::new();
         if stdin.read_line(&mut line).unwrap_or(0) == 0 {
             break;
         }
         let line = line.trim_end();
-        if matches!(line, "exit" | "exit()" | "quit" | "quit()" | "বের হও") {
+        if buffer.is_empty() && matches!(line, "exit" | "exit()" | "quit" | "quit()" | "বের হও")
+        {
             break;
         }
-        match line {
-            "help" | "help()" | "সাহায্য" => {
+        match (buffer.is_empty(), line) {
+            (true, "help" | "help()" | "সাহায্য") => {
                 println!("Padma interactive shell commands:");
                 println!("  help / সাহায্য       show this help");
                 println!("  copyright            show copyright information");
@@ -1975,24 +2011,32 @@ fn repl() {
                 println!("Examples: দেখাও ২ + ৩ | print \"hello\" | ধরি x = 10");
                 continue;
             }
-            "copyright" | "copyright()" => {
+            (true, "copyright" | "copyright()") => {
                 println!("Copyright (c) 2026 OfficialBiohub and Padma contributors.");
                 continue;
             }
-            "credits" | "credits()" => {
+            (true, "credits" | "credits()") => {
                 println!("Padma is an open-source Bangla-English language project by OfficialBiohub and its contributors.");
                 continue;
             }
-            "license" | "license()" => {
+            (true, "license" | "license()") => {
                 println!("Padma is released under the MIT License. See LICENSE in the repository.");
                 continue;
             }
             _ => {}
         }
-        if line.trim().is_empty() {
+        if buffer.is_empty() && line.trim().is_empty() {
             continue;
         }
-        match compile(&format!("{line}\n")) {
+        open_braces += brace_delta(line);
+        buffer.push_str(line);
+        buffer.push('\n');
+        if open_braces > 0 {
+            continue;
+        }
+        let source = std::mem::take(&mut buffer);
+        open_braces = 0;
+        match compile(&source) {
             Ok((program, locale)) => {
                 interpreter.locale = locale;
                 interpreter.return_value = None;
@@ -2148,6 +2192,28 @@ mod tests {
         let out_of_range = run("ধরি সংখ্যা = [১]\nদেখাও সংখ্যা[১]\n").unwrap_err();
         assert_eq!(out_of_range.code, "P1027");
         assert_eq!(out_of_range.locale, Locale::Bangla);
+    }
+
+    #[test]
+    fn supports_english_and_bangla_null_values() {
+        let output = run(
+            "let result = none\nif result {\n  print \"unexpected\"\n} else {\n  print \"empty\"\n}\nধরি উত্তর = কিছুইনা\nযদি উত্তর {\n  দেখাও \"ভুল\"\n} নইলে {\n  দেখাও \"খালি\"\n}\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["empty", "খালি"]);
+    }
+
+    #[test]
+    fn function_without_return_produces_null() {
+        let output = run("function work() {\n print \"done\"\n}\nprint work()\n").unwrap();
+        assert_eq!(output, vec!["done", "none"]);
+    }
+
+    #[test]
+    fn counts_repl_braces_without_counting_strings_or_comments() {
+        assert_eq!(brace_delta("if true {"), 1);
+        assert_eq!(brace_delta("print \"{not a block}\" # }"), 0);
+        assert_eq!(brace_delta("}"), -1);
     }
 
     #[test]
