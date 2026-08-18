@@ -10,7 +10,7 @@ This document defines the current contract and the approval requirements for any
 |---|---|---|---|
 | Project files | `filesystem = ["read"]` / `["write"]` | Resolves under the canonical project root. Rejects `..`, absolute paths, `@downloads`, and symlink escapes. | `P1034` when not granted; `P1014` for an unsafe path. |
 | HTTP(S) | `network = ["http"]` | Enables bounded `http.get`; URL validation still applies. | `P1034` when not granted. |
-| Selected executables | `process = ["git", "yt-dlp", "curl", "ffmpeg", "python", "python3"]` | Enables only the named executable through argument-safe process invocation, never a shell. | `P1034` when not granted. |
+| Selected executables | `process = ["git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node"]` | Enables only the named executable through argument-safe process invocation, never a shell. `bridge.call` accepts only fixed Python/Node runtime selectors and a validated project-local script path. | `P1034` when not granted. |
 | Media download | `media = ["download"]` plus `filesystem = ["write"]` | Enables `media.download` with safe output-path checks. | `P1034` when either grant is absent. |
 
 Inspect permissions before execution:

@@ -38,6 +38,12 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1032 | Project | Project manifest or entrypoint is invalid or cannot be read. |
 | P1033 | Project safety | Third-party dependencies are not supported until a trusted registry policy exists. |
 | P1034 | Capability safety | A manifest-run project attempted a sensitive builtin without its explicit capability grant. |
+| P1035 | Bridge safety | Requested bridge runtime is not supported. |
+| P1036 | Bridge safety | Bridge script path is unsafe, missing, outside the project root, or has the wrong extension. |
+| P1037 | Bridge safety | Bridge JSON input or output exceeded the 256 KiB limit. |
+| P1038 | Bridge runtime | Bridge process could not start or completed with a non-zero exit status. |
+| P1039 | Bridge safety | Bridge process exceeded the 10-second execution limit. |
+| P1040 | Bridge runtime | Bridge standard output was not one valid JSON-compatible value. |
 
 ## Example
 

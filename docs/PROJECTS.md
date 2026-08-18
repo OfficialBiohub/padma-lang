@@ -58,7 +58,7 @@ When a program runs as a project with `padma .`, sensitive builtins are **denied
 |---|---|---|---|
 | `filesystem` | `read`, `write` | `file.read`, `file.exists`, `file.write` | Paths are relative to the canonical project root; `..`, symlink escapes, and `@downloads` are rejected. |
 | `network` | `http` | `http.get` | HTTP and HTTPS URLs only; request timeout remains bounded. |
-| `process` | `git`, `yt-dlp`, `curl`, `ffmpeg`, `python`, `python3` | `process.run(program, ...)` | Each executable needs its own explicit grant; shell interpolation is never used. |
+| `process` | `git`, `yt-dlp`, `curl`, `ffmpeg`, `python`, `python3`, `node` | `process.run(program, ...)`, `bridge.call(...)` | Each executable needs its own explicit grant; shell interpolation is never used. `bridge.call("python", ...)` requires `python`; `bridge.call("javascript", ...)` requires `node`. |
 | `media` | `download` | `media.download(url[, output])` | Also requires `filesystem = ["write"]` because it writes output. |
 
 For example, a read-only HTTP project needs only:
@@ -75,6 +75,20 @@ padma capabilities .
 ```
 
 Direct single-file execution such as `padma script.pd` preserves the existing compatibility mode. It retains Padma's path validation and limited executable allowlist, but does not require a `padma.toml` capability declaration. New multi-file projects should prefer `padma .` because it makes each sensitive permission reviewable and scopes declared filesystem operations to the project root.
+
+For a reviewed Python bridge, keep the foreign script in the project and grant only Python:
+
+```toml
+[capabilities]
+process = ["python"]
+```
+
+```padma
+let result = bridge.call("python", "bridges/analyze.py", {"scores": [4, 5, 5]})
+print result
+```
+
+Use `process = ["node"]` for `bridge.call("javascript", ...)`. The bridge does not accept arbitrary commands or extra subprocess arguments. Read [`INTEROPERABILITY.md`](INTEROPERABILITY.md) before enabling a foreign runtime.
 
 > Capability declarations do not grant Android storage permission, unrestricted paths, shell access, background execution, or remote package installation. Android shared-storage access and audited escalation remain future milestones.
 

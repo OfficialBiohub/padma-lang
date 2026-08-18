@@ -8,15 +8,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value as JsonValue;
 
 static RANDOM_COUNTER: AtomicU64 = AtomicU64::new(0);
+const BRIDGE_MAX_BYTES: usize = 256 * 1024;
+const BRIDGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Locale {
@@ -226,6 +229,18 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1031") => (format!("text.format placeholder was not found: `{detail}`"), Some("Add a text key with the same name to the map.".into())),
         (Locale::Bangla, "P1034") => (format!("এই project-এ `{detail}` capability অনুমোদিত নয়"), Some("padma.toml-এর [capabilities] অংশে প্রয়োজনীয় সীমিত permission যোগ করুন।".into())),
         (Locale::English, "P1034") => (format!("This project has not granted the `{detail}` capability"), Some("Add only the required limited permission under [capabilities] in padma.toml.".into())),
+        (Locale::Bangla, "P1035") => (format!("এই bridge runtime সমর্থিত নয়: `{detail}`"), Some("শুধু `python` অথবা `javascript` ব্যবহার করুন।".into())),
+        (Locale::English, "P1035") => (format!("This bridge runtime is not supported: `{detail}`"), Some("Use only `python` or `javascript`.".into())),
+        (Locale::Bangla, "P1036") => (format!("bridge script path নিরাপদ বা সঠিক নয়: `{detail}`"), Some("project folder-এর ভেতরে `.py` বা `.js` relative file ব্যবহার করুন।".into())),
+        (Locale::English, "P1036") => (format!("Bridge script path is unsafe or invalid: `{detail}`"), Some("Use a relative `.py` or `.js` file inside the project folder.".into())),
+        (Locale::Bangla, "P1037") => ("bridge input বা output অনুমোদিত আকারের চেয়ে বড়".into(), Some("bridge JSON data 256 KiB-এর মধ্যে রাখুন।".into())),
+        (Locale::English, "P1037") => ("Bridge input or output exceeds the permitted size".into(), Some("Keep bridge JSON data within 256 KiB.".into())),
+        (Locale::Bangla, "P1038") => (format!("bridge process চালু বা সম্পন্ন করা যায়নি: `{detail}`"), Some("runtime install, script code, এবং capability পরীক্ষা করুন।".into())),
+        (Locale::English, "P1038") => (format!("Bridge process could not start or complete: `{detail}`"), Some("Check the runtime installation, script code, and capability.".into())),
+        (Locale::Bangla, "P1039") => ("bridge process সময়সীমা অতিক্রম করেছে".into(), Some("bridge কাজটি 10 সেকেন্ডের মধ্যে শেষ করুন।".into())),
+        (Locale::English, "P1039") => ("Bridge process exceeded its time limit".into(), Some("Make the bridge finish within 10 seconds.".into())),
+        (Locale::Bangla, "P1040") => ("bridge output সঠিক JSON data নয়".into(), Some("standard output-এ একটি মাত্র JSON value লিখুন।".into())),
+        (Locale::English, "P1040") => ("Bridge output is not valid JSON data".into(), Some("Write exactly one JSON value to standard output.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1449,6 +1464,21 @@ fn value_to_json(value: &Value) -> Result<JsonValue, String> {
     }
 }
 
+fn read_bridge_stream(mut stream: impl Read) -> Result<Vec<u8>, ()> {
+    let mut result = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = stream.read(&mut buffer).map_err(|_| ())?;
+        if read == 0 {
+            return Ok(result);
+        }
+        if result.len().saturating_add(read) > BRIDGE_MAX_BYTES {
+            return Err(());
+        }
+        result.extend_from_slice(&buffer[..read]);
+    }
+}
+
 #[derive(Debug)]
 struct ParsedUrl {
     normalized: String,
@@ -1665,6 +1695,121 @@ impl Interpreter {
             return Err(());
         }
         Ok(resolved)
+    }
+
+    fn bridge_call(
+        &self,
+        runtime: &str,
+        script_path: &str,
+        value: &Value,
+        position: Position,
+    ) -> Result<Value, PadmaError> {
+        let (program, required_extension) = match runtime {
+            "python" => ("python", "py"),
+            "javascript" => ("node", "js"),
+            _ => return Err(error_for(self.locale, "P1035", position, runtime)),
+        };
+        self.require_capability(&format!("process:{program}"), "bridge.call", position)?;
+
+        let relative = safe_relative_path(script_path)
+            .map_err(|_| error_for(self.locale, "P1036", position, script_path))?;
+        let resolved = if self.project_root.is_some() {
+            self.resolve_file_path(script_path)
+                .map_err(|_| error_for(self.locale, "P1036", position, script_path))?
+        } else {
+            relative
+        };
+        let script = fs::canonicalize(&resolved)
+            .map_err(|_| error_for(self.locale, "P1036", position, script_path))?;
+        if !script.is_file()
+            || script.extension().and_then(|extension| extension.to_str())
+                != Some(required_extension)
+        {
+            return Err(error_for(self.locale, "P1036", position, script_path));
+        }
+        if let Some(root) = self.project_root.as_ref() {
+            if !script.starts_with(root) {
+                return Err(error_for(self.locale, "P1036", position, script_path));
+            }
+        }
+
+        let input = serde_json::to_vec(
+            &value_to_json(value)
+                .map_err(|detail| error_for(self.locale, "P1029", position, &detail))?,
+        )
+        .map_err(|error| error_for(self.locale, "P1029", position, &error.to_string()))?;
+        if input.len() > BRIDGE_MAX_BYTES {
+            return Err(error_for(self.locale, "P1037", position, "input"));
+        }
+        let path = env::var_os("PATH")
+            .ok_or_else(|| error_for(self.locale, "P1038", position, program))?;
+        let working_directory = self.project_root.clone().unwrap_or(
+            env::current_dir().map_err(|_| error_for(self.locale, "P1038", position, program))?,
+        );
+        let mut child = process::Command::new(program)
+            .arg(&script)
+            .current_dir(working_directory)
+            .env_clear()
+            .env("PATH", path)
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()
+            .map_err(|_| error_for(self.locale, "P1038", position, program))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| error_for(self.locale, "P1038", position, program))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| error_for(self.locale, "P1038", position, program))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| error_for(self.locale, "P1038", position, program))?;
+        let writer = thread::spawn(move || stdin.write_all(&input).and_then(|_| stdin.flush()));
+        let stdout_reader = thread::spawn(move || read_bridge_stream(stdout));
+        let stderr_reader = thread::spawn(move || read_bridge_stream(stderr));
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if started.elapsed() > BRIDGE_TIMEOUT => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(error_for(self.locale, "P1039", position, runtime));
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(error_for(self.locale, "P1038", position, program));
+                }
+            }
+        };
+        let write_result = writer
+            .join()
+            .map_err(|_| error_for(self.locale, "P1038", position, program))?;
+        let output = stdout_reader
+            .join()
+            .map_err(|_| error_for(self.locale, "P1038", position, program))?
+            .map_err(|_| error_for(self.locale, "P1037", position, "output"))?;
+        let _ = stderr_reader.join();
+        if write_result.is_err() || !status.success() {
+            return Err(error_for(self.locale, "P1038", position, program));
+        }
+        let output: JsonValue = serde_json::from_slice(&output)
+            .map_err(|_| error_for(self.locale, "P1040", position, runtime))?;
+        value_from_json(output).map_err(|_| error_for(self.locale, "P1040", position, runtime))
     }
 
     fn run(&mut self, program: &[Stmt]) -> Result<(), PadmaError> {
@@ -2481,6 +2626,18 @@ impl Interpreter {
                         String::from_utf8_lossy(&result.stdout).to_string(),
                     ));
                 }
+                if name == "bridge.call" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let runtime = self.evaluate(&arguments[0])?;
+                    let runtime = expect_string(&runtime, self.locale, *position, "runtime")?;
+                    let script_path = self.evaluate(&arguments[1])?;
+                    let script_path =
+                        expect_string(&script_path, self.locale, *position, "script path")?;
+                    let data = self.evaluate(&arguments[2])?;
+                    return self.bridge_call(runtime, script_path, &data, *position);
+                }
                 if name == "process.run" || name == "media.download" {
                     let values = arguments
                         .iter()
@@ -2882,7 +3039,9 @@ struct ProjectManifest {
     lint_disabled: BTreeSet<String>,
 }
 
-const PROCESS_CAPABILITIES: [&str; 6] = ["git", "yt-dlp", "curl", "ffmpeg", "python", "python3"];
+const PROCESS_CAPABILITIES: [&str; 7] = [
+    "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
+];
 const LINT_RULES: [&str; 3] = ["L1001", "L1002", "L1003"];
 
 fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
@@ -3188,6 +3347,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
     match name {
         "range" | "পরিসর" | "media.download" => Some((1, 2)),
         "process.run" => Some((1, usize::MAX)),
+        "bridge.call" => Some((3, 3)),
         "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
         | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
         | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
@@ -4065,6 +4225,102 @@ mod tests {
         let directory = env::temp_dir().join(format!("padma-{label}-{}-{nonce}", process::id()));
         fs::create_dir_all(&directory).unwrap();
         directory
+    }
+
+    fn run_bridge_project(
+        root: &Path,
+        capabilities: BTreeSet<String>,
+        source: &str,
+    ) -> Result<Vec<String>, PadmaError> {
+        let (program, locale) = compile(source)?;
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.to_path_buf(),
+            capabilities,
+        );
+        interpreter.run(&program)?;
+        Ok(interpreter.output)
+    }
+
+    #[test]
+    fn exchanges_typed_json_with_python_and_javascript_bridges() {
+        let root = module_fixture_dir("bridge-typed-json");
+        fs::create_dir_all(root.join("bridges")).unwrap();
+        fs::write(
+            root.join("bridges/score.py"),
+            "import json, sys\nrequest = json.load(sys.stdin)\njson.dump({'name': request['name'], 'total': sum(request['scores'])}, sys.stdout)\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("bridges/score.js"),
+            "const request = JSON.parse(require('node:fs').readFileSync(0, 'utf8')); process.stdout.write(JSON.stringify({name: request.name, total: request.scores.reduce((a, b) => a + b, 0)}));\n",
+        )
+        .unwrap();
+        let capabilities = BTreeSet::from(["process:python".into(), "process:node".into()]);
+        let output = run_bridge_project(
+            &root,
+            capabilities,
+            "let input = {\"name\": \"Rafi\", \"scores\": [2, 3, 4]}\nlet python_result = bridge.call(\"python\", \"bridges/score.py\", input)\nlet javascript_result = bridge.call(\"javascript\", \"bridges/score.js\", input)\nprint python_result[\"name\"]\nprint python_result[\"total\"]\nprint javascript_result[\"name\"]\nprint javascript_result[\"total\"]\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["Rafi", "9", "Rafi", "9"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bridge_rejects_unsafe_requests_with_stable_localized_errors() {
+        let root = module_fixture_dir("bridge-errors");
+        fs::create_dir_all(root.join("bridges")).unwrap();
+        fs::write(root.join("bridges/not_json.py"), "print('not json')\n").unwrap();
+        fs::write(
+            root.join("bridges/fail.py"),
+            "raise RuntimeError('intentional test failure')\n",
+        )
+        .unwrap();
+
+        let denied = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            "# padma:locale=bn\nদেখাও bridge.call(\"python\", \"bridges/not_json.py\", {})\n",
+        )
+        .unwrap_err();
+        assert_eq!(denied.code, "P1034");
+        assert_eq!(denied.locale, Locale::Bangla);
+
+        let capabilities = BTreeSet::from(["process:python".into()]);
+        let unsafe_path = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print bridge.call(\"python\", \"../outside.py\", {})\n",
+        )
+        .unwrap_err();
+        assert_eq!(unsafe_path.code, "P1036");
+
+        let invalid_runtime = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print bridge.call(\"shell\", \"bridges/not_json.py\", {})\n",
+        )
+        .unwrap_err();
+        assert_eq!(invalid_runtime.code, "P1035");
+
+        let invalid_json = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print bridge.call(\"python\", \"bridges/not_json.py\", {})\n",
+        )
+        .unwrap_err();
+        assert_eq!(invalid_json.code, "P1040");
+
+        let failed_process = run_bridge_project(
+            &root,
+            capabilities,
+            "print bridge.call(\"python\", \"bridges/fail.py\", {})\n",
+        )
+        .unwrap_err();
+        assert_eq!(failed_process.code, "P1038");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

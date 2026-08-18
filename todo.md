@@ -84,7 +84,12 @@
 - [x] Expose a compiler-owned parsed declaration API with local declaration kind, scope depth, and one-based source positions for editor consumers.
 - [x] Bind same-document local identifier references to lexical declarations without evaluating source or treating strings/comments as references.
 - [x] Return LSP rename edits only when every bound local reference is deterministic and the requested replacement is a valid Padma identifier.
-- [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
+- [x] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
+- [x] Define a versioned `bridge.call` contract that accepts JSON-compatible data only and returns decoded JSON values without evaluating returned source code.
+- [x] Require explicit `process` capability allowlist entries for each Python or JavaScript executable before any bridge child process starts.
+- [x] Execute bridge programs with fixed argument vectors, project-root-scoped script paths, bounded input/output, captured stderr, and localized failure diagnostics.
+- [x] Add Bangla-English regression tests for successful typed exchange, denied capabilities, invalid JSON, non-zero exit, missing runtime, and unsafe paths.
+- [x] Document a minimal Termux installation and use workflow for optional Python and Node.js bridges, including capability manifest examples and security boundaries.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
 - [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
 - [ ] Publish Bangla-first tutorials, a reference manual, API documentation, contribution rules, a code of conduct, and maintainership policy.

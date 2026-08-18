@@ -46,6 +46,17 @@ Paths cannot be absolute and cannot contain `..`. The `@downloads/` alias remain
 
 `url.parse` deliberately accepts only absolute `http://` and `https://` URLs, rejects whitespace and embedded credentials, and does not perform any network request. It is an inspection utility; `http.get` remains the network API and applies its own network safeguards.
 
+## Interoperability bridge
+
+| API | Result and boundary |
+|---|---|
+| `bridge.call("python", script_path, data)` | Runs a reviewed project-local `.py` file through the fixed `python` executable and decodes its one JSON output value. Requires `process = ["python"]` in project mode. |
+| `bridge.call("javascript", script_path, data)` | Runs a reviewed project-local `.js` file through the fixed `node` executable and decodes its one JSON output value. Requires `process = ["node"]` in project mode. |
+
+`data` may contain only JSON-compatible Padma values: finite numbers, text, `true`/`false`, `none`, lists, and maps with text keys. Padma writes exactly one UTF-8 JSON document to standard input and accepts exactly one UTF-8 JSON value from standard output. Returned text is data, never foreign source code to evaluate.
+
+The bridge accepts no arbitrary executable or argument string. Its script path must be a `.py` or `.js` relative file inside the canonical project root, and Padma invokes only the fixed runtime plus that verified path with a cleared child environment. Input and output are each limited to 256 KiB; execution is limited to 10 seconds. A bridge program still has the operating-system authority of the Termux or desktop user, so inspect its source and dependencies before granting `process` capability. See [`INTEROPERABILITY.md`](INTEROPERABILITY.md) for the full versioned contract.
+
 ## Paths, formatting, and randomness
 
 | API | Result and boundary |
@@ -63,4 +74,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

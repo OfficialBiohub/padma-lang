@@ -122,6 +122,47 @@ Desktop VS Code একটি optional দ্বিতীয় পথ; এটি �
 
 VS Code যদি `padma` বা `padma-lsp` না পায়, Settings-এ `padma.command` ও `padma.languageServer.command`-এ ওই executable-এর পূর্ণ path দিন। Example workspace `tooling/vscode-padma/sample-workspace/` কোনো sensitive capability চায় না এবং Bangla shadowingসহ local rename পরীক্ষা করার জন্য ব্যবহার করা যায়। Termux-এ mobile-only হলে এই optional setup বাদ দিন; CLI commandগুলো একই Padma diagnostics দেয়।
 
+## ৮. Optional Python বা JavaScript bridge
+
+Padma-এর `bridge.call` দিয়ে existing Python বা Node.js library-এর ছোট, review করা helper ব্যবহার করা যায়। এটি shell নয়: Padma শুধু fixed `python` বা `node` executable এবং project-এর ভিতরের একটি `.py` বা `.js` file চালায়। Foreign script Android/Termux user-এর permission-এ চলে, তাই অচেনা script বা dependency চালাবেন না।
+
+Python bridge চাইলে একবার install করুন:
+
+```bash
+pkg install python -y
+```
+
+তারপর project-এ grant দিন এবং bridge file বানান:
+
+```toml
+[capabilities]
+process = ["python"]
+```
+
+```bash
+mkdir -p bridges
+nano bridges/average.py
+```
+
+`bridges/average.py`-এ লিখুন:
+
+```python
+import json
+import sys
+
+data = json.load(sys.stdin)
+json.dump({"average": sum(data["scores"]) / len(data["scores"])}, sys.stdout)
+```
+
+তারপর `src/main.pd`-এ লিখুন:
+
+```padma
+ধরি ফল = bridge.call("python", "bridges/average.py", {"scores": [৪, ৫, ৫]})
+দেখাও ফল["average"]
+```
+
+`padma capabilities .` দিয়ে `process:python` দেখুন, তারপর `padma .` চালান। JavaScript-এর জন্য `pkg install nodejs -y`, `process = ["node"]`, এবং `bridge.call("javascript", "bridges/helper.js", data)` ব্যবহার করুন। Bridge input ও output JSON data হতে হবে; 256 KiB-এর বেশি data বা 10 সেকেন্ডের বেশি সময় নিলে Padma error দেখাবে।
+
 ## সাহায্য দরকার হলে
 
 এই command-গুলোর outputসহ issue report করুন:
