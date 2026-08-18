@@ -7,6 +7,15 @@ struct Server {
     documents: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DocumentSymbol {
+    name: String,
+    kind: &'static str,
+    line: usize,
+    character: usize,
+    scope_depth: usize,
+}
+
 impl Server {
     fn new() -> Self {
         Self {
@@ -86,6 +95,35 @@ fn word_at(source: &str, position: &Value) -> Option<String> {
         end += text[end..].chars().next()?.len_utf8();
     }
     (start < end).then(|| text[start..end].to_string())
+}
+
+fn document_symbols(source: &str) -> Vec<DocumentSymbol> {
+    let mut symbols = Vec::new();
+    let mut depth = 0usize;
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.trim_start();
+        let indent = raw_line.len() - line.len();
+        for (prefix, kind) in [("let ", "variable"), ("ধরি ", "variable"), ("function ", "function"), ("ফাংশন ", "function")] {
+            if let Some(rest) = line.strip_prefix(prefix) {
+                let name: String = rest.chars().take_while(|value| value == &'_' || value.is_alphanumeric() || ('\u{0980}'..='\u{09ff}').contains(value)).collect();
+                if !name.is_empty() {
+                    symbols.push(DocumentSymbol {
+                        character: raw_line[..indent].encode_utf16().count() + prefix.encode_utf16().count(),
+                        name,
+                        kind,
+                        line: line_number,
+                        scope_depth: depth,
+                    });
+                }
+                break;
+            }
+        }
+        // Padma blocks are brace-delimited. This lexical counter intentionally does not
+        // claim semantic scope for malformed syntax; parser diagnostics remain authoritative.
+        depth = depth.saturating_add(line.matches('{').count());
+        depth = depth.saturating_sub(line.matches('}').count());
+    }
+    symbols
 }
 
 fn lsp_diagnostic(source: &str, diagnostic: &Value) -> Value {
@@ -299,5 +337,15 @@ mod tests {
     fn extracts_bangla_words_for_hover() {
         let source = "ধরি নাম = \"রাফি\"\n";
         assert_eq!(word_at(source, &json!({ "line": 0, "character": 1 })), Some("ধরি".to_string()));
+    }
+
+    #[test]
+    fn indexes_local_bangla_and_english_declarations_with_scopes() {
+        let symbols = document_symbols("let outer = 1\nif true {\n  ধরি ভিতর = 2\n}\nfunction run() {\n}\n");
+        assert_eq!(symbols.len(), 3);
+        assert_eq!(symbols[0].name, "outer");
+        assert_eq!(symbols[1].name, "ভিতর");
+        assert_eq!(symbols[1].scope_depth, 1);
+        assert_eq!(symbols[2].kind, "function");
     }
 }

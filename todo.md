@@ -65,6 +65,10 @@
 - [x] Add UTF-16-aware static LSP hover help for Bangla-English keywords and selected builtins.
 - [x] Add a Bangla Termux-first guide for installation, Nano editing, project capability review, diagnostics, formatting, linting, and Android storage boundaries.
 - [ ] Add LSP definitions, completion, hover, rename, extension packaging/sample-workspace validation, and fuller mobile editor guidance.
+- [ ] Build a parser-backed document symbol index that records lexical scopes, declarations, references, and UTF-16 locations without executing code.
+- [x] Build a tested non-executing local declaration index with lexical scope depth and UTF-16 declaration positions.
+- [ ] Add scope-aware go-to-definition and dynamic in-document completion from the symbol index, with Bangla-English regression fixtures.
+- [ ] Add conservative rename preparation and edits only for unambiguous local symbols, rejecting imports, public exports, and shadowed names until cross-file analysis exists.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
 - [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
