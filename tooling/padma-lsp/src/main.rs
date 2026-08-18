@@ -106,9 +106,80 @@ impl Server {
         }
         Value::Array(items)
     }
+
+    fn rename_binding(&self, uri: &str, position: &Value) -> Option<(u64, Value)> {
+        let source = self.documents.get(uri).map(String::as_str).unwrap_or("");
+        let range = word_range_at(source, position)?;
+        let report = padma_lang::local_reference_bindings_json(source).ok()?;
+        let line = range["start"]["line"].as_u64()? as usize;
+        let character = range["start"]["character"].as_u64()? as usize;
+        for item in report["declarations"].as_array()?.iter().chain(report["references"].as_array()?.iter()) {
+            let source_line = item["line"].as_u64()? as usize;
+            let source_column = item["column"].as_u64()? as usize;
+            if source_line.saturating_sub(1) == line && utf16_column(source, source_line, source_column) == character {
+                return Some((item["bindingId"].as_u64()?, range));
+            }
+        }
+        None
+    }
+
+    fn prepare_rename(&self, uri: &str, position: &Value) -> Value {
+        self.rename_binding(uri, position).map_or(Value::Null, |(_, range)| range)
+    }
+
+    fn rename(&self, uri: &str, position: &Value, new_name: &str) -> Value {
+        if !is_valid_identifier(new_name) {
+            return Value::Null;
+        }
+        let Some((binding_id, _)) = self.rename_binding(uri, position) else {
+            return Value::Null;
+        };
+        let source = self.documents.get(uri).map(String::as_str).unwrap_or("");
+        let Ok(report) = padma_lang::local_reference_bindings_json(source) else {
+            return Value::Null;
+        };
+        let target_depth = report["declarations"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["bindingId"].as_u64() == Some(binding_id)))
+            .and_then(|item| item["scopeDepth"].as_u64());
+        if report["declarations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|item| {
+                item["bindingId"].as_u64() != Some(binding_id)
+                    && item["name"].as_str() == Some(new_name)
+                    && item["scopeDepth"].as_u64() == target_depth
+            })
+        {
+            return Value::Null;
+        }
+        let mut edits = Vec::new();
+        for item in report["declarations"].as_array().into_iter().flatten().chain(report["references"].as_array().into_iter().flatten()) {
+            if item["bindingId"].as_u64() != Some(binding_id) { continue; }
+            let line = item["line"].as_u64().unwrap_or(1) as usize;
+            let column = item["column"].as_u64().unwrap_or(1) as usize;
+            let name = item["name"].as_str().unwrap_or("");
+            let start = json!({ "line": line.saturating_sub(1), "character": utf16_column(source, line, column) });
+            let end = json!({ "line": line.saturating_sub(1), "character": utf16_column(source, line, column) + name.encode_utf16().count() });
+            edits.push(json!({ "range": { "start": start, "end": end }, "newText": new_name }));
+        }
+        (!edits.is_empty()).then(|| json!({ "changes": { uri: edits } })).unwrap_or(Value::Null)
+    }
 }
 
 fn word_at(source: &str, position: &Value) -> Option<String> {
+    let range = word_range_at(source, position)?;
+    let line = range["start"]["line"].as_u64()? as usize;
+    let start = range["start"]["character"].as_u64()? as usize;
+    let end = range["end"]["character"].as_u64()? as usize;
+    let text = source.lines().nth(line)?;
+    let mut seen = 0usize;
+    let selected: String = text.chars().filter(|character| { let width = character.len_utf16(); let include = seen >= start && seen < end; seen += width; include }).collect();
+    (!selected.is_empty()).then_some(selected)
+}
+
+fn word_range_at(source: &str, position: &Value) -> Option<Value> {
     let line = position["line"].as_u64()? as usize;
     let character = position["character"].as_u64()? as usize;
     let text = source.lines().nth(line)?;
@@ -128,7 +199,17 @@ fn word_at(source: &str, position: &Value) -> Option<String> {
     while end < text.len() && is_word(text[end..].chars().next()?) {
         end += text[end..].chars().next()?.len_utf8();
     }
-    (start < end).then(|| text[start..end].to_string())
+    (start < end).then(|| json!({
+        "start": { "line": line, "character": text[..start].encode_utf16().count() },
+        "end": { "line": line, "character": text[..end].encode_utf16().count() }
+    }))
+}
+
+fn is_valid_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    let Some(first) = characters.next() else { return false; };
+    let valid = |character: char| character == '_' || character.is_alphanumeric() || ('\u{0980}'..='\u{09ff}').contains(&character);
+    valid(first) && characters.all(valid) && !matches!(value, "let" | "ধরি" | "function" | "ফাংশন" | "if" | "যদি" | "for" | "প্রতি" | "while" | "যতক্ষণ")
 }
 
 fn document_symbols(source: &str) -> Vec<DocumentSymbol> {
@@ -274,7 +355,8 @@ fn main() -> io::Result<()> {
                             "documentFormattingProvider": true,
                             "completionProvider": { "triggerCharacters": ["."] },
                             "hoverProvider": true,
-                            "definitionProvider": true
+                            "definitionProvider": true,
+                            "renameProvider": { "prepareProvider": true }
                         },
                         "serverInfo": { "name": "padma-lsp", "version": "0.1.0" }
                     })))?;
@@ -337,6 +419,19 @@ fn main() -> io::Result<()> {
                 if let Some(id) = id {
                     let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
                     write_message(&mut output, &response(id, server.definition(uri, &params["position"])))?;
+                }
+            }
+            "textDocument/prepareRename" => {
+                if let Some(id) = id {
+                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+                    write_message(&mut output, &response(id, server.prepare_rename(uri, &params["position"])))?;
+                }
+            }
+            "textDocument/rename" => {
+                if let Some(id) = id {
+                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+                    let new_name = params["newName"].as_str().unwrap_or("");
+                    write_message(&mut output, &response(id, server.rename(uri, &params["position"], new_name)))?;
                 }
             }
             _ if id.is_some() => {
@@ -412,5 +507,20 @@ mod tests {
         server.documents.insert(uri.to_string(), "ধরি নাম = 1\nদেখাও নাম\n".to_string());
         let items = server.completion(uri, &json!({ "line": 1, "character": 0 }));
         assert!(items.as_array().unwrap().iter().any(|item| item["label"] == "নাম"));
+    }
+
+    #[test]
+    fn renames_only_one_bound_local_symbol_with_bangla_shadowing() {
+        let mut server = Server::new();
+        let uri = "file:///rename.pd";
+        server.documents.insert(uri.to_string(), "ধরি নাম = 1\nধরি অন্য = 3\nদেখাও নাম\nযদি সত্য {\n  ধরি নাম = 2\n  দেখাও নাম\n}\n".to_string());
+        let edit = server.rename(uri, &json!({ "line": 2, "character": 7 }), "শিরোনাম");
+        let changes = edit["changes"][uri].as_array().unwrap();
+        assert_eq!(changes.len(), 2);
+        assert!(changes.iter().all(|item| item["newText"] == "শিরোনাম"));
+        assert!(server.prepare_rename(uri, &json!({ "line": 0, "character": 4 })).is_object());
+        assert!(server.rename(uri, &json!({ "line": 2, "character": 7 }), "যদি").is_null());
+        assert!(server.rename(uri, &json!({ "line": 2, "character": 7 }), "অন্য").is_null());
+        assert!(server.prepare_rename(uri, &json!({ "line": 3, "character": 1 })).is_null());
     }
 }

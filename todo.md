@@ -65,20 +65,20 @@
 - [x] Add UTF-16-aware static LSP hover help for Bangla-English keywords and selected builtins.
 - [x] Add a Bangla Termux-first guide for installation, Nano editing, project capability review, diagnostics, formatting, linting, and Android storage boundaries.
 - [x] Add conservative same-document LSP definitions, dynamic local completion, and Bangla-English hover help.
-- [ ] Add LSP rename, extension packaging/sample-workspace validation, and fuller mobile editor guidance.
+- [ ] Add extension packaging/sample-workspace validation and fuller mobile editor guidance.
 - [ ] Build a parser-backed document symbol index that records lexical scopes, declarations, references, and UTF-16 locations without executing code.
 - [x] Build a tested non-executing local declaration index with lexical scope depth and UTF-16 declaration positions.
 - [x] Add scope-aware go-to-definition and dynamic in-document completion from the symbol index, with Bangla-English regression fixtures.
 - [x] Add dynamic in-document completion for visible local declarations with Bangla-English regression fixtures.
 - [x] Add conservative same-document go-to-definition for the nearest visible local declaration, with shadowing regression tests.
-- [ ] Add conservative rename preparation and edits only for unambiguous local symbols, rejecting imports, public exports, and shadowed names until cross-file analysis exists.
-- [ ] Bind identifier references to the nearest visible same-document local declaration using lexical scope and UTF-16 ranges.
-- [ ] Implement `textDocument/prepareRename` and `textDocument/rename` only for unambiguous local variable bindings with validated replacement identifiers.
-- [ ] Reject unsafe rename requests for imports, exports, functions, members, unresolved identifiers, shadowed ambiguity, and malformed source; add Bangla-English protocol tests.
-- [ ] Expose a compiler-owned parsed-document analysis API with stable local declaration/reference IDs and UTF-16 ranges for editor consumers.
+- [x] Add conservative rename preparation and edits for compiler-bound same-document local variables, rejecting imports, public exports, functions, members, unresolved identifiers, malformed source, and invalid replacement identifiers.
+- [x] Bind identifier references to the nearest visible same-document local declaration using lexical scope; nested shadowed names receive distinct binding IDs.
+- [x] Implement `textDocument/prepareRename` and `textDocument/rename` only for deterministic local variable bindings with validated replacement identifiers.
+- [x] Reject unsafe rename requests for imports, exports, functions, members, unresolved identifiers, and malformed source; preserve shadowed locals as separate bindings and add Bangla regression tests.
+- [x] Expose a compiler-owned parsed-document analysis API with stable local declaration/reference IDs and source positions for editor consumers; the LSP converts those positions to UTF-16 ranges.
 - [x] Expose a compiler-owned parsed declaration API with local declaration kind, scope depth, and one-based source positions for editor consumers.
-- [ ] Bind same-document local identifier references to lexical declarations without evaluating source or treating strings/comments as references.
-- [ ] Return LSP rename edits only when every bound local reference is deterministic and the requested replacement is a valid Padma identifier.
+- [x] Bind same-document local identifier references to lexical declarations without evaluating source or treating strings/comments as references.
+- [x] Return LSP rename edits only when every bound local reference is deterministic and the requested replacement is a valid Padma identifier.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
 - [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
