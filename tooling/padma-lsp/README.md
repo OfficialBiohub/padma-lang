@@ -8,6 +8,7 @@ Current support is deliberately narrow:
 - `textDocument/didOpen`, `didChange`, and `didClose` publish CLI-compatible diagnostics;
 - `textDocument/formatting` returns the idempotent Padma formatter output.
 - `textDocument/completion` returns a safe static Bangla-English keyword, builtin, and standard-library module catalogue.
+- `textDocument/hover` explains supported Bangla-English keywords and selected stable builtins.
 
 Diagnostics are generated through the public `padma_lang::check_source_json` API, so their codes, Bangla-English messages, and ranges agree with `padma check --json`. The server converts columns to LSP UTF-16 positions before publishing diagnostics.
 
@@ -17,4 +18,4 @@ Run it during development with:
 cargo run --manifest-path tooling/padma-lsp/Cargo.toml
 ```
 
-Go-to-definition, hover, rename, dynamic symbol completion, and incremental range updates are intentionally deferred until the AST/node and static-analysis contracts are expanded and tested.
+Go-to-definition, rename, dynamic symbol completion, and incremental range updates are intentionally deferred until the AST/node and static-analysis contracts are expanded and tested.

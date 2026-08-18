@@ -47,6 +47,45 @@ impl Server {
             "newText": padma_lang::format_source_text(source)
         }])
     }
+
+    fn hover(&self, uri: &str, position: &Value) -> Value {
+        let source = self.documents.get(uri).map(String::as_str).unwrap_or("");
+        let word = word_at(source, position).unwrap_or_default();
+        let message = match word.as_str() {
+            "let" | "ধরি" => Some("Padma variable declaration."),
+            "function" | "ফাংশন" => Some("Padma function declaration."),
+            "if" | "যদি" => Some("Padma conditional statement."),
+            "while" | "যতক্ষণ" => Some("Padma bounded loop statement."),
+            "for" | "প্রতি" => Some("Padma collection iteration statement."),
+            "input" => Some("Read one line of user input."),
+            "range" | "পরিসর" => Some("Create a bounded integer range."),
+            _ => None,
+        };
+        message.map_or(Value::Null, |value| json!({ "contents": { "kind": "markdown", "value": value } }))
+    }
+}
+
+fn word_at(source: &str, position: &Value) -> Option<String> {
+    let line = position["line"].as_u64()? as usize;
+    let character = position["character"].as_u64()? as usize;
+    let text = source.lines().nth(line)?;
+    let mut byte = 0usize;
+    let mut utf16 = 0usize;
+    for value in text.chars() {
+        if utf16 >= character { break; }
+        utf16 += value.len_utf16();
+        byte += value.len_utf8();
+    }
+    let is_word = |value: char| value == '_' || value.is_alphanumeric() || ('\u{0980}'..='\u{09ff}').contains(&value);
+    let mut start = byte.min(text.len());
+    while start > 0 && is_word(text[..start].chars().next_back()?) {
+        start = text[..start].char_indices().next_back()?.0;
+    }
+    let mut end = byte.min(text.len());
+    while end < text.len() && is_word(text[end..].chars().next()?) {
+        end += text[end..].chars().next()?.len_utf8();
+    }
+    (start < end).then(|| text[start..end].to_string())
 }
 
 fn lsp_diagnostic(source: &str, diagnostic: &Value) -> Value {
@@ -156,7 +195,8 @@ fn main() -> io::Result<()> {
                         "capabilities": {
                             "textDocumentSync": 1,
                             "documentFormattingProvider": true,
-                            "completionProvider": { "triggerCharacters": ["."] }
+                            "completionProvider": { "triggerCharacters": ["."] },
+                            "hoverProvider": true
                         },
                         "serverInfo": { "name": "padma-lsp", "version": "0.1.0" }
                     })))?;
@@ -208,6 +248,12 @@ fn main() -> io::Result<()> {
                     write_message(&mut output, &response(id, completion_items()))?;
                 }
             }
+            "textDocument/hover" => {
+                if let Some(id) = id {
+                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("");
+                    write_message(&mut output, &response(id, server.hover(uri, &params["position"])))?;
+                }
+            }
             _ if id.is_some() => {
                 write_message(&mut output, &json!({
                     "jsonrpc": "2.0",
@@ -247,5 +293,11 @@ mod tests {
         let items = completion_items();
         assert!(items.as_array().unwrap().iter().any(|item| item["label"] == "ধরি"));
         assert!(items.as_array().unwrap().iter().any(|item| item["label"] == "function"));
+    }
+
+    #[test]
+    fn extracts_bangla_words_for_hover() {
+        let source = "ধরি নাম = \"রাফি\"\n";
+        assert_eq!(word_at(source, &json!({ "line": 0, "character": 1 })), Some("ধরি".to_string()));
     }
 }
