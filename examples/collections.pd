@@ -1,0 +1,13 @@
+# Safe list and map collection operations
+let tasks = ["learn", "practice"]
+tasks.push("build")
+tasks.set(0, "study")
+
+print tasks[0]
+print tasks.len()
+print tasks.contains("practice")
+print tasks.remove(1)
+
+let profile = {"name": "Rafi", "class": 6}
+print profile["name"]
+print profile.len()

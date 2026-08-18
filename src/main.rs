@@ -203,6 +203,10 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1024") => (format!("Circular module import detected: `{detail}`"), Some("Do not import a module again through itself.".into())),
         (Locale::Bangla, "P1025") => (format!("module-এ error আছে: `{detail}`"), Some("module file-এর code ও syntax পরীক্ষা করুন।".into())),
         (Locale::English, "P1025") => (format!("Module contains an error: `{detail}`"), Some("Check the module code and syntax.".into())),
+        (Locale::Bangla, "P1026") => (format!("collection index অবশ্যই শূন্য বা তার বেশি পূর্ণসংখ্যা হতে হবে: `{detail}`"), Some("উদাহরণ: `তালিকা[0]` অথবা `তালিকা.get(0)` ব্যবহার করুন।".into())),
+        (Locale::English, "P1026") => (format!("Collection index must be a non-negative whole number: `{detail}`"), Some("Use an index such as `items[0]` or `items.get(0)`.".into())),
+        (Locale::Bangla, "P1027") => (format!("collection index সীমার বাইরে: `{detail}`"), Some("তালিকার দৈর্ঘ্যের চেয়ে ছোট index ব্যবহার করুন।".into())),
+        (Locale::English, "P1027") => (format!("Collection index is out of bounds: `{detail}`"), Some("Use an index smaller than the list length.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -540,6 +544,20 @@ fn expect_map_key<'a>(
         other => Err(error_for(locale, "P1020", position, &other.to_string())),
     }
 }
+
+fn expect_collection_index(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<usize, PadmaError> {
+    match value {
+        Value::Number(value) if value.is_finite() && *value >= 0.0 && value.fract() == 0.0 => {
+            usize::try_from(*value as u128)
+                .map_err(|_| error_for(locale, "P1026", position, &value.to_string()))
+        }
+        other => Err(error_for(locale, "P1026", position, &other.to_string())),
+    }
+}
 #[derive(Clone, Debug)]
 enum Stmt {
     Let {
@@ -599,6 +617,11 @@ enum Expr {
     Call {
         name: String,
         arguments: Vec<Expr>,
+        position: Position,
+    },
+    Index {
+        target: Box<Expr>,
+        index: Box<Expr>,
         position: Position,
     },
     List(Vec<Expr>),
@@ -923,7 +946,22 @@ impl Parser {
                 position: operator.position,
             });
         }
-        self.primary()
+        self.postfix()
+    }
+
+    fn postfix(&mut self) -> Result<Expr, PadmaError> {
+        let mut expression = self.primary()?;
+        while self.matches(|kind| matches!(kind, TokenKind::LeftBracket)) {
+            let position = self.previous().position;
+            let index = self.expression()?;
+            self.consume(|kind| matches!(kind, TokenKind::RightBracket), "]")?;
+            expression = Expr::Index {
+                target: Box::new(expression),
+                index: Box::new(index),
+                position,
+            };
+        }
+        Ok(expression)
     }
 
     fn primary(&mut self) -> Result<Expr, PadmaError> {
@@ -1297,6 +1335,30 @@ impl Interpreter {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| error_for(self.locale, "P1007", *position, name)),
+            Expr::Index {
+                target,
+                index,
+                position,
+            } => {
+                let target = self.evaluate(target)?;
+                let index = self.evaluate(index)?;
+                match target {
+                    Value::List(values) => {
+                        let index = expect_collection_index(&index, self.locale, *position)?;
+                        values.get(index).cloned().ok_or_else(|| {
+                            error_for(self.locale, "P1027", *position, &index.to_string())
+                        })
+                    }
+                    Value::Map(values) => {
+                        let key = expect_map_key(&index, self.locale, *position)?;
+                        values
+                            .get(key)
+                            .cloned()
+                            .ok_or_else(|| error_for(self.locale, "P1021", *position, key))
+                    }
+                    _ => Err(error_for(self.locale, "P1010", *position, "index")),
+                }
+            }
             Expr::Unary {
                 operator,
                 right,
@@ -1445,6 +1507,121 @@ impl Interpreter {
                     return Ok(Value::String(
                         line.trim_end_matches(['\r', '\n']).to_string(),
                     ));
+                }
+                if let Some(list_name) = name.strip_suffix(".get") {
+                    if self
+                        .environment
+                        .get(list_name)
+                        .is_some_and(|value| matches!(value, Value::List(_)))
+                    {
+                        if arguments.len() != 1 {
+                            return Err(error_for(self.locale, "P1009", *position, name));
+                        }
+                        let index = self.evaluate(&arguments[0])?;
+                        let index = expect_collection_index(&index, self.locale, *position)?;
+                        let Value::List(values) = self.environment.get(list_name).unwrap() else {
+                            unreachable!("list check above guarantees a list")
+                        };
+                        return values.get(index).cloned().ok_or_else(|| {
+                            error_for(self.locale, "P1027", *position, &index.to_string())
+                        });
+                    }
+                }
+                if let Some(list_name) = name.strip_suffix(".set") {
+                    if self
+                        .environment
+                        .get(list_name)
+                        .is_some_and(|value| matches!(value, Value::List(_)))
+                    {
+                        if arguments.len() != 2 {
+                            return Err(error_for(self.locale, "P1009", *position, name));
+                        }
+                        let index = self.evaluate(&arguments[0])?;
+                        let index = expect_collection_index(&index, self.locale, *position)?;
+                        let value = self.evaluate(&arguments[1])?;
+                        let Value::List(values) = self.environment.get_mut(list_name).unwrap()
+                        else {
+                            unreachable!("list check above guarantees a list")
+                        };
+                        let slot = values.get_mut(index).ok_or_else(|| {
+                            error_for(self.locale, "P1027", *position, &index.to_string())
+                        })?;
+                        *slot = value;
+                        return Ok(Value::Boolean(true));
+                    }
+                }
+                if let Some(list_name) = name.strip_suffix(".push") {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let list = self
+                        .environment
+                        .get_mut(list_name)
+                        .ok_or_else(|| error_for(self.locale, "P1007", *position, list_name))?;
+                    let Value::List(values) = list else {
+                        return Err(error_for(self.locale, "P1010", *position, "list.push"));
+                    };
+                    values.push(value);
+                    return Ok(Value::Boolean(true));
+                }
+                if let Some(list_name) = name.strip_suffix(".remove") {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let index = self.evaluate(&arguments[0])?;
+                    let index = expect_collection_index(&index, self.locale, *position)?;
+                    let list = self
+                        .environment
+                        .get_mut(list_name)
+                        .ok_or_else(|| error_for(self.locale, "P1007", *position, list_name))?;
+                    let Value::List(values) = list else {
+                        return Err(error_for(self.locale, "P1010", *position, "list.remove"));
+                    };
+                    if index >= values.len() {
+                        return Err(error_for(
+                            self.locale,
+                            "P1027",
+                            *position,
+                            &index.to_string(),
+                        ));
+                    }
+                    return Ok(values.remove(index));
+                }
+                if let Some(collection_name) = name.strip_suffix(".len") {
+                    if !arguments.is_empty() {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let collection = self.environment.get(collection_name).ok_or_else(|| {
+                        error_for(self.locale, "P1007", *position, collection_name)
+                    })?;
+                    return match collection {
+                        Value::List(values) => Ok(Value::Number(values.len() as f64)),
+                        Value::Map(values) => Ok(Value::Number(values.len() as f64)),
+                        _ => Err(error_for(self.locale, "P1010", *position, "collection.len")),
+                    };
+                }
+                if let Some(collection_name) = name.strip_suffix(".contains") {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let needle = self.evaluate(&arguments[0])?;
+                    let collection = self.environment.get(collection_name).ok_or_else(|| {
+                        error_for(self.locale, "P1007", *position, collection_name)
+                    })?;
+                    return match collection {
+                        Value::List(values) => Ok(Value::Boolean(values.contains(&needle))),
+                        Value::Map(values) => {
+                            let key = expect_map_key(&needle, self.locale, *position)?;
+                            Ok(Value::Boolean(values.contains_key(key)))
+                        }
+                        _ => Err(error_for(
+                            self.locale,
+                            "P1010",
+                            *position,
+                            "collection.contains",
+                        )),
+                    };
                 }
                 if let Some(map_name) = name.strip_suffix(".get") {
                     if arguments.len() != 1 {
@@ -1943,6 +2120,34 @@ mod tests {
     fn evaluates_bengali_list_literal() {
         let output = run("ধরি সংখ্যা = [১, ২, ৩]\nদেখাও সংখ্যা\n").unwrap();
         assert_eq!(output, vec!["[1, 2, 3]"]);
+    }
+
+    #[test]
+    fn indexes_and_mutates_lists_safely() {
+        let output = run(
+            "let items = [10, 20]\nprint items[1]\nitems.set(0, 9)\nitems.push(30)\nprint items.len()\nprint items.contains(20)\nprint items.remove(1)\nprint items[1]\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["20", "3", "true", "20", "30"]);
+    }
+
+    #[test]
+    fn indexes_maps_and_supports_bangla_list_code() {
+        let output = run(
+            "ধরি সংখ্যা = [১০, ২০, ৩০]\nদেখাও সংখ্যা.get(০)\nদেখাও সংখ্যা[২]\nধরি প্রোফাইল = {\"নাম\": \"রাফি\"}\nদেখাও প্রোফাইল[\"নাম\"]\n",
+        )
+        .unwrap();
+        assert_eq!(output, vec!["10", "30", "রাফি"]);
+    }
+
+    #[test]
+    fn rejects_invalid_or_out_of_range_list_indexes() {
+        let invalid_type = run("let items = [1]\nprint items[\"zero\"]\n").unwrap_err();
+        assert_eq!(invalid_type.code, "P1026");
+
+        let out_of_range = run("ধরি সংখ্যা = [১]\nদেখাও সংখ্যা[১]\n").unwrap_err();
+        assert_eq!(out_of_range.code, "P1027");
+        assert_eq!(out_of_range.locale, Locale::Bangla);
     }
 
     #[test]

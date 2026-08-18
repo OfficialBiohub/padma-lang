@@ -29,6 +29,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1023 | Runtime | Module file could not be read. |
 | P1024 | Safety | Circular module import detected. |
 | P1025 | Compile/runtime | Imported module has an error; the diagnostic points to that module's source. |
+| P1026 | Type | Collection index is not a non-negative whole number. |
+| P1027 | Runtime | Collection index is outside the list bounds. |
 
 ## Example
 

@@ -19,6 +19,11 @@
 - [x] Preserve source file, source line, and locale context for imported-module diagnostics.
 - [x] Add parser recovery so `padma check` reports multiple independent syntax errors in one run.
 - [ ] Implement null values, indexing, slicing, list mutation, iteration, and collection utility APIs.
+- [ ] Add `none` / `কিছুইনা` null values with stable truthiness and display semantics.
+- [x] Add list indexing syntax, bounds diagnostics, and a zero-based non-negative index policy.
+- [x] Add list mutation APIs (`push`, `set`, `remove`) with type and bounds validation.
+- [x] Add collection length and membership APIs for lists and maps.
+- [ ] Add collection regression tests, Bengali-English examples, and specification updates.
 - [ ] Add a documented safe standard library for text, math, random, time, filesystem, JSON, and URL handling.
 - [ ] Add module namespaces, public exports, a project manifest, lockfile design, and a registry trust policy.
 - [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.

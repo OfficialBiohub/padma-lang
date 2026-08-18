@@ -150,6 +150,32 @@ The Bengali and mixed forms work the same way:
 দেখাও তথ্য.get("স্তর")
 ```
 
+### Lists and collection access
+
+Lists and maps can be read with bracket syntax. Lists use a zero-based, non-negative integer index; maps use a text key. Invalid indexes and missing keys stop safely with a localized diagnostic instead of silently producing an incorrect value.
+
+```padma
+let tasks = ["learn", "practice"]
+tasks.push("build")
+tasks.set(0, "study")
+
+print tasks[0]                       # study
+print tasks.len()                    # 3
+print tasks.contains("practice")    # true
+print tasks.remove(1)                # practice
+
+let profile = {"name": "Rafi"}
+print profile["name"]
+```
+
+The same collection APIs work in Bangla source code:
+
+```padma
+ধরি সংখ্যা = [১০, ২০, ৩০]
+দেখাও সংখ্যা[২]
+দেখাও সংখ্যা.get(০)
+```
+
 ### Reusable modules
 
 Split a larger Padma program into nearby `.pd` files. Use `import "file.pd"` or `ইমপোর্ট "file.pd"`; imported variables and functions become available to the current file. A module is loaded only once, even if it is imported repeatedly.
