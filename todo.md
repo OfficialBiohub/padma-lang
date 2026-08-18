@@ -72,6 +72,9 @@
 - [x] Add dynamic in-document completion for visible local declarations with Bangla-English regression fixtures.
 - [x] Add conservative same-document go-to-definition for the nearest visible local declaration, with shadowing regression tests.
 - [ ] Add conservative rename preparation and edits only for unambiguous local symbols, rejecting imports, public exports, and shadowed names until cross-file analysis exists.
+- [ ] Bind identifier references to the nearest visible same-document local declaration using lexical scope and UTF-16 ranges.
+- [ ] Implement `textDocument/prepareRename` and `textDocument/rename` only for unambiguous local variable bindings with validated replacement identifiers.
+- [ ] Reject unsafe rename requests for imports, exports, functions, members, unresolved identifiers, shadowed ambiguity, and malformed source; add Bangla-English protocol tests.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.
 - [ ] Add semantic versioning, release notes, signed artifacts, reproducible builds, compatibility fixtures, fuzzing, benchmarks, and SBOM generation.
