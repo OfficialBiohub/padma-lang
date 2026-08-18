@@ -41,7 +41,12 @@
 - [x] Define and enforce a no-registry-yet dependency policy that rejects untrusted dependency declarations.
 - [x] Add import aliases and public export rules so modules stop leaking all internal names into callers.
 - [x] Document local module/project layout, lockfile schema, compatibility policy, and future registry trust requirements.
-- [ ] Replace static command allowlists with explicit user-granted capability policies for process, network, media, and storage access.
+- [x] Add explicit user-granted capability policies for project process, network, media, and storage access while retaining safe single-file compatibility mode.
+- [x] Parse explicit `[capabilities]` grants from `padma.toml` and reject unknown or duplicate grants.
+- [x] Enforce capability grants for project file access, HTTP, process execution, and media download.
+- [x] Add `padma capabilities <project>` to inspect declared grants without executing project code.
+- [x] Add capability-denied diagnostics, negative security tests, and Bangla-English Termux examples.
+- [ ] Define audited capability escalation and Android shared-storage boundaries before enabling broader permissions.
 - [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
 - [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.

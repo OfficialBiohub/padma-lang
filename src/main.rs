@@ -4,7 +4,7 @@
 // UTF-8 source, Bangla/English keyword aliases, expressions, variables, print,
 // conditionals, string interpolation, and localized diagnostics.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fmt;
 use std::fs;
@@ -224,6 +224,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1030") => (format!("Invalid URL: `{detail}`"), Some("Provide a complete URL such as `https://example.com/path`.".into())),
         (Locale::Bangla, "P1031") => (format!("text.format-এর placeholder পাওয়া যায়নি: `{detail}`"), Some("map-এ একই নামের একটি text key যোগ করুন।".into())),
         (Locale::English, "P1031") => (format!("text.format placeholder was not found: `{detail}`"), Some("Add a text key with the same name to the map.".into())),
+        (Locale::Bangla, "P1034") => (format!("এই project-এ `{detail}` capability অনুমোদিত নয়"), Some("padma.toml-এর [capabilities] অংশে প্রয়োজনীয় সীমিত permission যোগ করুন।".into())),
+        (Locale::English, "P1034") => (format!("This project has not granted the `{detail}` capability"), Some("Add only the required limited permission under [capabilities] in padma.toml.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1567,6 +1569,8 @@ struct Interpreter {
     active_modules: HashSet<PathBuf>,
     modules: HashMap<String, ModuleNamespace>,
     module_cache: HashMap<PathBuf, ModuleNamespace>,
+    project_capabilities: Option<BTreeSet<String>>,
+    project_root: Option<PathBuf>,
 }
 
 impl Interpreter {
@@ -1586,7 +1590,63 @@ impl Interpreter {
             active_modules: HashSet::new(),
             modules: HashMap::new(),
             module_cache: HashMap::new(),
+            project_capabilities: None,
+            project_root: None,
         }
+    }
+
+    fn with_project_capabilities(
+        locale: Locale,
+        current_source: PathBuf,
+        project_root: PathBuf,
+        project_capabilities: BTreeSet<String>,
+    ) -> Self {
+        let mut interpreter = Self::with_source_path(locale, current_source);
+        interpreter.project_capabilities = Some(project_capabilities);
+        interpreter.project_root = fs::canonicalize(project_root).ok();
+        interpreter
+    }
+
+    fn require_capability(
+        &self,
+        capability: &str,
+        operation: &str,
+        position: Position,
+    ) -> Result<(), PadmaError> {
+        if self
+            .project_capabilities
+            .as_ref()
+            .is_some_and(|grants| !grants.contains(capability))
+        {
+            return Err(error_for(
+                self.locale,
+                "P1034",
+                position,
+                &format!("{capability} for {operation}"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn resolve_file_path(&self, path: &str) -> Result<PathBuf, ()> {
+        let Some(root) = self.project_root.as_ref() else {
+            return resolve_output_path(path);
+        };
+        let relative = safe_relative_path(path)?;
+        let resolved = root.join(relative);
+        let parent = resolved.parent().ok_or(())?;
+        let canonical_parent = fs::canonicalize(parent).map_err(|_| ())?;
+        if !canonical_parent.starts_with(root) {
+            return Err(());
+        }
+        if resolved.exists()
+            && !fs::canonicalize(&resolved)
+                .map_err(|_| ())?
+                .starts_with(root)
+        {
+            return Err(());
+        }
+        Ok(resolved)
     }
 
     fn run(&mut self, program: &[Stmt]) -> Result<(), PadmaError> {
@@ -1788,6 +1848,8 @@ impl Interpreter {
             let has_explicit_exports = !public_values.is_empty() || !public_functions.is_empty();
             let mut child = Interpreter::with_source_path(module_locale, path.clone());
             child.active_modules = self.active_modules.clone();
+            child.project_capabilities = self.project_capabilities.clone();
+            child.project_root = self.project_root.clone();
             child.run(&program).map_err(|error| {
                 error.with_source_context(path.clone(), source.clone(), module_locale)
             })?;
@@ -2294,7 +2356,9 @@ impl Interpreter {
                     }
                     let value = self.evaluate(&arguments[0])?;
                     let path = expect_string(&value, self.locale, *position, "path")?;
-                    let resolved_path = resolve_output_path(path)
+                    self.require_capability("filesystem:read", name, *position)?;
+                    let resolved_path = self
+                        .resolve_file_path(path)
                         .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
                     if name == "file.exists" {
                         return Ok(Value::Boolean(resolved_path.is_file()));
@@ -2319,7 +2383,9 @@ impl Interpreter {
                         Value::String(value) => value,
                         _ => return Err(error_for(self.locale, "P1010", *position, "content")),
                     };
-                    let resolved_path = resolve_output_path(path)
+                    self.require_capability("filesystem:write", name, *position)?;
+                    let resolved_path = self
+                        .resolve_file_path(path)
                         .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
                     fs::write(&resolved_path, content)
                         .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
@@ -2331,6 +2397,7 @@ impl Interpreter {
                     }
                     let url = self.evaluate(&arguments[0])?;
                     let url = expect_string(&url, self.locale, *position, "url")?;
+                    self.require_capability("network:http", name, *position)?;
                     if !(url.starts_with("https://") || url.starts_with("http://")) {
                         return Err(error_for(self.locale, "P1016", *position, url));
                     }
@@ -2372,7 +2439,10 @@ impl Interpreter {
                         if !(url.starts_with("https://") || url.starts_with("http://")) {
                             return Err(error_for(self.locale, "P1016", *position, url));
                         }
-                        let resolved_output = resolve_output_path(&output)
+                        self.require_capability("media:download", name, *position)?;
+                        self.require_capability("filesystem:write", name, *position)?;
+                        let resolved_output = self
+                            .resolve_file_path(&output)
                             .map_err(|_| error_for(self.locale, "P1014", *position, &output))?;
                         (
                             "yt-dlp".to_string(),
@@ -2386,6 +2456,14 @@ impl Interpreter {
                         if values.is_empty() {
                             return Err(error_for(self.locale, "P1009", *position, name));
                         }
+                        self.require_capability(
+                            &format!(
+                                "process:{}",
+                                expect_string(&values[0], self.locale, *position, "program")?
+                            ),
+                            name,
+                            *position,
+                        )?;
                         let program = expect_string(&values[0], self.locale, *position, "program")?;
                         let args = values[1..]
                             .iter()
@@ -2397,7 +2475,7 @@ impl Interpreter {
                         (program.to_string(), args)
                     };
                     let allowed = ["yt-dlp", "curl", "ffmpeg", "python", "python3"];
-                    if !allowed.contains(&program.as_str()) {
+                    if self.project_capabilities.is_none() && !allowed.contains(&program.as_str()) {
                         return Err(error_for(self.locale, "P1017", *position, &program));
                     }
                     let result = process::Command::new(&program)
@@ -2741,11 +2819,73 @@ struct ProjectManifest {
     version: String,
     entry: String,
     locale: String,
+    capabilities: BTreeSet<String>,
+}
+
+const PROCESS_CAPABILITIES: [&str; 6] = ["git", "yt-dlp", "curl", "ffmpeg", "python", "python3"];
+
+fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
+    let value = value.trim();
+    if !(value.starts_with('[') && value.ends_with(']')) {
+        return Err(format!(
+            "P1032: capability values must use a string list on line {line_number}"
+        ));
+    }
+    let inner = value[1..value.len() - 1].trim();
+    if inner.is_empty() {
+        return Ok(Vec::new());
+    }
+    inner
+        .split(',')
+        .map(|item| {
+            let item = item.trim();
+            if item.len() < 2 || !item.starts_with('"') || !item.ends_with('"') {
+                return Err(format!(
+                    "P1032: capability values must be quoted strings on line {line_number}"
+                ));
+            }
+            Ok(item[1..item.len() - 1].to_string())
+        })
+        .collect()
+}
+
+fn capability_grants_for_field(
+    key: &str,
+    values: Vec<String>,
+    line_number: usize,
+) -> Result<BTreeSet<String>, String> {
+    let permitted: &[&str] = match key {
+        "filesystem" => &["read", "write"],
+        "network" => &["http"],
+        "process" => &PROCESS_CAPABILITIES,
+        "media" => &["download"],
+        _ => {
+            return Err(format!(
+                "P1032: unsupported capability `{key}` on line {line_number}"
+            ))
+        }
+    };
+    let mut grants = BTreeSet::new();
+    for value in values {
+        if !permitted.contains(&value.as_str()) {
+            return Err(format!(
+                "P1032: unsupported `{key}` grant `{value}` on line {line_number}"
+            ));
+        }
+        if !grants.insert(format!("{key}:{value}")) {
+            return Err(format!(
+                "P1032: duplicate `{key}` grant `{value}` on line {line_number}"
+            ));
+        }
+    }
+    Ok(grants)
 }
 
 fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
     let mut section = String::new();
     let mut fields = BTreeMap::new();
+    let mut capabilities = BTreeSet::new();
+    let mut capability_fields = BTreeSet::new();
     for (line_number, raw_line) in source.lines().enumerate() {
         let line = raw_line.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
@@ -2753,7 +2893,7 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
         }
         if line.starts_with('[') && line.ends_with(']') {
             section = line[1..line.len() - 1].trim().to_string();
-            if section != "padma" && section != "dependencies" {
+            if section != "padma" && section != "dependencies" && section != "capabilities" {
                 return Err(format!(
                     "P1032: unsupported manifest section `{section}` on line {}",
                     line_number + 1
@@ -2765,13 +2905,28 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
             .split_once('=')
             .ok_or_else(|| format!("P1032: expected `key = value` on line {}", line_number + 1))?;
         let key = key.trim();
-        let value = raw_value.trim().trim_matches('"').to_string();
         if section == "dependencies" || key == "dependencies" {
             return Err(format!(
                 "P1033: dependencies are not supported yet (line {})",
                 line_number + 1
             ));
         }
+        if section == "capabilities" {
+            if !capability_fields.insert(key.to_string()) {
+                return Err(format!(
+                    "P1032: duplicate capability field `{key}` on line {}",
+                    line_number + 1
+                ));
+            }
+            let grants = capability_grants_for_field(
+                key,
+                parse_manifest_string_list(raw_value, line_number + 1)?,
+                line_number + 1,
+            )?;
+            capabilities.extend(grants);
+            continue;
+        }
+        let value = raw_value.trim().trim_matches('"').to_string();
         if section != "padma" || !matches!(key, "name" | "version" | "entry" | "locale") {
             return Err(format!(
                 "P1032: unsupported manifest field `{key}` on line {}",
@@ -2800,6 +2955,7 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
             .get("locale")
             .cloned()
             .unwrap_or_else(|| "auto".to_string()),
+        capabilities,
     };
     if !matches!(manifest.locale.as_str(), "auto" | "bn" | "en") {
         return Err("P1032: `locale` must be `auto`, `bn`, or `en`".to_string());
@@ -2860,13 +3016,14 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
         version: "0.1.0".to_string(),
         entry: "src/main.pd".to_string(),
         locale: "bn".to_string(),
+        capabilities: BTreeSet::new(),
     };
     fs::create_dir_all(directory.join("src"))
         .map_err(|error| format!("P1032: cannot create project source directory: {error}"))?;
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n",
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\n",
             manifest.name, manifest.version, manifest.entry, manifest.locale
         ),
     )
@@ -2947,10 +3104,10 @@ fn format_diagnostic(path: &str, source: &str, error: &PadmaError) -> String {
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
@@ -2990,6 +3147,32 @@ fn main() {
         }
         return;
     }
+    if arguments.get(1).map(String::as_str) == Some("capabilities") {
+        let directory = arguments
+            .get(2)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        if arguments.len() > 3 {
+            eprintln!("{}", usage(Locale::English));
+            process::exit(64);
+        }
+        let (manifest, _) = match load_project_manifest(&directory) {
+            Ok(project) => project,
+            Err(error) => {
+                eprintln!("{error}");
+                process::exit(1);
+            }
+        };
+        println!("Padma capabilities for `{}`:", manifest.name);
+        if manifest.capabilities.is_empty() {
+            println!("  (none; sensitive project actions are denied)");
+        } else {
+            for capability in manifest.capabilities {
+                println!("  {capability}");
+            }
+        }
+        return;
+    }
     if arguments.len() == 2 && Path::new(&arguments[1]).is_dir() {
         let directory = Path::new(&arguments[1]);
         let (manifest, entry_path) = match load_project_manifest(directory) {
@@ -3016,7 +3199,12 @@ fn main() {
                 process::exit(1);
             }
         };
-        let mut interpreter = Interpreter::with_source_path(locale, entry_path.clone());
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            entry_path.clone(),
+            directory.to_path_buf(),
+            manifest.capabilities,
+        );
         if let Err(error) = interpreter.run(&program) {
             eprintln!(
                 "{}",
@@ -3262,6 +3450,83 @@ mod tests {
         )
         .unwrap_err();
         assert!(invalid_locale.starts_with("P1032"));
+    }
+
+    #[test]
+    fn parses_and_validates_manifest_capabilities() {
+        let manifest = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[capabilities]\nfilesystem = [\"read\", \"write\"]\nnetwork = [\"http\"]\nprocess = [\"git\", \"yt-dlp\"]\nmedia = [\"download\"]\n",
+        )
+        .unwrap();
+        assert!(manifest.capabilities.contains("filesystem:read"));
+        assert!(manifest.capabilities.contains("process:git"));
+        assert_eq!(manifest.capabilities.len(), 6);
+
+        let duplicate = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[capabilities]\nprocess = [\"git\", \"git\"]\n",
+        )
+        .unwrap_err();
+        assert!(duplicate.contains("duplicate"));
+
+        let unknown = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[capabilities]\nnetwork = [\"all\"]\n",
+        )
+        .unwrap_err();
+        assert!(unknown.contains("unsupported"));
+    }
+
+    #[test]
+    fn project_mode_denies_undeclared_sensitive_capabilities() {
+        let capabilities = BTreeSet::new();
+        let (program, locale) = compile("print http.get(\"https://example.com\")\n").unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            PathBuf::from("project/main.pd"),
+            PathBuf::from("project"),
+            capabilities.clone(),
+        );
+        let error = interpreter.run(&program).unwrap_err();
+        assert_eq!(error.code, "P1034");
+        assert!(error.message.contains("network:http"));
+
+        let (program, locale) = compile("দেখাও process.run(\"git\", \"status\")\n").unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            PathBuf::from("project/main.pd"),
+            PathBuf::from("project"),
+            capabilities,
+        );
+        let error = interpreter.run(&program).unwrap_err();
+        assert_eq!(error.code, "P1034");
+        assert!(error.message.contains("capability"));
+    }
+
+    #[test]
+    fn project_mode_scopes_declared_file_writes_to_its_root() {
+        let root = env::temp_dir().join(format!("padma-capability-root-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let capabilities = BTreeSet::from(["filesystem:write".to_string()]);
+        let (program, locale) = compile("file.write(\"inside.txt\", \"safe\")\n").unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("src/main.pd"),
+            root.clone(),
+            capabilities.clone(),
+        );
+        interpreter.run(&program).unwrap();
+        assert_eq!(fs::read_to_string(root.join("inside.txt")).unwrap(), "safe");
+
+        let (program, locale) = compile("file.write(\"@downloads/out.txt\", \"no\")\n").unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("src/main.pd"),
+            root.clone(),
+            capabilities,
+        );
+        let error = interpreter.run(&program).unwrap_err();
+        assert_eq!(error.code, "P1014");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

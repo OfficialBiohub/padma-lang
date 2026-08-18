@@ -1,0 +1,3 @@
+# Termux: cd examples/capabilities/english-file-write && padma capabilities . && padma .
+file.write("output.txt", "Created safely by a Padma project.\n")
+print "Created output.txt with filesystem:write."

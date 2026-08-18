@@ -28,6 +28,12 @@ name = "my-project"
 version = "0.1.0"
 entry = "src/main.pd"
 locale = "bn"
+
+[capabilities]
+filesystem = ["read", "write"]
+network = ["http"]
+process = ["git", "yt-dlp"]
+media = ["download"]
 ```
 
 | Field | Requirement |
@@ -38,6 +44,34 @@ locale = "bn"
 | `locale` | `bn`, `en`, or `auto`. It controls diagnostic language for the entry source. |
 
 `padma .` reads the manifest from the provided directory, validates the entry path, then runs the entry file. Imports remain relative to the importing file and keep the same path-safety restrictions.
+
+## Capability grants
+
+When a program runs as a project with `padma .`, sensitive builtins are **denied by default**. The optional `[capabilities]` section makes the smallest required permission visible in source control before project code executes. A malformed, unknown, or duplicate grant is rejected as `P1032`; use `padma capabilities .` to inspect grants without running the program.
+
+| Manifest field | Accepted grants | Enables | Notes |
+|---|---|---|---|
+| `filesystem` | `read`, `write` | `file.read`, `file.exists`, `file.write` | Paths are relative to the canonical project root; `..`, symlink escapes, and `@downloads` are rejected. |
+| `network` | `http` | `http.get` | HTTP and HTTPS URLs only; request timeout remains bounded. |
+| `process` | `git`, `yt-dlp`, `curl`, `ffmpeg`, `python`, `python3` | `process.run(program, ...)` | Each executable needs its own explicit grant; shell interpolation is never used. |
+| `media` | `download` | `media.download(url[, output])` | Also requires `filesystem = ["write"]` because it writes output. |
+
+For example, a read-only HTTP project needs only:
+
+```toml
+[capabilities]
+network = ["http"]
+```
+
+The command below is an **audit command**: it parses the manifest and prints sorted grants, but does not run `src/main.pd`.
+
+```bash
+padma capabilities .
+```
+
+Direct single-file execution such as `padma script.pd` preserves the existing compatibility mode. It retains Padma's path validation and limited executable allowlist, but does not require a `padma.toml` capability declaration. New multi-file projects should prefer `padma .` because it makes each sensitive permission reviewable and scopes declared filesystem operations to the project root.
+
+> Capability declarations do not grant Android storage permission, unrestricted paths, shell access, background execution, or remote package installation. Android shared-storage access and audited escalation remain future milestones.
 
 ## Modules, aliases, and exports
 

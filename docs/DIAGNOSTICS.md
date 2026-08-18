@@ -37,6 +37,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1031 | Runtime | `text.format` placeholder is missing or malformed. |
 | P1032 | Project | Project manifest or entrypoint is invalid or cannot be read. |
 | P1033 | Project safety | Third-party dependencies are not supported until a trusted registry policy exists. |
+| P1034 | Capability safety | A manifest-run project attempted a sensitive builtin without its explicit capability grant. |
 
 ## Example
 

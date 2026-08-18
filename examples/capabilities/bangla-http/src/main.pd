@@ -1,0 +1,3 @@
+# Termux: cd examples/capabilities/bangla-http && padma capabilities . && padma .
+ধরি উত্তর = http.get("https://example.com")
+দেখাও "HTTP response পাওয়া গেছে: {উত্তর}"

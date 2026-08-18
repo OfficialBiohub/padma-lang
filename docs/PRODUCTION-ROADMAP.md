@@ -26,7 +26,7 @@ The project will not claim production readiness until the following guarantees a
 
 ## 2. Current baseline
 
-Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, functions, null values, safe lists/maps with slicing and iteration, an interactive shell, local modules, alias namespaces, explicit exports, local-first projects, and documented standard-library APIs for text, math, time, files, JSON, URLs, paths, formatting, and non-cryptographic randomness. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include capability grants, static checks, formatting, editor tooling, typed bridges, reproducible release artifacts, and a comprehensive security policy.
+Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, functions, null values, safe lists/maps with slicing and iteration, an interactive shell, local modules, alias namespaces, explicit exports, local-first projects, documented standard-library APIs, and manifest-enforced grants for file, HTTP, process, and media actions. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include auditable capability escalation and Android shared-storage boundaries, static checks, formatting, editor tooling, typed bridges, reproducible release artifacts, and a comprehensive security policy.
 
 ## 3. Delivery principles
 
@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-**M1 diagnostics, M2 core collections, M3 safe standard library, and M4 local project governance are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, a stable diagnostic registry, safe collections and iteration, standard-library utilities, `padma init`, manifest-driven `padma .` execution, a future-facing lockfile, rejected untrusted dependencies, namespace aliases, and explicit public export filtering. The next active milestone is **M5 capability governance**: applying explicit permissions and auditability to network, process, media, filesystem, and Android/Termux access.
+**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, and the first enforceable M5 capability-security increment are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, standard-library utilities, manifest-driven `padma .` execution, rejected untrusted dependencies, namespace aliases, public exports, explicit grants, capability-denied diagnostics, and a no-execution `padma capabilities` audit command. The remaining M5 work is audited escalation and Android shared-storage boundaries; M6 then adds static checks, formatting, linting, and JSON diagnostics.
 
 ## 7. Security and release references
 
