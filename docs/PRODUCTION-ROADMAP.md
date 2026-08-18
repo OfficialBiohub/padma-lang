@@ -26,7 +26,7 @@ The project will not claim production readiness until the following guarantees a
 
 ## 2. Current baseline
 
-Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, functions, null values, safe lists/maps with slicing and iteration, an interactive shell, local modules, alias namespaces, explicit exports, local-first projects, documented standard-library APIs, and manifest-enforced grants for file, HTTP, process, and media actions. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include auditable capability escalation and Android shared-storage boundaries, static checks, formatting, editor tooling, typed bridges, reproducible release artifacts, and a comprehensive security policy.
+Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, functions, null values, safe lists/maps with slicing and iteration, an interactive shell, local modules, alias namespaces, explicit exports, local-first projects, manifest-enforced grants for file, HTTP, process, and media actions, JSON diagnostics, source formatting, and reviewed lint policy. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include editor tooling, gradual type checking, typed bridges, reproducible release artifacts, and a comprehensive security policy.
 
 ## 3. Delivery principles
 
@@ -107,10 +107,10 @@ Every milestone must retain four principles.
 
 | Tool | Required capability | Release gate |
 |---|---|---|
-| `padma check` | Parse, module resolution, unused names, unreachable code, capability preflight | Exit-code and JSON diagnostic tests |
+| `padma check` | Parser recovery plus conservative literal division and call-arity analysis | Exit-code and JSON diagnostic tests |
 | `padma fmt` | Idempotent formatter with stable layout | Formatter golden tests and second-run equality |
-| `padma lint` | Configurable beginner and strict rules | Versioned lint-code catalogue |
-| Type checking | Gradual annotations for function params/returns, collections, and JSON values | Type-check fixtures and clear opt-in policy |
+| `padma lint` | Stable beginner rules with reviewed manifest suppression | Versioned lint-code catalogue |
+| Type checking | Gradual annotations for function params/returns, collections, and JSON values | Deferred to a later static-analysis increment |
 | Diagnostics API | JSON output for editors and CI | Schema version and integration examples |
 
 ### M7 — Editor and learning tooling
@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, and M5 capability security are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, standard-library utilities, manifest-driven `padma .` execution, rejected untrusted dependencies, namespace aliases, public exports, explicit grants, canonical project-root filesystem scope, capability-denied diagnostics, a no-execution `padma capabilities` audit command, and a published audited-escalation/Android shared-storage boundary. The next active milestone is **M6 developer workflow**: static checks, formatting, linting, and JSON diagnostics.
+**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, M5 capability security, and the M6 developer-workflow baseline are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, manifest projects, explicit grants, canonical project-root filesystem scope, `padma capabilities`, JSON diagnostics, an idempotent `padma fmt`, localized `padma lint` rules with manifest-reviewed suppression, and non-executing literal-division/call-arity checks. The next active milestone is **M7 editor and learning tooling**: Tree-sitter, VS Code integration, a language server, and Termux-first guides.
 
 ## 7. Security and release references
 

@@ -47,7 +47,7 @@
 - [x] Add `padma capabilities <project>` to inspect declared grants without executing project code.
 - [x] Add capability-denied diagnostics, negative security tests, and Bangla-English Termux examples.
 - [x] Define audited capability escalation and Android shared-storage boundaries before enabling broader permissions.
-- [ ] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, static checking, and configurable warnings.
+- [x] Add `padma check`, `padma fmt`, `padma lint`, JSON diagnostics, conservative static checking, and reviewed warning suppression.
 - [x] Add stable JSON diagnostic output through `padma check --json <file.pd>` for editors and CI.
 - [x] Add an idempotent `padma fmt` formatter with newline/indentation golden tests.
 - [x] Add `padma lint` with documented rule identifiers, warning exit policy, and manifest-configurable reviewed rule suppression.

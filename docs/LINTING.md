@@ -28,4 +28,4 @@ disable = ["L1003"]
 
 Only `L1001`, `L1002`, and `L1003` are accepted. Unknown or duplicate entries fail manifest validation with `P1032`; a source comment cannot silently disable a warning. Run lint against the project source path—for example, `padma lint src/main.pd`—so its nearest project manifest is found.
 
-Severity overrides and semantic lint rules remain future M6 work.
+Severity overrides and semantic lint rules remain future developer-workflow work.
