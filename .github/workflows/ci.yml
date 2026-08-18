@@ -28,3 +28,70 @@ jobs:
         run: ./target/release/padma run examples/hello-bn.pd
       - name: Run English example
         run: ./target/release/padma run examples/hello-en.pd
+
+  tree-sitter:
+    name: Test Tree-sitter grammar
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tooling/tree-sitter-padma
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: tooling/tree-sitter-padma/pnpm-lock.yaml
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install grammar dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate parser artifacts
+        run: pnpm generate
+      - name: Run grammar corpus tests
+        run: pnpm test
+
+  vscode-extension:
+    name: Validate VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: tooling/vscode-padma/pnpm-lock.yaml
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Install extension dependencies
+        working-directory: tooling/vscode-padma
+        run: pnpm install --frozen-lockfile
+      - name: Verify extension command bridge
+        working-directory: tooling/vscode-padma
+        run: pnpm run check
+      - name: Verify extension manifests
+        run: |
+          python3 -m json.tool tooling/vscode-padma/package.json > /dev/null
+          python3 -m json.tool tooling/vscode-padma/language-configuration.json > /dev/null
+          python3 -m json.tool tooling/vscode-padma/syntaxes/padma.tmLanguage.json > /dev/null
+
+  language-server:
+    name: Test Padma language server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run protocol bridge tests
+        run: cargo test --manifest-path tooling/padma-lsp/Cargo.toml --locked
+      - name: Build optimized language server
+        run: cargo build --manifest-path tooling/padma-lsp/Cargo.toml --release --locked

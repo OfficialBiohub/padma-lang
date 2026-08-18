@@ -52,6 +52,8 @@ padma examples/hello-bn.pd
 
 After installation, `padma --version` prints the installed version and `padma` opens an interactive REPL.
 
+For a phone-only workflow in Bangla—including `nano`, project permissions, checking, formatting, and Android storage boundaries—read [`docs/TERMUX-FIRST-GUIDE-BN.md`](docs/TERMUX-FIRST-GUIDE-BN.md).
+
 ### Python-style interactive shell
 
 When you type `padma` without a file, Padma opens an interactive shell. Each complete line is compiled and executed immediately, and variables remain available for later lines:

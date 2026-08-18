@@ -1,0 +1,62 @@
+{
+  "name": "padma-vscode",
+  "displayName": "Padma",
+  "description": "Bangla-English language support for Padma .pd files.",
+  "version": "0.1.0",
+  "publisher": "officialbiohub",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Linters", "Formatters"],
+  "activationEvents": ["onLanguage:padma", "onCommand:padma.runFile", "onCommand:padma.checkFile", "onCommand:padma.startLanguageServer"],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "padma",
+        "aliases": ["Padma", "padma"],
+        "extensions": [".pd"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "padma",
+        "scopeName": "source.padma",
+        "path": "./syntaxes/padma.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      { "command": "padma.runFile", "title": "Padma: Run Current File" },
+      { "command": "padma.checkFile", "title": "Padma: Check Current File" },
+      { "command": "padma.formatFile", "title": "Padma: Format Current File" },
+      { "command": "padma.lintFile", "title": "Padma: Lint Current File" },
+      { "command": "padma.startLanguageServer", "title": "Padma: Start Language Server" },
+      { "command": "padma.stopLanguageServer", "title": "Padma: Stop Language Server" }
+    ],
+    "configuration": {
+      "title": "Padma",
+      "properties": {
+        "padma.command": {
+          "type": "string",
+          "default": "padma",
+          "description": "Path or command used to invoke the Padma CLI."
+        },
+        "padma.languageServer.command": {
+          "type": "string",
+          "default": "padma-lsp",
+          "description": "Path or command used to launch the opt-in Padma language server."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.0"
+  },
+  "scripts": {
+    "check": "node --check extension.js"
+  }
+}

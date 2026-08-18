@@ -1,0 +1,23 @@
+{
+  "name": "tree-sitter-padma",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Padma Bangla-English programming language",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "0.26.12"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.padma",
+      "file-types": ["pd"],
+      "injection-regex": "^padma$"
+    }
+  ]
+}

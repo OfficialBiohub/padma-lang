@@ -26,7 +26,7 @@ The project will not claim production readiness until the following guarantees a
 
 ## 2. Current baseline
 
-Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, functions, null values, safe lists/maps with slicing and iteration, an interactive shell, local modules, alias namespaces, explicit exports, local-first projects, manifest-enforced grants for file, HTTP, process, and media actions, JSON diagnostics, source formatting, and reviewed lint policy. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include editor tooling, gradual type checking, typed bridges, reproducible release artifacts, and a comprehensive security policy.
+Padma currently has a Rust interpreter, Bangla and English aliases for core keywords, Bengali digits, variables, functions, null values, safe lists/maps with slicing and iteration, an interactive shell, local modules, alias namespaces, explicit exports, local-first projects, manifest-enforced grants for file, HTTP, process, and media actions, JSON diagnostics, source formatting, reviewed lint policy, an independently tested Tree-sitter grammar, an initial VS Code extension, and a minimal standards-based language server for diagnostics and formatting. The current language remains an **early interpreter release**, not a production-ready universal platform. Important missing foundations include rich language-server navigation/completion, gradual type checking, typed bridges, reproducible release artifacts, and a comprehensive security policy.
 
 ## 3. Delivery principles
 
@@ -119,9 +119,9 @@ Every milestone must retain four principles.
 
 | Deliverable | Required work | Release gate |
 |---|---|---|
-| Tree-sitter grammar | Independent grammar, corpus tests, highlights, injections where needed | Generated parser and corpus CI |
-| VS Code extension | Syntax highlighting, snippets, run/check tasks, diagnostics wiring | Extension packaging and sample workspace test |
-| Language server | Go-to definition, completion, hover, diagnostics, formatting, rename | LSP conformance-oriented integration tests |
+| Tree-sitter grammar | Independent grammar, corpus tests, highlights, injections where needed | **Baseline complete:** generated ABI-15 parser and corpus CI |
+| VS Code extension | Syntax highlighting, snippets, run/check tasks, diagnostics wiring | **Baseline complete:** `.pd` association, highlighting, explicit commands, JSON check diagnostics, and manifest CI; packaging/sample workspace test remains before distribution |
+| Language server | **Baseline complete:** stdio LSP diagnostics and full-document formatting; later go-to definition, completion, hover, and rename | Protocol smoke tests and LSP conformance-oriented integration tests for advanced features |
 | Termux mobile guide | nano shortcuts, REPL, project folders, backups, troubleshooting | Tested copy-paste commands |
 
 ### M8 — Interoperability
@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, M5 capability security, and the M6 developer-workflow baseline are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, manifest projects, explicit grants, canonical project-root filesystem scope, `padma capabilities`, JSON diagnostics, an idempotent `padma fmt`, localized `padma lint` rules with manifest-reviewed suppression, and non-executing literal-division/call-arity checks. The next active milestone is **M7 editor and learning tooling**: Tree-sitter, VS Code integration, a language server, and Termux-first guides.
+**M1 diagnostics, M2 core collections, M3 safe standard library, M4 local project governance, M5 capability security, and the M6 developer-workflow baseline are complete for the current release line:** Padma has multi-error syntax checks, module-aware localized diagnostics, safe collections, manifest projects, explicit grants, canonical project-root filesystem scope, `padma capabilities`, JSON diagnostics, an idempotent `padma fmt`, localized `padma lint` rules with manifest-reviewed suppression, and non-executing literal-division/call-arity checks. **M7 is active:** its Tree-sitter grammar, initial VS Code integration, and diagnostics/formatting LSP baseline are complete; the next M7 work is extension distribution validation, richer LSP navigation/completion, and Termux-first learning guides.
 
 ## 7. Security and release references
 

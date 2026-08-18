@@ -1,0 +1,41 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "padma",
+      "camelcase": "Padma",
+      "title": "Padma",
+      "scope": "source.padma",
+      "file-types": [
+        "pd"
+      ],
+      "injection-regex": "^padma$",
+      "class-name": "TreeSitterPadma"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for the Padma Bangla-English programming language",
+    "authors": [
+      {
+        "name": "OfficialBiohub",
+        "url": "https://github.com/OfficialBiohub"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/OfficialBiohub/padma-lang",
+      "funding": ""
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": false,
+    "java": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}

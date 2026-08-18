@@ -1,0 +1,100 @@
+==================
+English declarations and calls
+==================
+
+let total = 12
+function add(left, right) {
+  return left + right
+}
+print add(total, 3)
+
+---
+
+(source_file
+  (let_declaration
+    (identifier)
+    (expression
+      (number)))
+  (function_definition
+    (identifier)
+    (parameter_list
+      (identifier)
+      (identifier))
+    (block
+      (return_statement
+        (expression
+          (binary_expression
+            (expression
+              (identifier))
+            (expression
+              (identifier)))))))
+  (print_statement
+    (expression
+      (call_expression
+        (identifier)
+        (expression
+          (identifier))
+        (expression
+          (number))))))
+
+==================
+Bangla control flow, lists, maps, and slices
+==================
+
+ধরি নামগুলো = ["রিমা", "Rafi", "Tania"]
+ধরি ব্যক্তি = {"নাম": "রিমা", "বয়স": ১২}
+প্রতি নাম মধ্যে নামগুলো {
+  যদি নাম != "" {
+    দেখাও নাম
+  }
+}
+দেখাও নামগুলো[1:]
+
+---
+
+(source_file
+  (let_declaration
+    (identifier)
+    (expression
+      (list
+        (expression
+          (string))
+        (expression
+          (string))
+        (expression
+          (string)))))
+  (let_declaration
+    (identifier)
+    (expression
+      (map
+        (expression
+          (string))
+        (expression
+          (string))
+        (expression
+          (string))
+        (expression
+          (number)))))
+  (for_statement
+    (identifier)
+    (expression
+      (identifier))
+    (block
+      (if_statement
+        (expression
+          (binary_expression
+            (expression
+              (identifier))
+            (expression
+              (string))))
+        (block
+          (print_statement
+            (expression
+              (identifier)))))))
+  (print_statement
+    (expression
+      (slice_expression
+        (expression
+          (identifier))
+        (expression
+          (number))))))
