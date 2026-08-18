@@ -313,7 +313,7 @@ Use this only for content you own or are authorized to download and in complianc
 | `padma init [folder]` | Create a local Padma project with a manifest, lockfile, and Bangla starter source. |
 | `padma capabilities [project]` | Print declared project capability grants without running project code. |
 | `padma run <file.pd>` | Backward-compatible explicit run form. |
-| `padma check <file.pd>` | Check syntax and supported static semantic errors without executing code. |
+| `padma check <file.pd>` | Check syntax, literal division by zero, and provable call arity without executing code. |
 | `padma check --json <file.pd>` | Emit one machine-readable diagnostic report for editors and CI. |
 | `padma fmt <file.pd>` | Format a syntactically valid source file in place. |
 | `padma fmt --check <file.pd>` | Exit non-zero when formatting changes would be needed, without modifying the file. |

@@ -55,7 +55,8 @@
 - [x] Add manifest-configurable reviewed lint suppression syntax.
 - [ ] Add lint severity overrides and conservative semantic lint rules.
 - [x] Extend `padma check` from parser recovery to non-executing static semantic checks for provable literal division by zero.
-- [ ] Extend static checks conservatively with scope-aware name resolution, call arity, and safe literal-type rules.
+- [x] Extend static checks conservatively with top-level function and stable builtin call-arity validation.
+- [ ] Add scope-aware name resolution and safe literal-type static rules without guessing about imports or dynamic values.
 - [ ] Create a Tree-sitter grammar, VS Code extension, language server protocol implementation, and mobile-editor guidance.
 - [ ] Define safe, opt-in Python and JavaScript bridge interfaces with typed data exchange and subprocess isolation.
 - [ ] Add safe domain libraries for HTTP APIs, web services, automation, and AI-provider clients; publish defensive security-tooling boundaries.

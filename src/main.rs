@@ -3125,95 +3125,155 @@ fn parse_source_recovering(source: &str) -> Result<(Vec<Stmt>, Locale), Vec<Padm
     }
 }
 
-fn static_check_expression(expression: &Expr, locale: Locale, errors: &mut Vec<PadmaError>) {
+fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
+    match name {
+        "range" | "পরিসর" | "media.download" => Some((1, 2)),
+        "process.run" => Some((1, usize::MAX)),
+        "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
+        | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
+        | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
+        | "math.abs" | "math.round" | "math.floor" | "math.ceil" => Some((1, 1)),
+        "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
+        | "random.int" => Some((2, 2)),
+        "text.replace" => Some((3, 3)),
+        "time.now" => Some((0, 0)),
+        _ => None,
+    }
+}
+
+fn static_function_arities(statements: &[Stmt]) -> BTreeMap<String, usize> {
+    let mut arities = BTreeMap::new();
+    for statement in statements {
+        let statement = match statement {
+            Stmt::Export(inner) => inner.as_ref(),
+            other => other,
+        };
+        if let Stmt::Function { name, params, .. } = statement {
+            arities.insert(name.clone(), params.len());
+        }
+    }
+    arities
+}
+
+fn static_check_expression(
+    expression: &Expr,
+    locale: Locale,
+    function_arities: &BTreeMap<String, usize>,
+    errors: &mut Vec<PadmaError>,
+) {
     match expression {
-        Expr::Unary { right, .. } => static_check_expression(right, locale, errors),
+        Expr::Unary { right, .. } => {
+            static_check_expression(right, locale, function_arities, errors)
+        }
         Expr::Binary {
             left,
             operator,
             right,
             position,
         } => {
-            static_check_expression(left, locale, errors);
-            static_check_expression(right, locale, errors);
+            static_check_expression(left, locale, function_arities, errors);
+            static_check_expression(right, locale, function_arities, errors);
             if matches!(operator, TokenKind::Slash)
                 && matches!(right.as_ref(), Expr::Literal(Value::Number(value), _) if *value == 0.0)
             {
                 errors.push(error_for(locale, "P1011", *position, "division"));
             }
         }
-        Expr::Call { arguments, .. } => {
+        Expr::Call {
+            name,
+            arguments,
+            position,
+        } => {
             for argument in arguments {
-                static_check_expression(argument, locale, errors);
+                static_check_expression(argument, locale, function_arities, errors);
+            }
+            let expected = static_builtin_arity(name)
+                .or_else(|| function_arities.get(name).map(|value| (*value, *value)));
+            if let Some((minimum, maximum)) = expected {
+                if arguments.len() < minimum || arguments.len() > maximum {
+                    errors.push(error_for(locale, "P1009", *position, name));
+                }
             }
         }
         Expr::Index { target, index, .. } => {
-            static_check_expression(target, locale, errors);
-            static_check_expression(index, locale, errors);
+            static_check_expression(target, locale, function_arities, errors);
+            static_check_expression(index, locale, function_arities, errors);
         }
         Expr::Slice {
             target, start, end, ..
         } => {
-            static_check_expression(target, locale, errors);
+            static_check_expression(target, locale, function_arities, errors);
             if let Some(start) = start {
-                static_check_expression(start, locale, errors);
+                static_check_expression(start, locale, function_arities, errors);
             }
             if let Some(end) = end {
-                static_check_expression(end, locale, errors);
+                static_check_expression(end, locale, function_arities, errors);
             }
         }
         Expr::List(values) => {
             for value in values {
-                static_check_expression(value, locale, errors);
+                static_check_expression(value, locale, function_arities, errors);
             }
         }
         Expr::Map(entries) => {
             for (key, value) in entries {
-                static_check_expression(key, locale, errors);
-                static_check_expression(value, locale, errors);
+                static_check_expression(key, locale, function_arities, errors);
+                static_check_expression(value, locale, function_arities, errors);
             }
         }
         Expr::Literal(_, _) | Expr::Variable(_, _) => {}
     }
 }
 
-fn static_check_statements(statements: &[Stmt], locale: Locale, errors: &mut Vec<PadmaError>) {
+fn static_check_statements(
+    statements: &[Stmt],
+    locale: Locale,
+    function_arities: &BTreeMap<String, usize>,
+    errors: &mut Vec<PadmaError>,
+) {
     for statement in statements {
         match statement {
             Stmt::Let { value, .. } | Stmt::Print { value } | Stmt::Expression { value } => {
-                static_check_expression(value, locale, errors)
+                static_check_expression(value, locale, function_arities, errors)
             }
-            Stmt::Assign { value, .. } => static_check_expression(value, locale, errors),
+            Stmt::Assign { value, .. } => {
+                static_check_expression(value, locale, function_arities, errors)
+            }
             Stmt::If {
                 condition,
                 then_branch,
                 else_branch,
             } => {
-                static_check_expression(condition, locale, errors);
-                static_check_statements(then_branch, locale, errors);
-                static_check_statements(else_branch, locale, errors);
+                static_check_expression(condition, locale, function_arities, errors);
+                static_check_statements(then_branch, locale, function_arities, errors);
+                static_check_statements(else_branch, locale, function_arities, errors);
             }
             Stmt::While {
                 condition, body, ..
             } => {
-                static_check_expression(condition, locale, errors);
-                static_check_statements(body, locale, errors);
+                static_check_expression(condition, locale, function_arities, errors);
+                static_check_statements(body, locale, function_arities, errors);
             }
             Stmt::For {
                 collection, body, ..
             } => {
-                static_check_expression(collection, locale, errors);
-                static_check_statements(body, locale, errors);
+                static_check_expression(collection, locale, function_arities, errors);
+                static_check_statements(body, locale, function_arities, errors);
             }
-            Stmt::Function { body, .. } => static_check_statements(body, locale, errors),
+            Stmt::Function { body, .. } => {
+                static_check_statements(body, locale, function_arities, errors)
+            }
             Stmt::Return { value } => {
                 if let Some(value) = value {
-                    static_check_expression(value, locale, errors);
+                    static_check_expression(value, locale, function_arities, errors);
                 }
             }
-            Stmt::Export(inner) => {
-                static_check_statements(std::slice::from_ref(inner), locale, errors)
-            }
+            Stmt::Export(inner) => static_check_statements(
+                std::slice::from_ref(inner),
+                locale,
+                function_arities,
+                errors,
+            ),
             Stmt::Import { .. } => {}
         }
     }
@@ -3226,7 +3286,8 @@ fn syntax_check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
 fn check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
     let (program, locale) = parse_source_recovering(source)?;
     let mut errors = Vec::new();
-    static_check_statements(&program, locale, &mut errors);
+    let function_arities = static_function_arities(&program);
+    static_check_statements(&program, locale, &function_arities, &mut errors);
     if errors.is_empty() {
         Ok(locale)
     } else {
@@ -3979,6 +4040,17 @@ mod tests {
         let value: JsonValue = serde_json::from_str(&output).unwrap();
         assert_eq!(value["status"], "error");
         assert_eq!(value["diagnostics"][0]["code"], "P1011");
+    }
+
+    #[test]
+    fn check_reports_provable_builtin_and_top_level_function_arity_errors() {
+        let source = "function add(left, right) {\n    return left + right\n}\nprint add(1)\nprint text.replace(\"a\", \"b\")\n";
+        let errors = check_source(source).unwrap_err();
+        assert_eq!(errors.len(), 2);
+        assert!(errors.iter().all(|error| error.code == "P1009"));
+
+        let source = "function add(left, right) {\n    return left + right\n}\nprint add(1, 2)\nprint text.replace(\"a\", \"a\", \"b\")\n";
+        assert!(check_source(source).is_ok());
     }
 
     #[test]
