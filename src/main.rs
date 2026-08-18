@@ -3101,13 +3101,69 @@ fn format_diagnostic(path: &str, source: &str, error: &PadmaError) -> String {
     rendered
 }
 
+fn diagnostic_json(path: &str, source: &str, error: &PadmaError) -> JsonValue {
+    let rendered_path = error
+        .source_path
+        .as_ref()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let rendered_source = error.source_text.as_deref().unwrap_or(source);
+    let line_text = rendered_source
+        .lines()
+        .nth(error.position.line.saturating_sub(1))
+        .unwrap_or("");
+    let locale = match error.locale {
+        Locale::Bangla => "bn",
+        Locale::English => "en",
+    };
+    serde_json::json!({
+        "code": error.code,
+        "message": error.message,
+        "hint": error.hint,
+        "locale": locale,
+        "path": rendered_path,
+        "range": {
+            "start": { "line": error.position.line, "column": error.position.column },
+            "end": { "line": error.position.line, "column": error.position.column + 1 }
+        },
+        "source_line": line_text,
+    })
+}
+
+fn check_json(path: &str, source: &str) -> String {
+    match check_source(source) {
+        Ok(locale) => {
+            let locale = match locale {
+                Locale::Bangla => "bn",
+                Locale::English => "en",
+            };
+            serde_json::json!({
+                "status": "ok",
+                "path": path,
+                "locale": locale,
+                "diagnostics": []
+            })
+            .to_string()
+        }
+        Err(errors) => serde_json::json!({
+            "status": "error",
+            "path": path,
+            "diagnostics": errors
+                .iter()
+                .map(|error| diagnostic_json(path, source, error))
+                .collect::<Vec<_>>()
+        })
+        .to_string(),
+    }
+}
+
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma examples/hello-bn.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma examples/hello-en.pd\n  padma check examples/hello-en.pd\n  padma check --json examples/hello-en.pd\n  padma ast examples/mixed.pd\n"
         }
     }
 }
@@ -3217,9 +3273,15 @@ fn main() {
         }
         return;
     }
-    let (command, path) = match arguments.len() {
-        2 if arguments[1].ends_with(".pd") => ("run", arguments[1].as_str()),
-        3 => (arguments[1].as_str(), arguments[2].as_str()),
+    let (command, path, json_diagnostics) = match arguments.as_slice() {
+        [_, path] if path.ends_with(".pd") => ("run", path.as_str(), false),
+        [_, command, path] => (command.as_str(), path.as_str(), false),
+        [_, command, flag, path] if command == "check" && flag == "--json" => {
+            ("check", path.as_str(), true)
+        }
+        [_, command, path, flag] if command == "check" && flag == "--json" => {
+            ("check", path.as_str(), true)
+        }
         _ => {
             eprintln!("{}", usage(Locale::Bangla));
             process::exit(64);
@@ -3237,6 +3299,15 @@ fn main() {
         }
     };
     if command == "check" {
+        if json_diagnostics {
+            let result = check_json(path, &source);
+            let has_errors = result.contains("\"status\":\"error\"");
+            println!("{result}");
+            if has_errors {
+                process::exit(1);
+            }
+            return;
+        }
         match check_source(&source) {
             Ok(locale) => match locale {
                 Locale::Bangla => println!("ঠিক আছে: `{path}`-এ কোনো syntax error পাওয়া যায়নি।"),
@@ -3395,6 +3466,28 @@ mod tests {
         let directory = env::temp_dir().join(format!("padma-{label}-{}-{nonce}", process::id()));
         fs::create_dir_all(&directory).unwrap();
         directory
+    }
+
+    #[test]
+    fn emits_machine_readable_json_check_diagnostics() {
+        let source = "let = 3\nprint (\n";
+        let output = check_json("broken.pd", source);
+        let value: JsonValue = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["status"], "error");
+        assert_eq!(value["path"], "broken.pd");
+        let diagnostics = value["diagnostics"].as_array().unwrap();
+        assert!(!diagnostics.is_empty());
+        assert!(diagnostics[0]["code"].as_str().unwrap().starts_with('P'));
+        assert_eq!(diagnostics[0]["locale"], "en");
+        assert!(diagnostics[0]["range"]["start"]["line"].is_number());
+    }
+
+    #[test]
+    fn emits_json_check_success_without_diagnostics() {
+        let output = check_json("valid.pd", "print \"ok\"\n");
+        let value: JsonValue = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["diagnostics"], serde_json::json!([]));
     }
 
     fn run_file(path: &Path) -> Result<Vec<String>, PadmaError> {

@@ -79,7 +79,7 @@ For a multi-line `if`, `while`, or function block, continue entering lines after
 
 If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
 
-For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, local-first projects, modules, public exports, standard-library APIs, and manifest capability grants. Static checking, audited permission escalation, and package tooling remain active implementation milestones rather than undocumented claims.
+For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, local-first projects, modules, public exports, standard-library APIs, manifest capability grants, and JSON parser diagnostics. Formatting, linting, static semantic checks, and package tooling remain active implementation milestones rather than undocumented claims.
 
 ## Your first Padma program
 
@@ -314,6 +314,7 @@ Use this only for content you own or are authorized to download and in complianc
 | `padma capabilities [project]` | Print declared project capability grants without running project code. |
 | `padma run <file.pd>` | Backward-compatible explicit run form. |
 | `padma check <file.pd>` | Check the source syntax without executing it. |
+| `padma check --json <file.pd>` | Emit one machine-readable diagnostic report for editors and CI. |
 | `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
 | `padma --version` | Print the installed compiler version. |
 | `padma --help` | Show CLI usage and interactive-shell commands. |

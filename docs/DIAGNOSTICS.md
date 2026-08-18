@@ -50,4 +50,31 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
    = পরামর্শ: আগের statement ও বন্ধনীগুলো পরীক্ষা করুন।
 ```
 
-Consumers that parse diagnostics should use the `P` code, not the localized message text. Structured JSON diagnostics are a planned tooling milestone.
+Consumers that parse diagnostics should use the `P` code, not the localized message text.
+
+## JSON diagnostics for editors and CI
+
+Use `padma check --json file.pd` (or `padma check file.pd --json`) when an editor, CI workflow, or script needs machine-readable output. The command writes one JSON object to standard output and still exits with `0` for a clean file and `1` when diagnostics are reported.
+
+```json
+{
+  "status": "error",
+  "path": "broken.pd",
+  "diagnostics": [
+    {
+      "code": "P1002",
+      "message": "...",
+      "hint": null,
+      "locale": "en",
+      "path": "broken.pd",
+      "range": {
+        "start": { "line": 1, "column": 5 },
+        "end": { "line": 1, "column": 6 }
+      },
+      "source_line": "let = 3"
+    }
+  ]
+}
+```
+
+The stable fields are `status`, `path`, `diagnostics[].code`, `diagnostics[].message`, `diagnostics[].hint`, `diagnostics[].locale`, `diagnostics[].path`, and one-based `range` coordinates. Later releases may add fields; consumers should ignore unknown fields.
