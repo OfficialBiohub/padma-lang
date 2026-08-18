@@ -27,14 +27,27 @@ impl Locale {
             return Self::Bangla;
         }
 
-        let bangla = ["ধরি", "দেখাও", "যদি", "নইলে", "সত্য", "মিথ্যা"]
-            .iter()
-            .map(|word| source.matches(word).count())
-            .sum::<usize>();
-        let english = ["let", "print", "if", "else", "true", "false"]
-            .iter()
-            .map(|word| source.matches(word).count())
-            .sum::<usize>();
+        let bangla = [
+            "ধরি",
+            "দেখাও",
+            "যদি",
+            "নইলে",
+            "যতক্ষণ",
+            "ফাংশন",
+            "ফেরত",
+            "ইমপোর্ট",
+            "সত্য",
+            "মিথ্যা",
+        ]
+        .iter()
+        .map(|word| source.matches(word).count())
+        .sum::<usize>();
+        let english = [
+            "let", "print", "if", "else", "while", "function", "return", "import", "true", "false",
+        ]
+        .iter()
+        .map(|word| source.matches(word).count())
+        .sum::<usize>();
 
         if english > bangla {
             Self::English
@@ -62,10 +75,14 @@ struct PadmaError {
     message: String,
     hint: Option<String>,
     position: Position,
+    locale: Locale,
+    source_path: Option<PathBuf>,
+    source_text: Option<String>,
 }
 
 impl PadmaError {
     fn new(
+        locale: Locale,
         code: &'static str,
         message: impl Into<String>,
         hint: Option<String>,
@@ -76,7 +93,17 @@ impl PadmaError {
             message: message.into(),
             hint,
             position,
+            locale,
+            source_path: None,
+            source_text: None,
         }
+    }
+
+    fn with_source_context(mut self, path: PathBuf, source: String, locale: Locale) -> Self {
+        self.locale = locale;
+        self.source_path = Some(path);
+        self.source_text = Some(source);
+        self
     }
 }
 
@@ -180,7 +207,7 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
     };
-    PadmaError::new(code, message, hint, position)
+    PadmaError::new(locale, code, message, hint, position)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1237,18 +1264,16 @@ impl Interpreter {
         let result = (|| {
             let source = fs::read_to_string(&path)
                 .map_err(|_| error_for(self.locale, "P1023", position, requested))?;
+            let module_locale = Locale::from_source(&source);
             let (program, module_locale) = compile(&source).map_err(|error| {
-                error_for(
-                    self.locale,
-                    "P1025",
-                    position,
-                    &format!("{requested}: {}", error.message),
-                )
+                error.with_source_context(path.clone(), source.clone(), module_locale)
             })?;
             let previous_source = std::mem::replace(&mut self.current_source, path.clone());
             let previous_locale = self.locale;
             self.locale = module_locale;
-            let run_result = self.run(&program);
+            let run_result = self.run(&program).map_err(|error| {
+                error.with_source_context(path.clone(), source.clone(), module_locale)
+            });
             self.current_source = previous_source;
             self.locale = previous_locale;
             run_result
@@ -1623,14 +1648,21 @@ fn check_source(source: &str) -> Result<Locale, Vec<PadmaError>> {
     }
 }
 
-fn format_diagnostic(path: &str, source: &str, error: &PadmaError, locale: Locale) -> String {
-    let line = source
+fn format_diagnostic(path: &str, source: &str, error: &PadmaError) -> String {
+    let rendered_path = error
+        .source_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let rendered_source = error.source_text.as_deref().unwrap_or(source);
+    let rendered_locale = error.locale;
+    let line = rendered_source
         .lines()
         .nth(error.position.line.saturating_sub(1))
         .unwrap_or("");
     let gutter_width = error.position.line.to_string().len();
     let marker = " ".repeat(error.position.column.saturating_sub(1));
-    let (label, point, hint_label) = match locale {
+    let (label, point, hint_label) = match rendered_locale {
         Locale::Bangla => ("ত্রুটি", "এই স্থানে", "পরামর্শ"),
         Locale::English => ("error", "here", "help"),
     };
@@ -1638,7 +1670,7 @@ fn format_diagnostic(path: &str, source: &str, error: &PadmaError, locale: Local
         "{label}[{}]: {}\n  --> {}:{}:{}\n   |\n{:>width$} | {}\n   | {}^ {point}\n",
         error.code,
         error.message,
-        path,
+        rendered_path,
         error.position.line,
         error.position.column,
         error.position.line,
@@ -1696,7 +1728,6 @@ fn main() {
             process::exit(66);
         }
     };
-    let locale = Locale::from_source(&source);
     if command == "check" {
         match check_source(&source) {
             Ok(locale) => match locale {
@@ -1705,7 +1736,7 @@ fn main() {
             },
             Err(errors) => {
                 for error in errors {
-                    eprintln!("{}", format_diagnostic(path, &source, &error, locale));
+                    eprintln!("{}", format_diagnostic(path, &source, &error));
                 }
                 process::exit(1);
             }
@@ -1716,7 +1747,7 @@ fn main() {
     let (program, locale) = match compiled {
         Ok(value) => value,
         Err(error) => {
-            eprintln!("{}", format_diagnostic(path, &source, &error, locale));
+            eprintln!("{}", format_diagnostic(path, &source, &error));
             process::exit(1);
         }
     };
@@ -1726,7 +1757,7 @@ fn main() {
         "run" => {
             let mut interpreter = Interpreter::with_source_path(locale, PathBuf::from(path));
             if let Err(error) = interpreter.run(&program) {
-                eprintln!("{}", format_diagnostic(path, &source, &error, locale));
+                eprintln!("{}", format_diagnostic(path, &source, &error));
                 process::exit(1);
             }
             for line in interpreter.output {
@@ -1986,6 +2017,21 @@ mod tests {
         let output = run_file(&main).unwrap();
         fs::remove_dir_all(directory).unwrap();
         assert_eq!(output, vec!["হ্যালো রাফি"]);
+    }
+
+    #[test]
+    fn preserves_imported_module_source_context_for_diagnostics() {
+        let directory = module_fixture_dir("module-diagnostic-context");
+        let module = directory.join("broken.pd");
+        let main = directory.join("main.pd");
+        fs::write(&module, "print missing_value\n").unwrap();
+        fs::write(&main, "import \"broken.pd\"\n").unwrap();
+        let error = run_file(&main).unwrap_err();
+        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(error.code, "P1007");
+        assert_eq!(error.source_path.as_deref(), Some(module.as_path()));
+        assert_eq!(error.source_text.as_deref(), Some("print missing_value\n"));
+        assert_eq!(error.locale, Locale::English);
     }
 
     #[test]

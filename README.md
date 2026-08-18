@@ -74,7 +74,7 @@ The shell accepts `help` or `সাহায্য`, `copyright`, `credits`, and
 
 If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
 
-For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). The current release is an executable interpreter core; functions, collections, modules, and static type checking remain active implementation milestones rather than undocumented claims.
+For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core; functions, collections, modules, and static type checking remain active implementation milestones rather than undocumented claims.
 
 ## Your first Padma program
 

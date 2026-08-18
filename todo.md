@@ -15,7 +15,8 @@
 ## Production-readiness roadmap
 
 - [ ] Publish a versioned production-readiness definition with supported platforms, compatibility guarantees, and explicit non-goals.
-- [ ] Add file-aware source spans, richer locale detection, and a complete bilingual diagnostics catalogue.
+- [x] Add richer locale detection and a complete bilingual diagnostics catalogue.
+- [x] Preserve source file, source line, and locale context for imported-module diagnostics.
 - [x] Add parser recovery so `padma check` reports multiple independent syntax errors in one run.
 - [ ] Implement null values, indexing, slicing, list mutation, iteration, and collection utility APIs.
 - [ ] Add a documented safe standard library for text, math, random, time, filesystem, JSON, and URL handling.

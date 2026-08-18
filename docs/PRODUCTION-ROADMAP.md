@@ -175,7 +175,7 @@ The realistic sequence is intentionally narrow. A single language cannot become 
 
 ## 6. Immediate next implementation increment
 
-The next code milestone is **M1 diagnostics and source handling**. The first increment is complete: `padma check` now continues after a malformed statement and reports multiple independent syntax errors in one run. The remaining M1 work will add file-aware source spans for imports, a documented diagnostic registry, and broader `padma check` tests. This comes before new frameworks because a learner cannot effectively use a language that reports errors in the wrong file or with unclear guidance.
+The next code milestone is **M1 diagnostics and source handling**. Two increments are complete: `padma check` continues after a malformed statement and reports multiple independent syntax errors in one run; errors raised from an imported module now render against the original module file, source line, and its detected locale. The remaining M1 work is a documented diagnostic registry and broader `padma check` tests. This comes before new frameworks because a learner cannot effectively use a language that reports errors in the wrong file or with unclear guidance.
 
 ## 7. Security and release references
 
