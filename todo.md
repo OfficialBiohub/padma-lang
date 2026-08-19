@@ -138,6 +138,8 @@
 - [ ] Add a local SQLite persistence layer with project-root database paths, prepared statements, typed JSON rows, explicit `database` capability grant, migrations, and transaction safety; do not create a raw SQL string-evaluation API.
   - [x] Add a fixed-command, project-root-scoped SQLite foundation with explicit `database:sqlite` capability checks and localized diagnostics.
   - [ ] Add typed parameter binding, deterministic JSON row decoding, transaction boundaries, and schema migration metadata without exposing raw SQL evaluation.
+    - [x] Add a versioned, fixed migration metadata record and a read-only `db.version` API without accepting executable user schema text.
+    - [x] Add an atomic bounded batch API for fixed Padma record operations; reject nesting, callbacks, arbitrary SQL, and cross-database batches.
 - [ ] Add a signed package registry client and deterministic package lock workflow with integrity verification, version resolution, package-root isolation, offline cache, and explicit trust policy.
 - [ ] Add an optional identity/session layer using password hashing, signed expiring sessions, CSRF controls, secure cookie defaults, and secret names sourced from environment variables rather than source code.
 - [ ] Add deployment manifests and dry-run adapters before any remote deployment integration; preserve clear ownership, secret isolation, build reproducibility, rollback metadata, and explicit user confirmation for remote actions.

@@ -37,10 +37,12 @@ database = ["sqlite"]
 
 | Function | Arguments | Returns |
 |---|---|---|
+| `db.version` | `database_path` | fixed managed schema version (`1`) |
 | `db.put` | `database_path, namespace, key, value` | `true` after an insert or replacement |
 | `db.get` | `database_path, namespace, key` | stored Padma value, or `none` if no key exists |
 | `db.list` | `database_path, namespace, limit` | ordered list of `{ "key": text, "value": value }` maps |
 | `db.delete` | `database_path, namespace, key` | `true` after the requested deletion operation |
+| `db.apply` | `database_path, operations` | `true` after one atomic fixed-operation batch |
 
 `value` may be any JSON-compatible Padma value: number, text, list, map, `true`, `false`, or `none`. A map’s keys must remain text, consistent with the rest of Padma’s JSON contract.
 
@@ -62,6 +64,41 @@ print db.list("data/profile.sqlite", "user", 10)
 db.delete("data/profile.sqlite", "user", "rafi")
 print db.get("data/profile.sqlite", "user", "rafi")
 ```
+
+## Fixed version and atomic batches
+
+`db.version` exposes metadata for Padma-managed storage only. The initial version is **1**; it is not a user-defined schema migration engine. This deliberate constraint preserves upgrade ownership in the language runtime rather than accepting executable schema text from an application.
+
+`db.apply` makes up to 32 fixed `put` or `delete` operations to **one database file** atomically. Each operation is a map. No function callbacks, nested batches, arbitrary operation names, extra fields, or cross-database writes are accepted.
+
+```padma
+print db.version("data/tasks.sqlite")
+
+let saved = db.apply("data/tasks.sqlite", [
+  {
+    "op": "put",
+    "namespace": "tasks",
+    "key": "first",
+    "value": {"title": "Learn Padma", "done": false}
+  },
+  {
+    "op": "put",
+    "namespace": "tasks",
+    "key": "second",
+    "value": {"title": "Build safely", "done": true}
+  },
+  {
+    "op": "delete",
+    "namespace": "tasks",
+    "key": "old-task"
+  }
+])
+
+print saved
+print db.list("data/tasks.sqlite", "tasks", 10)
+```
+
+Internally, Padma validates the complete batch before opening SQLite, then emits a single `BEGIN IMMEDIATE` and `COMMIT` sequence. SQLite’s documented transaction model does not allow nested `BEGIN...COMMIT` transactions and permits only one simultaneous writer, so a lock conflict fails rather than silently producing a partial success. [2]
 
 Run it with normal project workflow:
 
@@ -100,3 +137,4 @@ This M9 foundation deliberately does **not** claim an ORM, user-defined schema, 
 ## References
 
 [1]: https://sqlite.org/cli.html "SQLite Command Line Shell"
+[2]: https://sqlite.org/lang_transaction.html "SQLite Transaction documentation"

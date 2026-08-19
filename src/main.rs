@@ -610,6 +610,10 @@ fn sqlite_script(parameters: &[String], statement: &str, json_output: bool) -> S
     lines.push(
         "CREATE TABLE IF NOT EXISTS padma_records (namespace TEXT NOT NULL, record_key TEXT NOT NULL, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(namespace, record_key)) WITHOUT ROWID;".to_string(),
     );
+    lines.push(
+        "CREATE TABLE IF NOT EXISTS padma_meta (id INTEGER PRIMARY KEY CHECK(id = 1), schema_version INTEGER NOT NULL CHECK(schema_version = 1));".to_string(),
+    );
+    lines.push("INSERT OR IGNORE INTO padma_meta(id, schema_version) VALUES(1, 1);".to_string());
     if json_output {
         lines.push(".mode json".to_string());
     }
@@ -2869,6 +2873,133 @@ impl Interpreter {
                         String::from_utf8_lossy(&result.stdout).to_string(),
                     ));
                 }
+                if name == "db.version" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let database = self.evaluate(&arguments[0])?;
+                    let database =
+                        expect_string(&database, self.locale, *position, "database path")?;
+                    let output = self.sqlite_execute(
+                        database,
+                        &[],
+                        "SELECT schema_version FROM padma_meta WHERE id = 1;",
+                        true,
+                        *position,
+                    )?;
+                    let version = serde_json::from_slice::<JsonValue>(&output)
+                        .ok()
+                        .and_then(|rows| rows.as_array().cloned())
+                        .and_then(|rows| rows.into_iter().next())
+                        .and_then(|row| row.get("schema_version").and_then(JsonValue::as_i64))
+                        .filter(|version| *version == 1)
+                        .ok_or_else(|| {
+                            error_for(self.locale, "P1042", *position, "schema version")
+                        })?;
+                    return Ok(Value::Number(version as f64));
+                }
+                if name == "db.apply" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let database = self.evaluate(&arguments[0])?;
+                    let database =
+                        expect_string(&database, self.locale, *position, "database path")?;
+                    let operations = self.evaluate(&arguments[1])?;
+                    let Value::List(operations) = operations else {
+                        return Err(error_for(
+                            self.locale,
+                            "P1010",
+                            *position,
+                            "db.apply operations",
+                        ));
+                    };
+                    if operations.is_empty() || operations.len() > 32 {
+                        return Err(error_for(self.locale, "P1043", *position, "batch size"));
+                    }
+                    let mut parameters = Vec::new();
+                    let mut statements = Vec::with_capacity(operations.len());
+                    for (index, operation) in operations.iter().enumerate() {
+                        let Value::Map(operation) = operation else {
+                            return Err(error_for(
+                                self.locale,
+                                "P1010",
+                                *position,
+                                "db.apply operation",
+                            ));
+                        };
+                        let Some(Value::String(kind)) = operation.get("op") else {
+                            return Err(error_for(self.locale, "P1010", *position, "db.apply op"));
+                        };
+                        if !matches!(kind.as_str(), "put" | "delete")
+                            || !operation.keys().all(|key| {
+                                matches!(key.as_str(), "op" | "namespace" | "key" | "value")
+                            })
+                        {
+                            return Err(error_for(
+                                self.locale,
+                                "P1010",
+                                *position,
+                                "db.apply operation",
+                            ));
+                        }
+                        let Some(Value::String(namespace)) = operation.get("namespace") else {
+                            return Err(error_for(self.locale, "P1010", *position, "namespace"));
+                        };
+                        let Some(Value::String(key)) = operation.get("key") else {
+                            return Err(error_for(self.locale, "P1010", *position, "record key"));
+                        };
+                        if namespace.len() > 256 || key.len() > 256 {
+                            return Err(error_for(self.locale, "P1043", *position, "batch record"));
+                        }
+                        let namespace_parameter = format!(":namespace{index}");
+                        let key_parameter = format!(":key{index}");
+                        parameters.push(sqlite_hex_parameter(
+                            &namespace_parameter,
+                            namespace.as_bytes(),
+                        ));
+                        parameters.push(sqlite_hex_parameter(&key_parameter, key.as_bytes()));
+                        if kind == "put" {
+                            let Some(value) = operation.get("value") else {
+                                return Err(error_for(
+                                    self.locale,
+                                    "P1010",
+                                    *position,
+                                    "record value",
+                                ));
+                            };
+                            let value =
+                                serde_json::to_vec(&value_to_json(value).map_err(|detail| {
+                                    error_for(self.locale, "P1029", *position, &detail)
+                                })?)
+                                .map_err(|_| {
+                                    error_for(self.locale, "P1029", *position, "database value")
+                                })?;
+                            if value.len() > SQLITE_MAX_BYTES {
+                                return Err(error_for(
+                                    self.locale,
+                                    "P1043",
+                                    *position,
+                                    "batch value",
+                                ));
+                            }
+                            let value_parameter = format!(":value{index}");
+                            parameters.push(sqlite_hex_parameter(&value_parameter, &value));
+                            statements.push(format!(
+                                "INSERT INTO padma_records(namespace, record_key, value_json, updated_at) VALUES(CAST({namespace_parameter} AS TEXT), CAST({key_parameter} AS TEXT), CAST({value_parameter} AS TEXT), CAST(strftime('%s', 'now') AS INTEGER)) ON CONFLICT(namespace, record_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at;"
+                            ));
+                        } else if operation.contains_key("value") {
+                            return Err(error_for(self.locale, "P1010", *position, "delete value"));
+                        } else {
+                            statements.push(format!(
+                                "DELETE FROM padma_records WHERE namespace = CAST({namespace_parameter} AS TEXT) AND record_key = CAST({key_parameter} AS TEXT);"
+                            ));
+                        }
+                    }
+                    let statement = format!("BEGIN IMMEDIATE;\n{}\nCOMMIT;", statements.join("\n"));
+                    self.sqlite_execute(database, &parameters, &statement, false, *position)?;
+                    return Ok(Value::Boolean(true));
+                }
                 if matches!(name.as_str(), "db.put" | "db.get" | "db.delete" | "db.list") {
                     let values = arguments
                         .iter()
@@ -3874,6 +4005,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "random.int" => Some((2, 2)),
         "text.replace" => Some((3, 3)),
         "db.put" => Some((4, 4)),
+        "db.version" => Some((1, 1)),
+        "db.apply" => Some((2, 2)),
         "time.now" => Some((0, 0)),
         _ => None,
     }
@@ -5190,6 +5323,43 @@ mod tests {
                 "none",
             ]
         );
+    }
+
+    #[test]
+    fn sqlite_reports_fixed_schema_version_and_applies_bounded_batch() {
+        if process::Command::new("sqlite3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = module_fixture_dir("sqlite-batch");
+        fs::create_dir(root.join("data")).unwrap();
+        let source = "print db.version(\"data/app.sqlite\")\nprint db.apply(\"data/app.sqlite\", [{\"op\": \"put\", \"namespace\": \"tasks\", \"key\": \"one\", \"value\": {\"done\": false}}, {\"op\": \"put\", \"namespace\": \"tasks\", \"key\": \"two\", \"value\": {\"done\": true}}, {\"op\": \"delete\", \"namespace\": \"tasks\", \"key\": \"one\"}])\nprint db.list(\"data/app.sqlite\", \"tasks\", 10)\n";
+        let (program, locale) = compile(source).unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::from(["database:sqlite".into()]),
+        );
+        interpreter.run(&program).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            interpreter.output,
+            vec!["1", "true", "[{\"key\": two, \"value\": {\"done\": true}}]",]
+        );
+
+        let (invalid_program, invalid_locale) = compile(
+            "db.apply(\"data/app.sqlite\", [{\"op\": \"drop\", \"namespace\": \"tasks\", \"key\": \"one\"}])\n",
+        )
+        .unwrap();
+        let mut invalid = Interpreter::new(invalid_locale);
+        let error = invalid.run(&invalid_program).unwrap_err();
+        assert_eq!(error.code, "P1010");
+        assert_eq!(static_builtin_arity("db.version"), Some((1, 1)));
+        assert_eq!(static_builtin_arity("db.apply"), Some((2, 2)));
     }
 
     #[test]
