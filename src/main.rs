@@ -3683,12 +3683,25 @@ struct ProjectManifest {
     locale: String,
     capabilities: BTreeSet<String>,
     lint_disabled: BTreeSet<String>,
+    dependencies: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PackageManifest {
+    name: String,
+    version: String,
+    entry: String,
+    exports: BTreeSet<String>,
+    capabilities: BTreeSet<String>,
+    digest: String,
 }
 
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
 const LINT_RULES: [&str; 3] = ["L1001", "L1002", "L1003"];
+const PACKAGE_MAX_FILES: usize = 256;
+const PACKAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
 
 fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
     let value = value.trim();
@@ -3756,6 +3769,7 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
     let mut capability_fields = BTreeSet::new();
     let mut lint_disabled = BTreeSet::new();
     let mut lint_fields = BTreeSet::new();
+    let mut dependencies = BTreeMap::new();
     for (line_number, raw_line) in source.lines().enumerate() {
         let line = raw_line.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
@@ -3779,11 +3793,29 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
             .split_once('=')
             .ok_or_else(|| format!("P1032: expected `key = value` on line {}", line_number + 1))?;
         let key = key.trim();
-        if section == "dependencies" || key == "dependencies" {
-            return Err(format!(
-                "P1033: dependencies are not supported yet (line {})",
-                line_number + 1
-            ));
+        if section == "dependencies" {
+            if !is_safe_package_name(key) {
+                return Err(format!(
+                    "P1032: unsafe package dependency name `{key}` on line {}",
+                    line_number + 1
+                ));
+            }
+            let raw_value = raw_value.trim();
+            if raw_value.len() < 2 || !raw_value.starts_with('"') || !raw_value.ends_with('"') {
+                return Err(format!(
+                    "P1032: package path must be a quoted string on line {}",
+                    line_number + 1
+                ));
+            }
+            let path = raw_value[1..raw_value.len() - 1].to_string();
+            safe_package_relative_path(&path)?;
+            if dependencies.insert(key.to_string(), path).is_some() {
+                return Err(format!(
+                    "P1032: duplicate dependency `{key}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
         }
         if section == "capabilities" {
             if !capability_fields.insert(key.to_string()) {
@@ -3860,11 +3892,239 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
             .unwrap_or_else(|| "auto".to_string()),
         capabilities,
         lint_disabled,
+        dependencies,
     };
     if !matches!(manifest.locale.as_str(), "auto" | "bn" | "en") {
         return Err("P1032: `locale` must be `auto`, `bn`, or `en`".to_string());
     }
     Ok(manifest)
+}
+
+fn is_safe_package_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_alphabetic())
+        && value.len() <= 64
+        && chars
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+fn is_semver(value: &str) -> bool {
+    let pieces = value.split('.').collect::<Vec<_>>();
+    pieces.len() == 3
+        && pieces
+            .iter()
+            .all(|piece| !piece.is_empty() && piece.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn is_sha256_digest(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
+}
+
+fn safe_package_relative_path(value: &str) -> Result<PathBuf, String> {
+    let path = safe_relative_path(value)
+        .map_err(|_| "P1032: package path must be a relative path without `..`".to_string())?;
+    if path
+        .components()
+        .next()
+        .and_then(|component| component.as_os_str().to_str())
+        != Some("packages")
+    {
+        return Err(
+            "P1032: package path must be inside the project `packages/` directory".to_string(),
+        );
+    }
+    Ok(path)
+}
+
+fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    let mut capabilities = BTreeSet::new();
+    let mut capability_fields = BTreeSet::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if !matches!(section.as_str(), "package" | "capabilities") {
+                return Err(format!(
+                    "P1032: unsupported package manifest section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1032: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        if section == "capabilities" {
+            if !capability_fields.insert(key.to_string()) {
+                return Err(format!(
+                    "P1032: duplicate package capability `{key}` on line {}",
+                    line_number + 1
+                ));
+            }
+            capabilities.extend(capability_grants_for_field(
+                key,
+                parse_manifest_string_list(raw_value, line_number + 1)?,
+                line_number + 1,
+            )?);
+            continue;
+        }
+        if section != "package"
+            || !matches!(key, "name" | "version" | "entry" | "exports" | "digest")
+        {
+            return Err(format!(
+                "P1032: unsupported package manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        let value = if key == "exports" {
+            parse_manifest_string_list(raw_value, line_number + 1)?.join("\u{1f}")
+        } else {
+            let raw_value = raw_value.trim();
+            if raw_value.len() < 2 || !raw_value.starts_with('"') || !raw_value.ends_with('"') {
+                return Err(format!(
+                    "P1032: package `{key}` must be a quoted string on line {}",
+                    line_number + 1
+                ));
+            }
+            raw_value[1..raw_value.len() - 1].to_string()
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(format!(
+                "P1032: duplicate package field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1032: missing `[package]` field `{key}`"))
+    };
+    let name = required("name")?;
+    let version = required("version")?;
+    let entry = required("entry")?;
+    let digest = required("digest")?;
+    if !is_safe_package_name(&name) || !is_semver(&version) || !is_sha256_digest(&digest) {
+        return Err("P1032: package name, version, or sha256 digest is invalid".to_string());
+    }
+    safe_project_relative_path(&entry)?;
+    let exports = fields
+        .get("exports")
+        .map(|value| {
+            value
+                .split('\u{1f}')
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    if exports.is_empty()
+        || exports
+            .iter()
+            .any(|item| item.len() > 64 || item.contains(['/', '\\', ' ']))
+    {
+        return Err("P1032: package exports must be a non-empty safe string list".to_string());
+    }
+    Ok(PackageManifest {
+        name,
+        version,
+        entry,
+        exports,
+        capabilities,
+        digest,
+    })
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut bytes = input.to_vec();
+    let bit_length = (bytes.len() as u64).saturating_mul(8);
+    bytes.push(0x80);
+    while bytes.len() % 64 != 56 {
+        bytes.push(0);
+    }
+    bytes.extend_from_slice(&bit_length.to_be_bytes());
+    let mut hash = [
+        0x6a09e667u32,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    for chunk in bytes.chunks_exact(64) {
+        let mut words = [0u32; 64];
+        for (index, word) in words.iter_mut().take(16).enumerate() {
+            *word = u32::from_be_bytes(chunk[index * 4..index * 4 + 4].try_into().unwrap());
+        }
+        for index in 16..64 {
+            let s0 = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(words[index - 7])
+                .wrapping_add(s1);
+        }
+        let mut state = hash;
+        for index in 0..64 {
+            let s1 =
+                state[4].rotate_right(6) ^ state[4].rotate_right(11) ^ state[4].rotate_right(25);
+            let choice = (state[4] & state[5]) ^ ((!state[4]) & state[6]);
+            let one = state[7]
+                .wrapping_add(s1)
+                .wrapping_add(choice)
+                .wrapping_add(K[index])
+                .wrapping_add(words[index]);
+            let s0 =
+                state[0].rotate_right(2) ^ state[0].rotate_right(13) ^ state[0].rotate_right(22);
+            let majority = (state[0] & state[1]) ^ (state[0] & state[2]) ^ (state[1] & state[2]);
+            let two = s0.wrapping_add(majority);
+            state = [
+                one.wrapping_add(two),
+                state[0],
+                state[1],
+                state[2],
+                state[3].wrapping_add(one),
+                state[4],
+                state[5],
+                state[6],
+            ];
+        }
+        for (target, value) in hash.iter_mut().zip(state) {
+            *target = target.wrapping_add(value);
+        }
+    }
+    hash.iter().map(|word| format!("{word:08x}")).collect()
 }
 
 fn safe_project_relative_path(value: &str) -> Result<PathBuf, String> {
@@ -3943,6 +4203,7 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
         locale: "bn".to_string(),
         capabilities: BTreeSet::new(),
         lint_disabled: BTreeSet::new(),
+        dependencies: BTreeMap::new(),
     };
     fs::create_dir_all(directory.join("src"))
         .map_err(|error| format!("P1032: cannot create project source directory: {error}"))?;
@@ -3954,20 +4215,197 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
         ),
     )
     .map_err(|error| format!("P1032: cannot write manifest: {error}"))?;
-    fs::write(
-        directory.join("padma.lock"),
-        format!(
-            "# Padma lockfile v1\nname = \"{}\"\nversion = \"{}\"\n",
-            manifest.name, manifest.version
-        ),
-    )
-    .map_err(|error| format!("P1032: cannot write lockfile: {error}"))?;
+    write_package_lock(directory)?;
     fs::write(
         directory.join("src/main.pd"),
         "# padma:locale=bn\nদেখাও \"পদ্ম project শুরু হয়েছে\"\n",
     )
     .map_err(|error| format!("P1032: cannot write starter source: {error}"))?;
     Ok(manifest)
+}
+
+fn package_digest(directory: &Path) -> Result<String, String> {
+    fn collect(
+        root: &Path,
+        current: &Path,
+        entries: &mut BTreeMap<String, Vec<u8>>,
+        total: &mut usize,
+    ) -> Result<(), String> {
+        for entry in fs::read_dir(current)
+            .map_err(|error| format!("P1044: cannot inspect package directory: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("P1044: cannot read package entry: {error}"))?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("P1044: cannot inspect package entry: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err("P1044: symbolic links are not allowed in local packages".to_string());
+            }
+            if metadata.is_dir() {
+                collect(root, &path, entries, total)?;
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err("P1044: local packages may contain only regular files".to_string());
+            }
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| "P1044: package path escaped its source root".to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative == "padma-package.toml" {
+                continue;
+            }
+            let content = fs::read(&path).map_err(|error| {
+                format!("P1044: cannot read package file `{relative}`: {error}")
+            })?;
+            *total = total.saturating_add(content.len());
+            if entries.len() >= PACKAGE_MAX_FILES || *total > PACKAGE_MAX_BYTES {
+                return Err("P1044: package exceeds local cache file or byte limit".to_string());
+            }
+            entries.insert(relative, content);
+        }
+        Ok(())
+    }
+
+    let mut entries = BTreeMap::new();
+    let mut total = 0usize;
+    collect(directory, directory, &mut entries, &mut total)?;
+    let mut canonical = Vec::new();
+    for (path, content) in entries {
+        canonical.extend_from_slice(path.as_bytes());
+        canonical.push(0);
+        canonical.extend_from_slice(&(content.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(&content);
+    }
+    Ok(format!("sha256:{}", sha256_hex(&canonical)))
+}
+
+fn resolve_local_package(
+    project_root: &Path,
+    dependency_name: &str,
+    relative_path: &str,
+) -> Result<(PackageManifest, PathBuf, String), String> {
+    let root = fs::canonicalize(project_root)
+        .map_err(|error| format!("P1044: cannot resolve project root: {error}"))?;
+    let relative = safe_package_relative_path(relative_path)?;
+    let source = root.join(relative);
+    let source_metadata = fs::symlink_metadata(&source)
+        .map_err(|error| format!("P1044: package `{dependency_name}` is unavailable: {error}"))?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err(format!(
+            "P1044: package `{dependency_name}` source must be a directory"
+        ));
+    }
+    let source = fs::canonicalize(source)
+        .map_err(|error| format!("P1044: cannot resolve package `{dependency_name}`: {error}"))?;
+    if !source.starts_with(&root) {
+        return Err(format!(
+            "P1044: package `{dependency_name}` escaped the project root"
+        ));
+    }
+    let manifest_path = source.join("padma-package.toml");
+    let manifest_source = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("P1044: cannot read package manifest: {error}"))?;
+    let manifest = parse_package_manifest(&manifest_source)?;
+    if manifest.name != dependency_name {
+        return Err(format!(
+            "P1044: dependency `{dependency_name}` does not match package name `{}`",
+            manifest.name
+        ));
+    }
+    let entry = source.join(safe_project_relative_path(&manifest.entry)?);
+    let entry_metadata = fs::symlink_metadata(&entry)
+        .map_err(|error| format!("P1044: cannot inspect package entry: {error}"))?;
+    if entry_metadata.file_type().is_symlink() || !entry_metadata.is_file() {
+        return Err("P1044: package entry must be a regular local `.pd` file".to_string());
+    }
+    let digest = package_digest(&source)?;
+    if digest != manifest.digest {
+        return Err(format!(
+            "P1044: package `{dependency_name}` digest does not match its manifest"
+        ));
+    }
+    Ok((manifest, source, digest))
+}
+
+fn package_lock_contents(directory: &Path) -> Result<String, String> {
+    let (project, _) = load_project_manifest(directory)?;
+    let mut packages = Vec::new();
+    for (name, path) in &project.dependencies {
+        let (package, _source, digest) = resolve_local_package(directory, name, path)?;
+        if !package.capabilities.is_subset(&project.capabilities) {
+            return Err(format!(
+                "P1034: package `{name}` requests capabilities not granted by this project"
+            ));
+        }
+        packages.push(serde_json::json!({
+            "name": package.name,
+            "version": package.version,
+            "path": path,
+            "entry": package.entry,
+            "exports": package.exports.into_iter().collect::<Vec<_>>(),
+            "capabilities": package.capabilities.into_iter().collect::<Vec<_>>(),
+            "digest": digest,
+        }));
+    }
+    serde_json::to_string_pretty(&serde_json::json!({
+        "lockfileVersion": 1,
+        "project": {"name": project.name, "version": project.version},
+        "packages": packages,
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1044: cannot encode lockfile: {error}"))
+}
+
+fn write_package_lock(directory: &Path) -> Result<(), String> {
+    let contents = package_lock_contents(directory)?;
+    let temporary = directory.join(".padma.lock.tmp");
+    fs::write(&temporary, contents)
+        .map_err(|error| format!("P1044: cannot write temporary lockfile: {error}"))?;
+    fs::rename(&temporary, directory.join("padma.lock"))
+        .map_err(|error| format!("P1044: cannot replace lockfile: {error}"))?;
+    Ok(())
+}
+
+fn verify_package_lock(directory: &Path) -> Result<(), String> {
+    let expected = package_lock_contents(directory)?;
+    let actual = fs::read_to_string(directory.join("padma.lock"))
+        .map_err(|error| format!("P1044: cannot read padma.lock: {error}"))?;
+    if actual != expected {
+        return Err(
+            "P1044: padma.lock does not match the verified local package sources".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn inspect_local_package(directory: &Path, name: &str) -> Result<(), String> {
+    let (project, _) = load_project_manifest(directory)?;
+    let path = project
+        .dependencies
+        .get(name)
+        .ok_or_else(|| format!("P1044: `{name}` is not a direct local dependency"))?;
+    let (package, source, digest) = resolve_local_package(directory, name, path)?;
+    println!("Padma local package `{}`", package.name);
+    println!("  version: {}", package.version);
+    println!("  path: {}", source.display());
+    println!("  entry: {}", package.entry);
+    println!("  digest: {digest}");
+    println!(
+        "  exports: {}",
+        package.exports.into_iter().collect::<Vec<_>>().join(", ")
+    );
+    println!(
+        "  requested capabilities: {}",
+        package
+            .capabilities
+            .into_iter()
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    Ok(())
 }
 
 fn project_source_with_locale(source: String, locale: &str) -> String {
@@ -4501,10 +4939,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -4594,6 +5032,48 @@ fn main() {
             process::exit(64);
         }
         if let Err(error) = serve_local_project(&directory) {
+            eprintln!("{error}");
+            process::exit(1);
+        }
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("package") {
+        let command = arguments.get(2).map(String::as_str);
+        let result = match command {
+            Some("lock") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                write_package_lock(&directory).map(|_| {
+                    println!(
+                        "Verified local package lockfile written to {}/padma.lock",
+                        directory.display()
+                    );
+                })
+            }
+            Some("verify") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                verify_package_lock(&directory).map(|_| {
+                    println!("Local package lockfile and digests are verified.");
+                })
+            }
+            Some("inspect") if (4..=5).contains(&arguments.len()) => {
+                let directory = arguments
+                    .get(4)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                inspect_local_package(&directory, &arguments[3])
+            }
+            _ => {
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        if let Err(error) = result {
             eprintln!("{error}");
             process::exit(1);
         }
@@ -5172,7 +5652,13 @@ mod tests {
             "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[dependencies]\nnetwork = \"1\"\n",
         )
         .unwrap_err();
-        assert!(dependencies.starts_with("P1033"));
+        assert!(dependencies.starts_with("P1032"));
+
+        let escaped_dependency = parse_project_manifest(
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n[dependencies]\nhelper = \"../outside\"\n",
+        )
+        .unwrap_err();
+        assert!(escaped_dependency.starts_with("P1032"));
 
         let unsafe_entry = parse_project_manifest(
             "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"../outside.pd\"\n",
@@ -5185,6 +5671,51 @@ mod tests {
         )
         .unwrap_err();
         assert!(invalid_locale.starts_with("P1032"));
+    }
+
+    #[test]
+    fn verifies_local_package_manifest_digest_and_canonical_lockfile() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let root = module_fixture_dir("package-lock");
+        let package = root.join("packages/helper");
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("main.pd"),
+            "export function greet() { return \"hello\" }\n",
+        )
+        .unwrap();
+        let digest = package_digest(&package).unwrap();
+        fs::write(
+            package.join("padma-package.toml"),
+            format!(
+                "[package]\nname = \"helper\"\nversion = \"1.0.0\"\nentry = \"main.pd\"\nexports = [\"greet\"]\ndigest = \"{digest}\"\n\n[capabilities]\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[dependencies]\nhelper = \"packages/helper\"\n\n[capabilities]\n",
+        )
+        .unwrap();
+        fs::write(root.join("main.pd"), "print \"ok\"\n").unwrap();
+
+        write_package_lock(&root).unwrap();
+        verify_package_lock(&root).unwrap();
+        let lock = fs::read_to_string(root.join("padma.lock")).unwrap();
+        assert!(lock.contains("\"lockfileVersion\": 1"));
+        assert!(lock.contains(&digest));
+
+        fs::write(
+            package.join("main.pd"),
+            "export function greet() { return \"changed\" }\n",
+        )
+        .unwrap();
+        let error = verify_package_lock(&root).unwrap_err();
+        assert!(error.starts_with("P1044"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

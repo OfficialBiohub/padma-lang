@@ -141,6 +141,9 @@
     - [x] Add a versioned, fixed migration metadata record and a read-only `db.version` API without accepting executable user schema text.
     - [x] Add an atomic bounded batch API for fixed Padma record operations; reject nesting, callbacks, arbitrary SQL, and cross-database batches.
 - [ ] Add a signed package registry client and deterministic package lock workflow with integrity verification, version resolution, package-root isolation, offline cache, and explicit trust policy.
+  - [x] Define and validate a versioned package manifest with explicit exports, capability declarations, source digest, and no lifecycle scripts.
+  - [x] Add deterministic local dependency resolution and a canonical `padma.lock` writer that records resolved source paths and digests.
+  - [x] Add an opt-in project-local cache inspector with strict path scope and digest verification; do not download or execute packages automatically.
 - [ ] Add an optional identity/session layer using password hashing, signed expiring sessions, CSRF controls, secure cookie defaults, and secret names sourced from environment variables rather than source code.
 - [ ] Add deployment manifests and dry-run adapters before any remote deployment integration; preserve clear ownership, secret isolation, build reproducibility, rollback metadata, and explicit user confirmation for remote actions.
 - [ ] Define GUI/mobile application bridges as opt-in adapter contracts with no automatic Android permission elevation, then validate a small Termux-friendly renderer example.
