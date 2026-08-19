@@ -136,6 +136,8 @@
 - [ ] Deliver the remaining production platform capabilities through independently shippable, security-reviewed milestones; do not expose unrestricted servers, databases, package installs, credentials, deployment credentials, device permissions, or browser control by default.
 - [ ] Add a Termux-first local web server framework with fixed listen policy, explicit `server` capability grant, bounded request sizes, safe route matching, JSON responses, and graceful shutdown.
 - [ ] Add a local SQLite persistence layer with project-root database paths, prepared statements, typed JSON rows, explicit `database` capability grant, migrations, and transaction safety; do not create a raw SQL string-evaluation API.
+  - [x] Add a fixed-command, project-root-scoped SQLite foundation with explicit `database:sqlite` capability checks and localized diagnostics.
+  - [ ] Add typed parameter binding, deterministic JSON row decoding, transaction boundaries, and schema migration metadata without exposing raw SQL evaluation.
 - [ ] Add a signed package registry client and deterministic package lock workflow with integrity verification, version resolution, package-root isolation, offline cache, and explicit trust policy.
 - [ ] Add an optional identity/session layer using password hashing, signed expiring sessions, CSRF controls, secure cookie defaults, and secret names sourced from environment variables rather than source code.
 - [ ] Add deployment manifests and dry-run adapters before any remote deployment integration; preserve clear ownership, secret isolation, build reproducibility, rollback metadata, and explicit user confirmation for remote actions.

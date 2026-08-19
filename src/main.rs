@@ -21,6 +21,8 @@ use serde_json::Value as JsonValue;
 static RANDOM_COUNTER: AtomicU64 = AtomicU64::new(0);
 const BRIDGE_MAX_BYTES: usize = 256 * 1024;
 const BRIDGE_TIMEOUT: Duration = Duration::from_secs(10);
+const SQLITE_MAX_BYTES: usize = 256 * 1024;
+const SQLITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Locale {
@@ -242,6 +244,12 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1039") => ("Bridge process exceeded its time limit".into(), Some("Make the bridge finish within 10 seconds.".into())),
         (Locale::Bangla, "P1040") => ("bridge output সঠিক JSON data নয়".into(), Some("standard output-এ একটি মাত্র JSON value লিখুন।".into())),
         (Locale::English, "P1040") => ("Bridge output is not valid JSON data".into(), Some("Write exactly one JSON value to standard output.".into())),
+        (Locale::Bangla, "P1041") => (format!("SQLite database tool চালানো যায়নি: `{detail}`"), Some("Termux-এ `pkg install sqlite -y` চালিয়ে আবার চেষ্টা করুন।".into())),
+        (Locale::English, "P1041") => (format!("Could not run the SQLite database tool: `{detail}`"), Some("Install it in Termux with `pkg install sqlite -y`, then try again.".into())),
+        (Locale::Bangla, "P1042") => ("SQLite থেকে সঠিক JSON row পাওয়া যায়নি".into(), Some("database file ও Padma-managed records পরীক্ষা করুন।".into())),
+        (Locale::English, "P1042") => ("SQLite did not return valid JSON rows".into(), Some("Check the database file and Padma-managed records.".into())),
+        (Locale::Bangla, "P1043") => (format!("SQLite কাজের নিরাপদ সীমা অতিক্রম করেছে: `{detail}`"), Some("request ছোট করুন এবং কাজটি 5 সেকেন্ডের মধ্যে শেষ করুন।".into())),
+        (Locale::English, "P1043") => (format!("SQLite work exceeded a safety limit: `{detail}`"), Some("Reduce the request and make it complete within 5 seconds.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -578,6 +586,35 @@ fn safe_relative_path(path: &str) -> Result<PathBuf, ()> {
         return Err(());
     }
     Ok(normalized)
+}
+
+fn sqlite_hex_parameter(name: &str, value: &[u8]) -> String {
+    let encoded = value
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!(".parameter set {name} x'{encoded}'")
+}
+
+fn sqlite_number_parameter(name: &str, value: usize) -> String {
+    format!(".parameter set {name} {value}")
+}
+
+fn sqlite_script(parameters: &[String], statement: &str, json_output: bool) -> String {
+    let mut lines = vec![
+        ".bail on".to_string(),
+        ".timeout 5000".to_string(),
+        ".parameter init".to_string(),
+    ];
+    lines.extend(parameters.iter().cloned());
+    lines.push(
+        "CREATE TABLE IF NOT EXISTS padma_records (namespace TEXT NOT NULL, record_key TEXT NOT NULL, value_json TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(namespace, record_key)) WITHOUT ROWID;".to_string(),
+    );
+    if json_output {
+        lines.push(".mode json".to_string());
+    }
+    lines.push(statement.to_string());
+    lines.join("\n")
 }
 
 fn safe_http_url(url: &str) -> bool {
@@ -1706,6 +1743,27 @@ impl Interpreter {
         Ok(())
     }
 
+    fn require_project_capability(
+        &self,
+        capability: &str,
+        operation: &str,
+        position: Position,
+    ) -> Result<(), PadmaError> {
+        if !self
+            .project_capabilities
+            .as_ref()
+            .is_some_and(|grants| grants.contains(capability))
+        {
+            return Err(error_for(
+                self.locale,
+                "P1034",
+                position,
+                &format!("{capability} for {operation}"),
+            ));
+        }
+        Ok(())
+    }
+
     fn resolve_file_path(&self, path: &str) -> Result<PathBuf, ()> {
         let Some(root) = self.project_root.as_ref() else {
             return resolve_output_path(path);
@@ -1725,6 +1783,103 @@ impl Interpreter {
             return Err(());
         }
         Ok(resolved)
+    }
+
+    fn sqlite_database_path(&self, path: &str, position: Position) -> Result<PathBuf, PadmaError> {
+        self.require_project_capability("database:sqlite", "db", position)?;
+        if !path.ends_with(".sqlite") {
+            return Err(error_for(self.locale, "P1014", position, path));
+        }
+        self.resolve_file_path(path)
+            .map_err(|_| error_for(self.locale, "P1014", position, path))
+    }
+
+    fn sqlite_execute(
+        &self,
+        path: &str,
+        parameters: &[String],
+        statement: &str,
+        json_output: bool,
+        position: Position,
+    ) -> Result<Vec<u8>, PadmaError> {
+        let database = self.sqlite_database_path(path, position)?;
+        let script = sqlite_script(parameters, statement, json_output);
+        if script.len() > SQLITE_MAX_BYTES {
+            return Err(error_for(self.locale, "P1043", position, "request"));
+        }
+        let path = env::var_os("PATH")
+            .ok_or_else(|| error_for(self.locale, "P1041", position, "sqlite3"))?;
+        let working_directory = self
+            .project_root
+            .clone()
+            .ok_or_else(|| error_for(self.locale, "P1034", position, "database:sqlite for db"))?;
+        let mut child = process::Command::new("sqlite3")
+            .arg(&database)
+            .args(["-batch", "-bail"])
+            .current_dir(working_directory)
+            .env_clear()
+            .env("PATH", path)
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()
+            .map_err(|_| error_for(self.locale, "P1041", position, "sqlite3"))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| error_for(self.locale, "P1041", position, "sqlite3"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| error_for(self.locale, "P1041", position, "sqlite3"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| error_for(self.locale, "P1041", position, "sqlite3"))?;
+        let writer = thread::spawn(move || {
+            stdin
+                .write_all(script.as_bytes())
+                .and_then(|_| stdin.flush())
+        });
+        let stdout_reader = thread::spawn(move || read_bridge_stream(stdout));
+        let stderr_reader = thread::spawn(move || read_bridge_stream(stderr));
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if started.elapsed() > SQLITE_TIMEOUT => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(error_for(self.locale, "P1043", position, "time"));
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(error_for(self.locale, "P1041", position, "sqlite3"));
+                }
+            }
+        };
+        let write_result = writer
+            .join()
+            .map_err(|_| error_for(self.locale, "P1041", position, "sqlite3"))?;
+        let output = stdout_reader
+            .join()
+            .map_err(|_| error_for(self.locale, "P1043", position, "output"))?
+            .map_err(|_| error_for(self.locale, "P1043", position, "output"))?;
+        let _ = stderr_reader.join();
+        if write_result.is_err() || !status.success() {
+            return Err(error_for(self.locale, "P1041", position, "sqlite3"));
+        }
+        Ok(output)
     }
 
     fn bridge_call(
@@ -2714,6 +2869,142 @@ impl Interpreter {
                         String::from_utf8_lossy(&result.stdout).to_string(),
                     ));
                 }
+                if matches!(name.as_str(), "db.put" | "db.get" | "db.delete" | "db.list") {
+                    let values = arguments
+                        .iter()
+                        .map(|argument| self.evaluate(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let expected = match name.as_str() {
+                        "db.put" => 4,
+                        "db.get" | "db.delete" => 3,
+                        "db.list" => 3,
+                        _ => unreachable!(),
+                    };
+                    if values.len() != expected {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let database =
+                        expect_string(&values[0], self.locale, *position, "database path")?;
+                    let namespace = expect_string(&values[1], self.locale, *position, "namespace")?;
+                    if namespace.len() > 256 {
+                        return Err(error_for(self.locale, "P1043", *position, "namespace"));
+                    }
+                    let namespace_parameter =
+                        sqlite_hex_parameter(":namespace", namespace.as_bytes());
+                    if name == "db.put" {
+                        let key = expect_string(&values[2], self.locale, *position, "record key")?;
+                        let value =
+                            serde_json::to_vec(&value_to_json(&values[3]).map_err(|detail| {
+                                error_for(self.locale, "P1029", *position, &detail)
+                            })?)
+                            .map_err(|_| {
+                                error_for(self.locale, "P1029", *position, "database value")
+                            })?;
+                        if key.len() > 256 || value.len() > SQLITE_MAX_BYTES {
+                            return Err(error_for(self.locale, "P1043", *position, "record"));
+                        }
+                        self.sqlite_execute(
+                            database,
+                            &[
+                                namespace_parameter,
+                                sqlite_hex_parameter(":key", key.as_bytes()),
+                                sqlite_hex_parameter(":value", &value),
+                            ],
+                            "INSERT INTO padma_records(namespace, record_key, value_json, updated_at) VALUES(CAST(:namespace AS TEXT), CAST(:key AS TEXT), CAST(:value AS TEXT), CAST(strftime('%s', 'now') AS INTEGER)) ON CONFLICT(namespace, record_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at;",
+                            false,
+                            *position,
+                        )?;
+                        return Ok(Value::Boolean(true));
+                    }
+                    if name == "db.list" {
+                        let limit = expect_number(&values[2], self.locale, *position, "limit")?;
+                        if !(1.0..=100.0).contains(&limit) || limit.fract() != 0.0 {
+                            return Err(error_for(self.locale, "P1010", *position, "limit"));
+                        }
+                        let output = self.sqlite_execute(
+                            database,
+                            &[
+                                namespace_parameter,
+                                sqlite_number_parameter(":limit", limit as usize),
+                            ],
+                            "SELECT record_key AS key, value_json FROM padma_records WHERE namespace = CAST(:namespace AS TEXT) ORDER BY record_key LIMIT :limit;",
+                            true,
+                            *position,
+                        )?;
+                        if output.iter().all(u8::is_ascii_whitespace) {
+                            return Ok(Value::List(Vec::new()));
+                        }
+                        let rows: JsonValue = serde_json::from_slice(&output)
+                            .map_err(|_| error_for(self.locale, "P1042", *position, "list"))?;
+                        let rows = rows
+                            .as_array()
+                            .ok_or_else(|| error_for(self.locale, "P1042", *position, "list"))?;
+                        let mut result = Vec::with_capacity(rows.len());
+                        for row in rows {
+                            let key =
+                                row.get("key").and_then(JsonValue::as_str).ok_or_else(|| {
+                                    error_for(self.locale, "P1042", *position, "record key")
+                                })?;
+                            let value_json = row
+                                .get("value_json")
+                                .and_then(JsonValue::as_str)
+                                .ok_or_else(|| {
+                                    error_for(self.locale, "P1042", *position, "record value")
+                                })?;
+                            let mut item = BTreeMap::new();
+                            item.insert("key".into(), Value::String(key.to_string()));
+                            item.insert(
+                                "value".into(),
+                                value_from_json(serde_json::from_str(value_json).map_err(
+                                    |_| error_for(self.locale, "P1042", *position, "record value"),
+                                )?)
+                                .map_err(|_| {
+                                    error_for(self.locale, "P1042", *position, "record value")
+                                })?,
+                            );
+                            result.push(Value::Map(item));
+                        }
+                        return Ok(Value::List(result));
+                    }
+                    let key = expect_string(&values[2], self.locale, *position, "record key")?;
+                    if key.len() > 256 {
+                        return Err(error_for(self.locale, "P1043", *position, "record key"));
+                    }
+                    let output = self.sqlite_execute(
+                        database,
+                        &[
+                            namespace_parameter,
+                            sqlite_hex_parameter(":key", key.as_bytes()),
+                        ],
+                        if name == "db.get" {
+                            "SELECT value_json FROM padma_records WHERE namespace = CAST(:namespace AS TEXT) AND record_key = CAST(:key AS TEXT) LIMIT 1;"
+                        } else {
+                            "DELETE FROM padma_records WHERE namespace = CAST(:namespace AS TEXT) AND record_key = CAST(:key AS TEXT);"
+                        },
+                        name == "db.get",
+                        *position,
+                    )?;
+                    if name == "db.delete" {
+                        return Ok(Value::Boolean(true));
+                    }
+                    if output.iter().all(u8::is_ascii_whitespace) {
+                        return Ok(Value::Null);
+                    }
+                    let rows: JsonValue = serde_json::from_slice(&output)
+                        .map_err(|_| error_for(self.locale, "P1042", *position, "get"))?;
+                    let Some(value_json) = rows
+                        .as_array()
+                        .and_then(|rows| rows.first())
+                        .and_then(|row| row.get("value_json"))
+                        .and_then(JsonValue::as_str)
+                    else {
+                        return Ok(Value::Null);
+                    };
+                    return value_from_json(serde_json::from_str(value_json).map_err(|_| {
+                        error_for(self.locale, "P1042", *position, "record value")
+                    })?)
+                    .map_err(|_| error_for(self.locale, "P1042", *position, "record value"));
+                }
                 if name == "backend.response" {
                     if arguments.len() != 3 {
                         return Err(error_for(self.locale, "P1009", *position, name));
@@ -3299,6 +3590,7 @@ fn capability_grants_for_field(
     line_number: usize,
 ) -> Result<BTreeSet<String>, String> {
     let permitted: &[&str] = match key {
+        "database" => &["sqlite"],
         "filesystem" => &["read", "write"],
         "network" => &["http", "ai"],
         "server" => &["local"],
@@ -3526,7 +3818,7 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\ndatabase = []\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\nserver = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
             manifest.name, manifest.version, manifest.entry, manifest.locale
         ),
     )
@@ -3573,6 +3865,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "range" | "পরিসর" | "media.download" => Some((1, 2)),
         "process.run" => Some((1, usize::MAX)),
         "bridge.call" => Some((3, 3)),
+        "db.get" | "db.delete" | "db.list" => Some((3, 3)),
         "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
         | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
         | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
@@ -3580,6 +3873,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" => Some((2, 2)),
         "text.replace" => Some((3, 3)),
+        "db.put" => Some((4, 4)),
         "time.now" => Some((0, 0)),
         _ => None,
     }
@@ -4763,12 +5057,13 @@ mod tests {
     #[test]
     fn parses_and_validates_manifest_capabilities() {
         let manifest = parse_project_manifest(
-            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[capabilities]\nfilesystem = [\"read\", \"write\"]\nnetwork = [\"http\"]\nprocess = [\"git\", \"yt-dlp\"]\nmedia = [\"download\"]\n",
+            "[padma]\nname = \"demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[capabilities]\ndatabase = [\"sqlite\"]\nfilesystem = [\"read\", \"write\"]\nnetwork = [\"http\"]\nprocess = [\"git\", \"yt-dlp\"]\nmedia = [\"download\"]\n",
         )
         .unwrap();
         assert!(manifest.capabilities.contains("filesystem:read"));
         assert!(manifest.capabilities.contains("process:git"));
-        assert_eq!(manifest.capabilities.len(), 6);
+        assert!(manifest.capabilities.contains("database:sqlite"));
+        assert_eq!(manifest.capabilities.len(), 7);
 
         let lint_manifest = parse_project_manifest(
             "[padma]\nname = \"lint-demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\n\n[lint]\ndisable = [\"L1003\"]\n",
@@ -4820,6 +5115,81 @@ mod tests {
         assert!(error.starts_with("P1034"));
         assert!(error.contains("server:local"));
         assert!(error.contains("[capabilities]"));
+    }
+
+    #[test]
+    fn database_rejects_missing_project_grant_and_unsafe_paths() {
+        let source = "print db.get(\"data/app.sqlite\", \"settings\", \"theme\")\n";
+        let (program, locale) = compile(source).unwrap();
+        let mut standalone = Interpreter::new(locale);
+        let denied = standalone.run(&program).unwrap_err();
+        assert_eq!(denied.code, "P1034");
+        assert!(denied.message.contains("database:sqlite"));
+
+        let root = module_fixture_dir("sqlite-safe-path");
+        fs::create_dir(root.join("data")).unwrap();
+        let capabilities = BTreeSet::from(["database:sqlite".into()]);
+        let (unsafe_program, unsafe_locale) =
+            compile("print db.get(\"../outside.sqlite\", \"settings\", \"theme\")\n").unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            unsafe_locale,
+            root.join("main.pd"),
+            root.clone(),
+            capabilities,
+        );
+        let unsafe_error = interpreter.run(&unsafe_program).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(unsafe_error.code, "P1014");
+    }
+
+    #[test]
+    fn sqlite_script_binds_values_without_interpolating_them_into_sql() {
+        let malicious = "theme'); DROP TABLE padma_records; --";
+        let binding = sqlite_hex_parameter(":key", malicious.as_bytes());
+        let script = sqlite_script(
+            &[binding],
+            "SELECT value_json FROM padma_records WHERE record_key = CAST(:key AS TEXT);",
+            true,
+        );
+        assert!(script.contains(".parameter set :key x'"));
+        assert!(script.contains(".mode json"));
+        assert!(!script.contains(malicious));
+        assert!(!script.contains("DROP TABLE"));
+        assert_eq!(static_builtin_arity("db.put"), Some((4, 4)));
+        assert_eq!(static_builtin_arity("db.list"), Some((3, 3)));
+    }
+
+    #[test]
+    fn sqlite_persistence_round_trip_when_cli_is_available() {
+        if process::Command::new("sqlite3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = module_fixture_dir("sqlite-round-trip");
+        fs::create_dir(root.join("data")).unwrap();
+        let source = "let saved = db.put(\"data/app.sqlite\", \"profile\", \"name\", {\"name\": \"Padma\", \"level\": 6})\nprint saved\nprint db.get(\"data/app.sqlite\", \"profile\", \"name\")\nprint db.list(\"data/app.sqlite\", \"profile\", 10)\nprint db.delete(\"data/app.sqlite\", \"profile\", \"name\")\nprint db.get(\"data/app.sqlite\", \"profile\", \"name\")\n";
+        let (program, locale) = compile(source).unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::from(["database:sqlite".into()]),
+        );
+        interpreter.run(&program).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            interpreter.output,
+            vec![
+                "true",
+                "{\"level\": 6, \"name\": Padma}",
+                "[{\"key\": name, \"value\": {\"level\": 6, \"name\": Padma}}]",
+                "true",
+                "none",
+            ]
+        );
     }
 
     #[test]
