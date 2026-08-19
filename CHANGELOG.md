@@ -1,0 +1,25 @@
+# Changelog
+
+All notable user-visible changes are recorded in this file. Padma follows a pre-1.0 development policy: interfaces may evolve, but breaking changes require a migration note and explicit review.
+
+## Unreleased
+
+### Added
+
+| Area | Change |
+|---|---|
+| Repository | Language-first repository architecture, documentation index, examples/tooling/test indexes, collaboration policies, issue forms, pull-request template, and repeatable quality scripts. |
+| Quality | Repository hygiene, documentation-link, and Termux installer-contract checks integrated with CI. |
+
+## 0.1.0
+
+### Added
+
+| Area | Change |
+|---|---|
+| Language core | Bangla-English lexer aliases, parser, AST, interpreter, functions, collections, modules, exports, localized diagnostics, REPL, formatter, linter, and selected static checks. |
+| Runtime and safety | Project manifests, capability model, safe file/process/bridge operations, HTTP/AI/domain helpers, package trust foundation, local server, SQLite persistence, identity/session helpers, and deployment planning boundaries. |
+| Tooling | Tree-sitter grammar, Padma LSP, VS Code extension, WASM bridge, and Termux installer. |
+| Platform planning | Local GUI manifest bridge, Android build plan, Render Git-linked release plan, and explicit-confirmation Render API adapter. |
+
+The detailed evolution and unfinished milestones remain in `todo.md` and the documents under `docs/`.

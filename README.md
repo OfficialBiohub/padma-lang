@@ -1,92 +1,51 @@
 # পদ্মা / Padma
 
-> **Padma** is an experimental Bangla-English hybrid programming language for learning, automation, web work, and future production tooling in Bangladesh.
+[![CI](https://github.com/OfficialBiohub/padma-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/OfficialBiohub/padma-lang/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Padma allows Bengali and English keywords to represent the **same internal syntax**. A learner can write `ধরি` and `দেখাও`; an experienced developer can write `let` and `print`; a team can temporarily mix them while the future formatter/linter guides the project toward a consistent style.
+> **Padma** is a runnable Bangla-English hybrid programming language for learning, local automation, and practical Termux-first development in Bangladesh.
 
-**Current status:** `v0.1.0` is a runnable, dependency-free Rust MVP. It is not yet suitable for production systems. It exists to validate the core language experience before expanding the compiler, standard library, editor extension, package manager, and backend targets.
+Padma lets Bengali and English keywords express the same language semantics. Learners can write `ধরি` and `দেখাও`; developers can write `let` and `print`; a project can transition between both while the formatter and linter keep code consistent. Bangla source receives Bangla diagnostics, English source receives English diagnostics, and mixed source remains supported.
 
-| What works in v0.1.0 | Bangla keyword | English keyword |
-|---|---|---|
-| Declare a variable | `ধরি` | `let` |
-| Show output | `দেখাও` | `print` |
-| Conditional branch | `যদি` / `নইলে` | `if` / `else` |
-| Repeating loop and assignment | `যতক্ষণ`, `=` | `while`, `=` |
-| Function and return | `ফাংশন`, `ফেরত` | `function`, `return` |
-| Boolean values | `সত্য` / `মিথ্যা` | `true` / `false` |
-| Empty/null value | `কিছুইনা` | `none` |
-| Number, string, arithmetic, comparison | Yes | Yes |
-| String interpolation | `"নাম: {নাম}"` | `"Name: {name}"` |
-| Bengali digits | `০`–`৯` | `0`–`9` |
-| Lists | Indexing plus `.get()`, `.set()`, `.push()`, `.remove()`, `.len()`, and `.contains()` | Same APIs |
-| Maps/dictionaries | Text-key maps with `.get()` and `.set()` | Text-key maps with `.get()` and `.set()` |
-| Standard library | `text.*`, `math.*`, `json.*`, `url.*`, `path.*`, bounded `time.*`, safe `file.*`, and non-cryptographic `random.*` helpers | Same APIs in Bangla source |
-| Localized diagnostics | Bengali source → Bengali error | English source → English error |
+## Project status
 
-## Quick start
+Padma `v0.1.0` is an experimental but executable Rust interpreter. It is appropriate for learning, local scripts, examples, and controlled project experiments. It is **not yet a production-grade replacement for Python, Node.js, or a hardened web framework**. The roadmap and limitations are documented openly in [the production roadmap](docs/PRODUCTION-ROADMAP.md) and [the repository architecture](docs/REPOSITORY-ARCHITECTURE.md).
 
-The compiler is written in Rust. Install a stable Rust toolchain, clone this repository, then build it locally.
+| Available now | Deliberately limited or planned |
+|---|---|
+| Bangla-English syntax, UTF-8 source, Bengali digits, REPL, scripts, functions, collections, modules, formatter, linter, JSON diagnostics | Full static type system, published package registry, official cloud runtime, unrestricted browser control, Android APK build adapter |
+| Termux installation, files, input, safe process bridge, `yt-dlp` media helper, HTTP/AI/domain helpers, SQLite plan, local server foundation | Automatic Android permission grants, native-code execution, device control, automatic remote deployment |
+| Capability grants, package lock/verify, identity/session helpers, GUI/Android plans, Render deployment planning | Production security certification, formal stable-release support policy |
+
+## Start on Termux
+
+Padma is designed to work from an Android phone with Termux. The reproducible source-install path is:
 
 ```bash
+pkg update
+pkg install -y git rust python
 git clone https://github.com/OfficialBiohub/padma-lang.git
 cd padma-lang
-cargo run -- examples/hello-bn.pd
+cargo build --release --locked
+install -m755 target/release/padma "$PREFIX/bin/padma"
+padma --version
 ```
 
-For an optimized binary:
+The repository also provides `install-termux.sh` for the supported source-installer workflow. Review the script before running any remote installer command:
 
 ```bash
-cargo build --release
-./target/release/padma examples/hello-en.pd
-./target/release/padma check examples/mixed.pd
+curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh -o install-termux.sh
+less install-termux.sh
+bash install-termux.sh
 ```
 
-### Install directly in Termux
+For a phone-only Bangla tutorial covering `nano`, project setup, permissions, checking, formatting, and Android storage boundaries, read [the Termux-first guide](docs/TERMUX-FIRST-GUIDE-BN.md).
 
-From Termux, the repository includes a reproducible installer:
+## First program
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh | bash
-padma examples/hello-bn.pd
-```
-
-After installation, `padma --version` prints the installed version and `padma` opens an interactive REPL.
-
-For a phone-only workflow in Bangla—including `nano`, project permissions, checking, formatting, and Android storage boundaries—read [`docs/TERMUX-FIRST-GUIDE-BN.md`](docs/TERMUX-FIRST-GUIDE-BN.md).
-
-### Python-style interactive shell
-
-When you type `padma` without a file, Padma opens an interactive shell. Each complete line is compiled and executed immediately, and variables remain available for later lines:
-
-```text
-$ padma
-Padma 0.1.0 (Bangla-English hybrid programming language)
-Interactive shell: help, copyright, credits, license; exit with exit() or বের হও.
-padma> দেখাও ২ + ৩
-5
-padma> ধরি নাম = "রাফি"
-padma> দেখাও "হ্যালো {নাম}"
-হ্যালো রাফি
-padma> help
-padma> exit()
-```
-
-The shell accepts `help` or `সাহায্য`, `copyright`, `credits`, and `license`. To leave it, use `exit()`, `quit()`, `exit`, or `বের হও`.
-
-For a multi-line `if`, `while`, or function block, continue entering lines after Padma changes the prompt to `...`; it runs the buffered block after the closing `}`.
-
-### Why `pkg install padma -y` is not available yet
-
-`pkg` and `apt` do not install arbitrary GitHub repositories. They install only signed packages that have been built and published in the Termux repositories configured on the device. The `packaging/termux/packages/padma/build.sh` file is a **recipe for a future Termux submission**; placing a recipe in this repository does not make `padma` appear in `pkg search`.
-
-If `pkg update` or `apt update` itself fails, first check the Termux installation and mirror. The deprecated Google Play build and old Bintray mirrors can produce repository errors. In a current F-Droid or GitHub Termux installation, run `termux-info`, then use `termux-change-repo` to select a working main mirror and run `pkg upgrade`. Until an upstream package is accepted and published, use the installer above; it builds Padma directly and installs the binary into `$PREFIX/bin`.
-
-For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For stable error-code meanings and `padma check` behavior, see [the diagnostics reference](docs/DIAGNOSTICS.md). The current release is an executable interpreter core with functions, collections, local-first projects, modules, public exports, standard-library APIs, manifest capability grants, JSON diagnostics, formatting, linting, and conservative static semantic checks. Broader static analysis, configurable lint policies, and package tooling remain active implementation milestones rather than undocumented claims.
-
-## Your first Padma program
+Create a file named `hello.pd`:
 
 ```padma
-# hello-bn.pd
 ধরি নাম = "রাফি"
 ধরি নম্বর = ৭০ + ২৩
 
@@ -97,298 +56,90 @@ For language rules, see [the specification draft](docs/LANGUAGE-SPEC.md). For st
 }
 ```
 
-The equivalent English program has identical meaning:
-
-```padma
-# hello-en.pd
-let name = "Rafi"
-let score = 70 + 23
-
-if score >= 90 {
-    print "{name}, your score is: {score}"
-} else {
-    print "{name}, try again."
-}
-```
-
-### Updating values and repeating work
-
-Padma variables can be updated after declaration, and both Bengali and English loop keywords are accepted:
-
-```padma
-ধরি i = ০
-যতক্ষণ i < ৩ {
-    দেখাও i
-    i = i + ১
-}
-```
-
-The interpreter enforces a loop-iteration safety limit so an accidental infinite loop cannot run forever on Termux.
-
-### Functions
-
-Functions accept parameters and return a value:
-
-```padma
-ফাংশন যোগ(a, b) {
-    ফেরত a + b
-}
-ধরি ফল = যোগ(২, ৩)
-দেখাও ফল
-```
-
-### Maps / dictionaries
-
-Padma maps use text keys. Read a value with `.get(key)` and update or add a value with `.set(key, value)`:
-
-```padma
-let profile = {"name": "Rafi", "class": 6}
-print profile.get("name")
-profile.set("class", 7)
-print profile.get("class")
-```
-
-The Bengali and mixed forms work the same way:
-
-```padma
-ধরি তথ্য = {"নাম": "রাফি", "বিষয়": "Padma"}
-দেখাও তথ্য.get("নাম")
-তথ্য.set("স্তর", ৬)
-দেখাও তথ্য.get("স্তর")
-```
-
-### Lists and collection access
-
-Lists and maps can be read with bracket syntax. Lists use a zero-based, non-negative integer index; maps use a text key. Invalid indexes and missing keys stop safely with a localized diagnostic instead of silently producing an incorrect value.
-
-```padma
-let tasks = ["learn", "practice"]
-tasks.push("build")
-tasks.set(0, "study")
-
-print tasks[0]                       # study
-print tasks.len()                    # 3
-print tasks.contains("practice")    # true
-print tasks.remove(1)      # practice
-print tasks[0:2]           # slice: start included, end excluded
-
-let profile = {"name": "Rafi"}
-print profile["name"]
-```
-
-List slices use zero-based, non-negative bounds. The start is included and the end is excluded: `items[1:3]`, `items[:2]`, and `items[2:]`. A reversed or out-of-range slice ends safely with a localized error.
-
-### Collection iteration
-
-Use `for item in collection` or `প্রতি item মধ্যে collection` to process each list item, text character, or map key. Map keys are yielded in stable text order. `range(end)` creates `0` through `end - 1`; `range(start, end)` excludes `end`. The loop variable is temporary: a pre-existing variable with the same name is restored after the loop.
-
-```padma
-ধরি যোগফল = ০
-প্রতি মান মধ্যে পরিসর(১, ৪) {
-  যোগফল = যোগফল + মান
-}
-দেখাও যোগফল  # 6
-```
-
-Iteration is bounded to one million items, matching Padma's existing loop-safety policy.
-
-### Standard library
-
-Padma includes useful no-import helpers for phone scripting. Text APIs include `text.split`, `text.join`, `text.trim`, `text.upper`, `text.lower`, `text.replace`, and `text.contains`. Math APIs include `math.abs`, `math.round`, `math.floor`, `math.ceil`, `math.min`, and `math.max`. Time includes `time.now()` and safety-bounded `time.sleep(seconds)`. File APIs include safe relative-path `file.read`, `file.write`, and `file.exists`.
-
-```padma
-ধরি শব্দ = text.split("Padma,বাংলা,Termux", ",")
-দেখাও text.join(শব্দ, " | ")
-দেখাও math.max(৩, ৮, ৫)
-
-file.write("notes.txt", "Padma works on Termux")
-যদি file.exists("notes.txt") {
-  দেখাও file.read("notes.txt")
-}
-```
-
-Read the complete API and safety reference in [`docs/STANDARD-LIBRARY.md`](docs/STANDARD-LIBRARY.md). A runnable program is in `examples/standard-library.pd`.
-
-The same collection APIs work in Bangla source code:
-
-```padma
-ধরি সংখ্যা = [১০, ২০, ৩০]
-দেখাও সংখ্যা[২]
-দেখাও সংখ্যা.get(০)
-```
-
-### Empty values
-
-Use `none` in English source or `কিছুইনা` in Bangla source when a value is intentionally absent. It is false in an `if` condition. A function that reaches the end without `return` / `ফেরত` also returns `none`.
-
-```padma
-ধরি নোট = কিছুইনা
-যদি নোট {
-  দেখাও নোট
-} নইলে {
-  দেখাও "এখনো কোনো নোট নেই"
-}
-```
-
-### Reusable modules
-
-Split a larger Padma program into nearby `.pd` files. Use `import "file.pd"` or `ইমপোর্ট "file.pd"`; imported variables and functions become available to the current file. A module is loaded only once, even if it is imported repeatedly.
-
-```padma
-# math.pd
-function double(value) {
-  return value * 2
-}
-```
-
-```padma
-# main.pd, in the same folder
-import "math.pd"
-print double(21)
-```
-
-For safety, module paths must remain relative to the current folder tree, must end in `.pd`, and cannot use `..` or absolute paths. Circular imports are rejected with a localized diagnostic. Run the English and Bangla examples with:
+Run it like Python:
 
 ```bash
-cd examples/modules
-padma main.pd
-padma মডিউল-demo.pd
+padma hello.pd
 ```
 
-### Projects
+You can also open the interactive shell:
 
-Create a local-first Padma project and run the declared entrypoint with one command:
-
-```bash
-padma init my-project
-cd my-project
-padma .
+```text
+$ padma
+Padma 0.1.0 (Bangla-English hybrid programming language)
+padma> দেখাও ২ + ৩
+5
+padma> exit()
 ```
 
-The generated `padma.toml` defines the project name, version, source entrypoint, and diagnostic locale. `padma.lock` is generated for future reproducible dependency resolution. Padma currently rejects remote or third-party dependencies deliberately; it will not download or execute package code until a signed registry and lockfile trust policy exist. Read [`docs/PROJECTS.md`](docs/PROJECTS.md) for the complete manifest schema and safety model.
-
-For larger local projects, `import "module.pd" as library` creates an isolated namespace. Use `export let ...` / `export function ...`—or Bangla `রপ্তানি ধরি ...` / `রপ্তানি ফাংশন ...`—to declare the public interface of a new module. Runnable examples are in `examples/modules/exports-demo.pd`.
-
-Projects run with `padma .` deny sensitive file, network, process, and media operations unless `padma.toml` declares a narrowly scoped `[capabilities]` grant. Inspect a project without executing it with `padma capabilities .`. Direct `padma file.pd` scripts retain backward-compatible safe defaults. See [`docs/PROJECTS.md`](docs/PROJECTS.md) and the runnable projects in [`examples/capabilities`](examples/capabilities).
-
-### Interactive input
-
-Termux scripts can read a line from the user with the built-in `input()` function:
-
-```padma
-ধরি url = input("ভিডিও URL দিন: ")
-দেখাও "আপনি দিয়েছেন: {url}"
-```
-
-Run it in the Python-style form:
-
-```bash
-padma examples/input-demo.pd
-```
-
-### Padma media downloader
-
-Padma can call an installed `yt-dlp` backend through a restricted, argument-safe builtin. The URL and output path are passed as separate arguments; shell interpolation is not used.
-
-```padma
-ধরি url = input("YouTube URL দিন: ")
-ধরি result = media.download(url, "downloads/%(title)s.%(ext)s")
-দেখাও result
-```
-
-Run it from the repository directory:
-
-```bash
-mkdir -p downloads
-padma examples/youtube-download.pd
-```
-
-Use this only for content you own or are authorized to download and in compliance with the source platform's terms. Padma does not bypass DRM or access controls. If `yt-dlp` is missing, the program returns a localized process-start error instead of executing an arbitrary command.
-
-## Commands
+## Core commands
 
 | Command | Purpose |
 |---|---|
-| `padma <file.pd>` | Parse and interpret a Padma source file, like `python file.py`. |
-| `padma` | Open the interactive Padma REPL. |
-| `padma .` | Run the manifest entrypoint from a `padma.toml` project directory. |
-| `padma init [folder]` | Create a local Padma project with a manifest, lockfile, and Bangla starter source. |
-| `padma capabilities [project]` | Print declared project capability grants without running project code. |
-| `padma run <file.pd>` | Backward-compatible explicit run form. |
-| `padma check <file.pd>` | Check syntax, literal division by zero, and provable call arity without executing code. |
-| `padma check --json <file.pd>` | Emit one machine-readable diagnostic report for editors and CI. |
-| `padma fmt <file.pd>` | Format a syntactically valid source file in place. |
-| `padma fmt --check <file.pd>` | Exit non-zero when formatting changes would be needed, without modifying the file. |
-| `padma lint <file.pd>` | Report non-executing source-style warnings; warnings exit non-zero for CI. |
-| `padma lint --json <file.pd>` | Emit one machine-readable lint report. |
-| `padma ast <file.pd>` | Show the compiler’s current abstract syntax tree. |
-| `padma --version` | Print the installed compiler version. |
-| `padma --help` | Show CLI usage and interactive-shell commands. |
+| `padma <file.pd>` | Run one Padma source file. |
+| `padma` | Open the interactive REPL. |
+| `padma init <folder>` | Create a manifest-based local project. |
+| `padma .` | Run the project entrypoint declared in `padma.toml`. |
+| `padma check [--json] <file.pd>` | Run non-executing syntax and selected semantic checks. |
+| `padma fmt [--check] <file.pd>` | Format valid source or report needed changes. |
+| `padma lint [--json] <file.pd>` | Run non-executing source-style checks. |
+| `padma capabilities [project]` | Inspect project capability grants without running code. |
+| `padma gui inspect\|plan [project]` | Validate a local static GUI manifest without launching a renderer. |
+| `padma android inspect\|plan [project]` | Validate Android build metadata without building, signing, or installing an APK. |
+| `padma render plan\|api-plan [project]` | Validate Render release metadata; planning mode sends no provider request. |
 
-`padma lint` is non-executing and returns `1` when it finds warnings, making it suitable for CI. Project owners can record a reviewed, narrowly scoped lint suppression in `[lint].disable`; see [`docs/LINTING.md`](docs/LINTING.md).
+Read [`padma --help`](src/main.rs) in a local build for the authoritative CLI output.
 
-## Diagnostic language
+## Language snapshot
 
-Padma detects the source language from its keywords. A Bengali source file receives Bengali diagnostics, while an English source file receives English diagnostics. Add one of the following comments at the top of a file when you need to override automatic detection:
+| Concept | Bangla form | English form |
+|---|---|---|
+| Variable | `ধরি নাম = "রাফি"` | `let name = "Rafi"` |
+| Output | `দেখাও নাম` | `print name` |
+| Condition | `যদি সত্য { ... } নইলে { ... }` | `if true { ... } else { ... }` |
+| Function | `ফাংশন যোগ(a, b) { ফেরত a + b }` | `function add(a, b) { return a + b }` |
+| Boolean/null | `সত্য`, `মিথ্যা`, `কিছুইনা` | `true`, `false`, `none` |
 
-```padma
-# padma:locale=bn
-# padma:locale=en
-```
+The detailed grammar and runtime behavior live in [the language specification](docs/LANGUAGE-SPEC.md). Runnable programs are in [`examples/`](examples/README.md).
 
-Example Bengali diagnostic:
+## Security model
+
+Padma local projects use explicit capability grants in `padma.toml`. Sensitive operations such as file access, HTTP, AI requests, process bridges, media tools, SQLite, identity helpers, local server planning, GUI planning, Android planning, and deployment planning are intentionally capability-gated. A plan command validates metadata; it does not silently gain device access, approve permissions, or perform remote work.
+
+| Read next | Subject |
+|---|---|
+| [Capability security](docs/CAPABILITY-SECURITY.md) | Manifest grants, filesystem scope, and deny-by-default model |
+| [Diagnostics](docs/DIAGNOSTICS.md) | Stable bilingual diagnostic codes |
+| [Standard library](docs/STANDARD-LIBRARY.md) | Text, math, file, JSON, URL, path, time, and random helpers |
+| [Projects](docs/PROJECTS.md) | `padma.toml`, lockfile, modules, and local project boundaries |
+| [Editor tooling](docs/EDITOR-TOOLING.md) | Tree-sitter, VS Code extension, and LSP |
+| [Platform guides](docs/README.md#platform-and-application-planning) | GUI, Android, identity, SQLite, Render, and deployment boundaries |
+
+## Repository map
 
 ```text
-ত্রুটি[P1007]: `বয়স` নামে কোনো variable পাওয়া যায়নি
-  --> student.pd:2:8
-   |
-2 | দেখাও বয়স
-   |        ^ এই স্থানে
-   = পরামর্শ: আগে এটি ঘোষণা করুন: `ধরি বয়স = ...`
+src/        Padma interpreter and public Rust library API
+examples/   Runnable copy-pasteable Padma projects
+docs/       Language, platform, security, and contributor documentation
+tooling/    LSP, Tree-sitter grammar, and VS Code extension
+wasm/       Optional browser bridge
+playground/ Optional demonstration client
+packaging/  Downstream distribution recipes
+scripts/    Reproducible quality and maintenance commands
 ```
 
-## Architecture in this MVP
+The complete responsibility and compatibility map is in [Repository Architecture](docs/REPOSITORY-ARCHITECTURE.md).
 
-```text
-UTF-8 .pd source
-  → Bangla/English lexer aliases
-  → parser
-  → abstract syntax tree
-  → small interpreter
-  → output or structured diagnostic
-```
+## Contribute safely
 
-The language intentionally maps `ধরি` and `let` to one internal token, rather than maintaining separate Bengali and English grammars. This keeps semantics identical and makes future formatters, type checkers, and target generators substantially more reliable.
+Padma welcomes contributors. Begin with [CONTRIBUTING.md](CONTRIBUTING.md), then use the issue forms for bugs or language proposals. Security reports must follow [SECURITY.md](SECURITY.md), not public issues. Community expectations are documented in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), while issue-routing guidance is in [SUPPORT.md](SUPPORT.md).
 
-## Development
+Before submitting a pull request, run:
 
 ```bash
-cargo fmt
-cargo test
-cargo build --release
+./scripts/verify-repository.sh
 ```
-
-The MVP has no third-party compiler dependencies. Unit tests cover Bengali, English, mixed syntax, Bengali digits, conditional execution, string interpolation, localization, diagnostics recovery, module loading, null values, safe collection indexing/mutation, assignment, while loops, and loop safety limits.
-
-## Scope and roadmap
-
-The full production-readiness plan, release gates, security boundaries, and ordered implementation work are documented in [docs/PRODUCTION-ROADMAP.md](docs/PRODUCTION-ROADMAP.md).
-
-| Release | Planned outcome |
-|---|---|
-| `v0.1` | Interpreter MVP: variables, output, arithmetic, conditions, diagnostics. |
-| `v0.2` | Functions, lists, interactive input, maps, modules, formatter, stronger type errors. |
-| `v0.3` | TypeScript code generator, browser playground, Node.js package bridge. |
-| `v0.4` | Python bridge for data/AI workflows, project manifest and lockfile. |
-| `v0.5` | VS Code extension, Tree-sitter grammar, language server. |
-| `v1.0` | Stable language specification, package governance, security model, reproducible releases. |
-
-AI training, full web frameworks, database connectors, quantum SDK wrappers, native LLVM output, and a public package registry are deliberately **not** part of `v0.1`. They will be added only after the language core, testing, security boundaries, and interoperability model are stable.
-
-## Contributing
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. In particular, every change to syntax or semantics needs a test and an RFC discussion where appropriate.
 
 ## License
 
-Padma is released under the [MIT License](LICENSE).
+Padma is released under the [MIT License](LICENSE). User-visible release history is maintained in [CHANGELOG.md](CHANGELOG.md).

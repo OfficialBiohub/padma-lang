@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible Padma compiler, CLI, tooling, documentation, or installer problem.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include passwords, API tokens, cookies, private URLs, or personal data. For vulnerabilities, follow SECURITY.md instead."
+  - type: input
+    id: version
+    attributes:
+      label: Padma version and revision
+      description: Include `padma --version` and, if built from source, the Git commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Interpreter or CLI
+        - Termux installer
+        - Diagnostics, formatter, or linter
+        - Capability or security boundary
+        - LSP, Tree-sitter, or VS Code extension
+        - Documentation or example
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest safe `.pd` program and exact command.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and safe output
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Termux/device or OS, Rust version, and relevant tool version.
+    validations:
+      required: true

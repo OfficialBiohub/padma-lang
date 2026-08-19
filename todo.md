@@ -165,3 +165,11 @@
 - [ ] Add provider-neutral AI workflow helpers for structured responses and local model adapters, bounded by explicit network/process capabilities and never executing model output as code.
 - [ ] Add bounded browser automation using reviewed action plans, domain allowlists, confirmation before side effects, redaction of sensitive fields, and no CAPTCHA or login bypass behavior.
 - [ ] Add Bangla-English diagnostics, negative security tests, Termux copy-paste examples, and release gates for every M9 component before marking it stable.
+
+## Repository Professionalization
+
+- [ ] Reorganize the repository into a language-first, Termux-friendly, contributor-ready structure without breaking the stable `padma` CLI, interpreter, LSP, installer, examples, or CI contracts.
+  - [x] Audit public files, build entry points, CI assumptions, documentation discoverability, and repository hygiene before moving any source or tooling paths.
+  - [x] Add a clear root README, contribution guide, security policy, code-of-conduct policy, issue/PR templates, and release-maintenance documentation appropriate for an open-source language project.
+  - [x] Establish stable directories for specifications, examples, tooling, tests, scripts, and release artifacts, then document ownership and supported compatibility boundaries.
+  - [x] Add repeatable quality commands and CI checks for formatting, tests, release build, documentation links, repository hygiene, and Termux install smoke coverage.

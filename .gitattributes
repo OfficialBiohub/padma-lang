@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+# Treat authored Padma source and grammar fixtures as language assets in repository views.
+*.pd linguist-language=Padma
+*.pd linguist-detectable=true
+
+# Development-only material is excluded from source archives.
+/.github export-ignore
+/.manus-logs export-ignore
+/target export-ignore
+/playground/node_modules export-ignore
+/tooling/*/node_modules export-ignore

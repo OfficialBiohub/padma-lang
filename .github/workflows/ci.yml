@@ -28,6 +28,12 @@ jobs:
         run: ./target/release/padma run examples/hello-bn.pd
       - name: Run English example
         run: ./target/release/padma run examples/hello-en.pd
+      - name: Verify repository hygiene
+        run: bash scripts/verify-repository-hygiene.sh
+      - name: Verify local documentation links
+        run: bash scripts/verify-doc-links.sh
+      - name: Verify Termux installer contract
+        run: bash scripts/verify-termux-contract.sh
 
   tree-sitter:
     name: Test Tree-sitter grammar

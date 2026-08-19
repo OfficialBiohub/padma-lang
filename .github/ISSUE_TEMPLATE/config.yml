@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation and usage support
+    url: https://github.com/OfficialBiohub/padma-lang/blob/main/SUPPORT.md
+    about: Read the support guide before opening a report.
+  - name: Security report guidance
+    url: https://github.com/OfficialBiohub/padma-lang/blob/main/SECURITY.md
+    about: Do not report vulnerabilities in a public issue.

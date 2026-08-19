@@ -4,7 +4,7 @@ Thank you for helping build a practical Bangla-English programming language. Pad
 
 ## Before you start
 
-Please search existing issues and RFCs before proposing a change. Open an issue first for a new keyword, syntax rule, standard-library API, code-generation target, security-sensitive feature, or breaking behavior. Small documentation corrections and isolated test fixes can be submitted directly as pull requests.
+Please search existing issues and proposals before proposing a change. Open an issue first for a new keyword, syntax rule, standard-library API, code-generation target, security-sensitive feature, or breaking behavior. Small documentation corrections and isolated test fixes can be submitted directly as pull requests. Use the repository issue forms so reports include the information needed to reproduce and review them safely.
 
 | Change type | What is required before merge |
 |---|---|
@@ -20,16 +20,13 @@ Please search existing issues and RFCs before proposing a change. Open an issue 
 ```bash
 git clone https://github.com/OfficialBiohub/padma-lang.git
 cd padma-lang
-cargo test
-cargo build --release
+./scripts/verify-repository.sh
 ```
 
 Before opening a pull request, run:
 
 ```bash
-cargo fmt --check
-cargo test
-cargo build --release
+./scripts/verify-repository.sh
 ```
 
 ## Language-design rules
@@ -40,8 +37,12 @@ Error messages must be actionable. Each diagnostic needs a stable code, exact so
 
 ## Commit and pull-request guidance
 
-Use small, focused commits with imperative titles, for example `Add Bengali alias for boolean literals` or `Report division by zero as P1011`. Pull requests should describe the user-visible behavior, test command and result, compatibility impact, and any remaining limitations.
+Use small, focused commits with imperative titles, for example `Add Bengali alias for boolean literals` or `Report division by zero as P1011`. Pull requests should describe the user-visible behavior, test command and result, compatibility impact, and any remaining limitations. Complete the pull-request template, keep generated output and secrets out of commits, and avoid combining unrelated refactors with behavior changes.
 
 ## Security
 
-Do not publicly disclose a potential vulnerability before maintainers have reviewed it. Report security-sensitive concerns privately to the repository maintainers. A formal security policy will be added before public package publishing or network-capable official libraries are released.
+Do not publicly disclose a potential vulnerability before maintainers have reviewed it. Follow [SECURITY.md](SECURITY.md) for the private reporting route, scope, and safe-research expectations. Do not include credentials, private URLs, session values, or personal data in public issues, pull requests, or test fixtures.
+
+## Repository structure
+
+The source and tooling layout is documented in [docs/REPOSITORY-ARCHITECTURE.md](docs/REPOSITORY-ARCHITECTURE.md). Keep the root crate, `padma` binary name, Termux installation contract, public library APIs, and documented diagnostic codes compatible unless an approved RFC and migration note explicitly change them.

@@ -1,0 +1,35 @@
+name: Feature or language proposal
+description: Propose a language, library, tooling, platform, or documentation improvement.
+title: "proposal: "
+labels: [proposal]
+body:
+  - type: markdown
+    attributes:
+      value: "For syntax, standard-library, security-sensitive, deployment, Android, or compatibility changes, explain the user problem before proposing an implementation."
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Who needs this and what cannot be done safely or clearly today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include Bangla-English syntax or API examples where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Compatibility and safety considerations
+      description: Describe capability, file, network, process, device, secret, or migration implications.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
