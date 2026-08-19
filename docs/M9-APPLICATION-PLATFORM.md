@@ -33,6 +33,10 @@ The first registry increment is deliberately local-only. A package is a director
 
 `padma package verify` re-hashes already-present package directories and compares them with the lockfile. It never downloads, unpacks, or executes a package. This all-or-nothing, locally recorded digest policy follows the useful integrity property of hash-checking workflows: each resolved dependency must be pinned and hashed rather than mixing protected and unprotected dependency entries.[8] Registry publishing, remote fetch, and package signature verification remain deferred until Padma has a reviewed root-key and index-rotation policy; Cargo’s registry index illustrates why package-name restrictions, version uniqueness, versioned index schemas, and per-package SHA-256 checksums should be explicit rather than implicit.[9]
 
+The first deployment increment is inspection-only. A versioned `padma-deploy.toml` will describe a project-relative entrypoint, a bounded named target, a public HTTPS base URL, environment-variable *names*, source digest, and local rollback descriptor. It must never contain a secret value, shell command, artifact upload endpoint, deployment credential, or arbitrary provider configuration. `padma deploy plan` and `padma deploy inspect` will only validate and render this local plan; they do not build, transmit, publish, or mutate remote infrastructure. This preserves the integrity and provenance focus promoted by SLSA while withholding remote supply-chain authority until a separate confirmed adapter exists.[10]
+
+Secrets are referenced only by validated uppercase environment-variable names and are not emitted by plan/inspect output. OWASP warns against hardcoding plaintext secrets in source or configuration and recommends least-privilege, standardized secret handling; a source digest and a redacted plan let a Termux user review deployment intent without exposing credential material.[11] OpenSSF’s source-management guidance similarly emphasizes restrictive CI/CD action trust and least-privilege defaults; Padma’s initial plan therefore has no workflow execution authority at all.[12]
+
 No M9 component silently opens a public port, uses a secret literal from Padma source, launches a background daemon, installs an unverified package, or performs browser side effects. Each external action is capability-gated and surfaces a localized diagnostic.
 
 ## Termux operation boundary
@@ -50,3 +54,6 @@ No M9 component silently opens a public port, uses a secret literal from Padma s
 [7]: https://docs.npmjs.com/cli/v8/configuring-npm/package-lock-json/ "npm package-lock.json documentation"
 [8]: https://pip.pypa.io/en/stable/topics/secure-installs/ "pip secure installs documentation"
 [9]: https://doc.rust-lang.org/cargo/reference/registry-index.html "Cargo registry index documentation"
+[10]: https://slsa.dev/ "SLSA — Supply-chain Levels for Software Artifacts"
+[11]: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html "OWASP Secrets Management Cheat Sheet"
+[12]: https://best.openssf.org/SCM-BestPractices/ "OpenSSF Source Code Management Platform Configuration Best Practices"

@@ -149,6 +149,9 @@
   - [ ] Add signed, versioned, expiring session envelopes and explicit verification without a network auth server or default cookie emission.
   - [ ] Define CSRF token and secure-cookie construction policy as pure, reviewed helpers; reject secret literals and untrusted environment-variable names.
 - [ ] Add deployment manifests and dry-run adapters before any remote deployment integration; preserve clear ownership, secret isolation, build reproducibility, rollback metadata, and explicit user confirmation for remote actions.
+  - [x] Define and validate a versioned deployment manifest with project-relative entry, bounded target metadata, public base URL policy, and approved environment-variable names only.
+  - [x] Add deterministic `padma deploy plan` and read-only `padma deploy inspect` commands; never transmit credentials, build artifacts, or application data.
+  - [x] Record a source digest and rollback descriptor in a local deployment plan, while rejecting secret values, shell commands, remote URLs, and unbounded providers.
 - [ ] Define GUI/mobile application bridges as opt-in adapter contracts with no automatic Android permission elevation, then validate a small Termux-friendly renderer example.
 - [ ] Add provider-neutral AI workflow helpers for structured responses and local model adapters, bounded by explicit network/process capabilities and never executing model output as code.
 - [ ] Add bounded browser automation using reviewed action plans, domain allowlists, confirmation before side effects, redaction of sensitive fields, and no CAPTCHA or login bypass behavior.

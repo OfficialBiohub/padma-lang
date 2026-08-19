@@ -3874,6 +3874,15 @@ struct PackageManifest {
     digest: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeploymentManifest {
+    entry: String,
+    target: String,
+    base_url: String,
+    environment_names: BTreeSet<String>,
+    rollback: String,
+}
+
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
@@ -3883,6 +3892,8 @@ const PACKAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
 const AUTH_PBKDF2_ITERATIONS: u32 = 600_000;
 const AUTH_PASSWORD_MAX_BYTES: usize = 1_024;
 const AUTH_SESSION_MAX_SECONDS: u64 = 86_400;
+const DEPLOYMENT_MAX_SOURCE_FILES: usize = 256;
+const DEPLOYMENT_MAX_SOURCE_BYTES: usize = 5 * 1024 * 1024;
 
 fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
     let value = value.trim();
@@ -4080,6 +4091,148 @@ fn parse_project_manifest(source: &str) -> Result<ProjectManifest, String> {
         return Err("P1032: `locale` must be `auto`, `bn`, or `en`".to_string());
     }
     Ok(manifest)
+}
+
+fn is_safe_environment_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_uppercase() || first == '_')
+        && value.len() <= 128
+        && chars.all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+        })
+}
+
+fn safe_public_https_url(value: &str) -> bool {
+    let Some(host) = value.strip_prefix("https://") else {
+        return false;
+    };
+    if host.is_empty()
+        || host.contains(['/', '?', '#', '@'])
+        || host.chars().any(char::is_whitespace)
+    {
+        return false;
+    }
+    !matches!(
+        host.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "[::1]"
+    )
+}
+
+fn safe_deployment_rollback_path(value: &str) -> Result<PathBuf, String> {
+    let path = safe_relative_path(value)
+        .map_err(|_| "P1046: rollback must be a project-relative `.json` path".to_string())?;
+    if !value.ends_with(".json") {
+        return Err("P1046: rollback must be a project-relative `.json` path".to_string());
+    }
+    Ok(path)
+}
+
+fn parse_deployment_manifest(source: &str) -> Result<DeploymentManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    let mut environment_names = BTreeSet::new();
+    let mut environment_seen = false;
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if !matches!(section.as_str(), "deployment" | "environment") {
+                return Err(format!(
+                    "P1046: unsupported deployment section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1046: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        if section == "environment" {
+            if key != "names" || environment_seen {
+                return Err(format!(
+                    "P1046: only one `environment.names` field is allowed on line {}",
+                    line_number + 1
+                ));
+            }
+            environment_seen = true;
+            for name in parse_manifest_string_list(raw_value, line_number + 1)? {
+                if !is_safe_environment_name(&name) {
+                    return Err(format!(
+                        "P1046: unsafe environment variable name `{name}` on line {}",
+                        line_number + 1
+                    ));
+                }
+                if !environment_names.insert(name.clone()) {
+                    return Err(format!(
+                        "P1046: duplicate environment variable name `{name}` on line {}",
+                        line_number + 1
+                    ));
+                }
+            }
+            continue;
+        }
+        if section != "deployment"
+            || !matches!(
+                key,
+                "version" | "entry" | "target" | "base_url" | "rollback"
+            )
+        {
+            return Err(format!(
+                "P1046: unsupported deployment field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        let value = raw_value.trim();
+        if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
+            return Err(format!(
+                "P1046: deployment values must be quoted strings on line {}",
+                line_number + 1
+            ));
+        }
+        if fields
+            .insert(key.to_string(), value[1..value.len() - 1].to_string())
+            .is_some()
+        {
+            return Err(format!(
+                "P1046: duplicate deployment field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1046: missing `[deployment]` field `{key}`"))
+    };
+    if required("version")? != "1" {
+        return Err("P1046: deployment manifest version must be `1`".to_string());
+    }
+    let entry = required("entry")?;
+    safe_project_relative_path(&entry)
+        .map_err(|_| "P1046: deployment entry must be a project-relative `.pd` path".to_string())?;
+    let target = required("target")?;
+    if !matches!(target.as_str(), "static" | "container" | "loopback") {
+        return Err("P1046: target must be `static`, `container`, or `loopback`".to_string());
+    }
+    let base_url = required("base_url")?;
+    if !safe_public_https_url(&base_url) {
+        return Err("P1046: base_url must be a public HTTPS origin without path, query, fragment, or credentials".to_string());
+    }
+    let rollback = required("rollback")?;
+    safe_deployment_rollback_path(&rollback)?;
+    Ok(DeploymentManifest {
+        entry,
+        target,
+        base_url,
+        environment_names,
+        rollback,
+    })
 }
 
 fn is_safe_package_name(value: &str) -> bool {
@@ -4821,6 +4974,128 @@ fn inspect_local_package(directory: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn deployment_source_digest(directory: &Path, entry: &Path) -> Result<String, String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1046: cannot resolve project root: {error}"))?;
+    let entry_metadata = fs::symlink_metadata(entry)
+        .map_err(|error| format!("P1046: cannot inspect deployment entry: {error}"))?;
+    if entry_metadata.file_type().is_symlink() || !entry_metadata.is_file() {
+        return Err("P1046: deployment entry must be a regular project file".to_string());
+    }
+    let entry = fs::canonicalize(entry)
+        .map_err(|error| format!("P1046: cannot resolve deployment entry: {error}"))?;
+    if !entry.starts_with(&root) {
+        return Err("P1046: deployment entry escaped the project root".to_string());
+    }
+    let source_root = root.join("src");
+    let source_metadata = fs::symlink_metadata(&source_root)
+        .map_err(|error| format!("P1046: cannot inspect project source directory: {error}"))?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
+        return Err("P1046: project source directory must be a regular directory".to_string());
+    }
+    fn collect(
+        root: &Path,
+        current: &Path,
+        entries: &mut BTreeMap<String, Vec<u8>>,
+        total: &mut usize,
+    ) -> Result<(), String> {
+        for item in fs::read_dir(current)
+            .map_err(|error| format!("P1046: cannot inspect project source: {error}"))?
+        {
+            let item =
+                item.map_err(|error| format!("P1046: cannot read project source: {error}"))?;
+            let path = item.path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("P1046: cannot inspect project source: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err(
+                    "P1046: symbolic links are not allowed in deployment source".to_string()
+                );
+            }
+            if metadata.is_dir() {
+                collect(root, &path, entries, total)?;
+                continue;
+            }
+            if !metadata.is_file() {
+                return Err("P1046: deployment source may contain only regular files".to_string());
+            }
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| "P1046: deployment source escaped project root".to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let contents = fs::read(&path)
+                .map_err(|error| format!("P1046: cannot read source `{relative}`: {error}"))?;
+            *total = total.saturating_add(contents.len());
+            if entries.len() >= DEPLOYMENT_MAX_SOURCE_FILES || *total > DEPLOYMENT_MAX_SOURCE_BYTES
+            {
+                return Err("P1046: deployment source exceeds file or byte limit".to_string());
+            }
+            entries.insert(relative, contents);
+        }
+        Ok(())
+    }
+    let mut entries = BTreeMap::new();
+    let mut total = 0usize;
+    collect(&root, &source_root, &mut entries, &mut total)?;
+    for fixed_file in ["padma.toml", "padma.lock"] {
+        let path = root.join(fixed_file);
+        if !path.is_file() {
+            continue;
+        }
+        let contents = fs::read(&path)
+            .map_err(|error| format!("P1046: cannot read `{fixed_file}`: {error}"))?;
+        total = total.saturating_add(contents.len());
+        if entries.len() >= DEPLOYMENT_MAX_SOURCE_FILES || total > DEPLOYMENT_MAX_SOURCE_BYTES {
+            return Err("P1046: deployment source exceeds file or byte limit".to_string());
+        }
+        entries.insert(fixed_file.to_string(), contents);
+    }
+    let mut canonical = Vec::new();
+    for (path, contents) in entries {
+        canonical.extend_from_slice(path.as_bytes());
+        canonical.push(0);
+        canonical.extend_from_slice(&(contents.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(&contents);
+    }
+    Ok(format!("sha256:{}", sha256_hex(&canonical)))
+}
+
+fn deployment_plan_contents(directory: &Path) -> Result<String, String> {
+    let (project, project_entry) = load_project_manifest(directory)?;
+    let manifest_path = directory.join("padma-deploy.toml");
+    let source = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("P1046: cannot read `{}`: {error}", manifest_path.display()))?;
+    let deployment = parse_deployment_manifest(&source)?;
+    if deployment.entry != project.entry {
+        return Err("P1046: deployment entry must match `[padma] entry`".to_string());
+    }
+    let source_digest = deployment_source_digest(directory, &project_entry)?;
+    serde_json::to_string_pretty(&serde_json::json!({
+        "deploymentPlanVersion": 1,
+        "mode": "dry-run-only",
+        "project": {"name": project.name, "version": project.version},
+        "entry": deployment.entry,
+        "target": deployment.target,
+        "baseUrl": deployment.base_url,
+        "environmentNames": deployment.environment_names.into_iter().collect::<Vec<_>>(),
+        "sourceDigest": source_digest,
+        "rollback": {"descriptor": deployment.rollback, "remoteAction": "not-configured"},
+        "network": "disabled",
+        "artifactUpload": "disabled",
+        "remoteMutation": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1046: cannot encode deployment plan: {error}"))
+}
+
+fn inspect_deployment_plan(directory: &Path) -> Result<(), String> {
+    let plan = deployment_plan_contents(directory)?;
+    println!("Padma deployment plan (inspection only)");
+    println!("{plan}");
+    Ok(())
+}
+
 fn project_source_with_locale(source: String, locale: &str) -> String {
     match locale {
         "bn" => format!("# padma:locale=bn\n{source}"),
@@ -5356,10 +5631,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -5484,6 +5759,34 @@ fn main() {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("."));
                 inspect_local_package(&directory, &arguments[3])
+            }
+            _ => {
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        if let Err(error) = result {
+            eprintln!("{error}");
+            process::exit(1);
+        }
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("deploy") {
+        let command = arguments.get(2).map(String::as_str);
+        let result = match command {
+            Some("plan") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                deployment_plan_contents(&directory).map(|plan| print!("{plan}"))
+            }
+            Some("inspect") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                inspect_deployment_plan(&directory)
             }
             _ => {
                 eprintln!("{}", usage(Locale::English));
@@ -6196,6 +6499,56 @@ mod tests {
         assert!(error.starts_with("P1034"));
         assert!(error.contains("server:local"));
         assert!(error.contains("[capabilities]"));
+    }
+
+    #[test]
+    fn deployment_manifest_requires_bounded_target_origin_and_environment_names() {
+        let manifest = parse_deployment_manifest(
+            "[deployment]\nversion = \"1\"\nentry = \"main.pd\"\ntarget = \"loopback\"\nbase_url = \"https://padma.example\"\nrollback = \"deploy/rollback.json\"\n\n[environment]\nnames = [\"PADMA_TOKEN\", \"API_KEY\"]\n",
+        )
+        .unwrap();
+        assert_eq!(manifest.target, "loopback");
+        assert!(manifest.environment_names.contains("PADMA_TOKEN"));
+
+        let unsafe_origin = parse_deployment_manifest(
+            "[deployment]\nversion = \"1\"\nentry = \"main.pd\"\ntarget = \"static\"\nbase_url = \"http://localhost\"\nrollback = \"deploy/rollback.json\"\n",
+        )
+        .unwrap_err();
+        assert!(unsafe_origin.starts_with("P1046"));
+        assert!(unsafe_origin.contains("public HTTPS"));
+
+        let unsafe_environment = parse_deployment_manifest(
+            "[deployment]\nversion = \"1\"\nentry = \"main.pd\"\ntarget = \"static\"\nbase_url = \"https://padma.example\"\nrollback = \"deploy/rollback.json\"\n\n[environment]\nnames = [\"token=value\"]\n",
+        )
+        .unwrap_err();
+        assert!(unsafe_environment.starts_with("P1046"));
+        assert!(unsafe_environment.contains("unsafe environment variable name"));
+    }
+
+    #[test]
+    fn deployment_plan_is_project_scoped_dry_run_and_never_contains_secret_values() {
+        let root = module_fixture_dir("deployment-plan");
+        fs::create_dir(root.join("deploy")).unwrap();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"deploy-demo\"\nversion = \"0.1.0\"\nentry = \"src/main.pd\"\nlocale = \"en\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join("padma-deploy.toml"),
+            "[deployment]\nversion = \"1\"\nentry = \"src/main.pd\"\ntarget = \"static\"\nbase_url = \"https://padma.example\"\nrollback = \"deploy/rollback.json\"\n\n[environment]\nnames = [\"PADMA_DEPLOY_TOKEN\"]\n",
+        )
+        .unwrap();
+        let plan = deployment_plan_contents(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert!(plan.contains("\"mode\": \"dry-run-only\""));
+        assert!(plan.contains("\"network\": \"disabled\""));
+        assert!(plan.contains("\"remoteMutation\": \"disabled\""));
+        assert!(plan.contains("PADMA_DEPLOY_TOKEN"));
+        assert!(!plan.contains("token=value"));
+        assert!(plan.contains("sha256:"));
     }
 
     #[test]
