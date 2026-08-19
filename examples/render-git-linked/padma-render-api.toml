@@ -1,0 +1,7 @@
+[render_api]
+version = "1"
+service = "srv-replacewithserviceid"
+token_env = "RENDER_API_TOKEN"
+commit = "0123456789abcdef0123456789abcdef01234567"
+clear_cache = "do_not_clear"
+rollback_deploy = "dep-replacewithdeployid"

@@ -3892,6 +3892,35 @@ struct GuiManifest {
     title: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderReleaseManifest {
+    service: String,
+    repository: String,
+    branch: String,
+    commit: String,
+    rollback_deploy: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderApiManifest {
+    service: String,
+    token_env: String,
+    commit: String,
+    clear_cache: String,
+    rollback_deploy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AndroidBuildManifest {
+    application_id: String,
+    min_sdk: u32,
+    target_sdk: u32,
+    artifact: String,
+    signing_key_env: String,
+    signing_cert_sha256: String,
+    permissions: BTreeSet<String>,
+}
+
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
@@ -3940,6 +3969,8 @@ fn capability_grants_for_field(
         "database" => &["sqlite"],
         "identity" => &["local"],
         "gui" => &["local"],
+        "android" => &["plan"],
+        "deployment" => &["render"],
         "filesystem" => &["read", "write"],
         "network" => &["http", "ai"],
         "server" => &["local"],
@@ -4244,6 +4275,435 @@ fn parse_deployment_manifest(source: &str) -> Result<DeploymentManifest, String>
         base_url,
         environment_names,
         rollback,
+    })
+}
+
+fn is_safe_render_identifier(value: &str, prefix: &str) -> bool {
+    value.starts_with(prefix)
+        && value.len() > prefix.len()
+        && value.len() <= 128
+        && value[prefix.len()..]
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+}
+
+fn is_safe_render_repository(value: &str) -> bool {
+    let mut segments = value.split('/');
+    let Some(owner) = segments.next() else {
+        return false;
+    };
+    let Some(repository) = segments.next() else {
+        return false;
+    };
+    segments.next().is_none()
+        && !owner.is_empty()
+        && !repository.is_empty()
+        && owner.len() <= 64
+        && repository.len() <= 100
+        && [owner, repository].iter().all(|segment| {
+            segment.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            }) && !segment.starts_with('.')
+                && !segment.ends_with('.')
+        })
+}
+
+fn is_safe_render_branch(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.starts_with('/')
+        && !value.starts_with('.')
+        && !value.ends_with('/')
+        && !value.ends_with('.')
+        && !value.contains("//")
+        && !value.contains("..")
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '/' | '-' | '_' | '.')
+        })
+}
+
+fn is_immutable_git_commit(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn parse_render_release_manifest(source: &str) -> Result<RenderReleaseManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "render" {
+                return Err(format!(
+                    "P1048: unsupported Render section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1048: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        if section != "render"
+            || !matches!(
+                key,
+                "version"
+                    | "mode"
+                    | "service"
+                    | "repository"
+                    | "branch"
+                    | "commit"
+                    | "rollback_deploy"
+            )
+        {
+            return Err(format!(
+                "P1048: unsupported Render field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        let value = raw_value.trim();
+        if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
+            return Err(format!(
+                "P1048: Render values must be quoted strings on line {}",
+                line_number + 1
+            ));
+        }
+        if fields
+            .insert(key.to_string(), value[1..value.len() - 1].to_string())
+            .is_some()
+        {
+            return Err(format!(
+                "P1048: duplicate Render field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1048: missing `[render]` field `{key}`"))
+    };
+    if required("version")? != "1" {
+        return Err("P1048: Render manifest version must be `1`".to_string());
+    }
+    if required("mode")? != "git-linked" {
+        return Err("P1048: Render mode must be `git-linked`".to_string());
+    }
+    let service = required("service")?;
+    if !is_safe_render_identifier(&service, "srv-") {
+        return Err("P1048: Render service must be a `srv-` identifier".to_string());
+    }
+    let repository = required("repository")?;
+    if !is_safe_render_repository(&repository) {
+        return Err("P1048: Render repository must be an `owner/repository` identity".to_string());
+    }
+    let branch = required("branch")?;
+    if !is_safe_render_branch(&branch) {
+        return Err("P1048: Render branch contains unsafe characters".to_string());
+    }
+    let commit = required("commit")?.to_ascii_lowercase();
+    if !is_immutable_git_commit(&commit) {
+        return Err(
+            "P1048: Render commit must be a full 40 or 64 character commit SHA".to_string(),
+        );
+    }
+    let rollback_deploy = fields.get("rollback_deploy").cloned();
+    if let Some(rollback_deploy) = &rollback_deploy {
+        if !is_safe_render_identifier(rollback_deploy, "dep-") {
+            return Err("P1048: Render rollback_deploy must be a `dep-` identifier".to_string());
+        }
+    }
+    Ok(RenderReleaseManifest {
+        service,
+        repository,
+        branch,
+        commit,
+        rollback_deploy,
+    })
+}
+
+fn parse_render_api_manifest(source: &str) -> Result<RenderApiManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "render_api" {
+                return Err(format!(
+                    "P1048: unsupported Render API section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1048: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        if section != "render_api"
+            || !matches!(
+                key,
+                "version" | "service" | "token_env" | "commit" | "clear_cache" | "rollback_deploy"
+            )
+        {
+            return Err(format!(
+                "P1048: unsupported Render API field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        let value = raw_value.trim();
+        if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
+            return Err(format!(
+                "P1048: Render API values must be quoted strings on line {}",
+                line_number + 1
+            ));
+        }
+        if fields
+            .insert(key.to_string(), value[1..value.len() - 1].to_string())
+            .is_some()
+        {
+            return Err(format!(
+                "P1048: duplicate Render API field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1048: missing `[render_api]` field `{key}`"))
+    };
+    if required("version")? != "1" {
+        return Err("P1048: Render API manifest version must be `1`".to_string());
+    }
+    let service = required("service")?;
+    if !is_safe_render_identifier(&service, "srv-") {
+        return Err("P1048: Render API service must be a `srv-` identifier".to_string());
+    }
+    let token_env = required("token_env")?;
+    if !is_safe_environment_name(&token_env) {
+        return Err(
+            "P1048: Render API token_env must be a safe environment variable name".to_string(),
+        );
+    }
+    let commit = required("commit")?.to_ascii_lowercase();
+    if !is_immutable_git_commit(&commit) {
+        return Err(
+            "P1048: Render API commit must be a full 40 or 64 character commit SHA".to_string(),
+        );
+    }
+    let clear_cache = required("clear_cache")?;
+    if !matches!(clear_cache.as_str(), "clear" | "do_not_clear") {
+        return Err("P1048: Render API clear_cache must be `clear` or `do_not_clear`".to_string());
+    }
+    let rollback_deploy = required("rollback_deploy")?;
+    if !is_safe_render_identifier(&rollback_deploy, "dep-") {
+        return Err("P1048: Render API rollback_deploy must be a `dep-` identifier".to_string());
+    }
+    Ok(RenderApiManifest {
+        service,
+        token_env,
+        commit,
+        clear_cache,
+        rollback_deploy,
+    })
+}
+
+fn is_safe_android_application_id(value: &str) -> bool {
+    let segments = value.split('.').collect::<Vec<_>>();
+    segments.len() >= 2
+        && value.len() <= 180
+        && segments.iter().all(|segment| {
+            let mut characters = segment.chars();
+            matches!(characters.next(), Some(first) if first.is_ascii_alphabetic())
+                && segment.len() <= 63
+                && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+        })
+}
+
+fn parse_android_permission_list(
+    value: &str,
+    line_number: usize,
+) -> Result<BTreeSet<String>, String> {
+    let value = value.trim();
+    if !(value.starts_with('[') && value.ends_with(']')) {
+        return Err(format!(
+            "P1049: Android permissions must use a quoted string list on line {line_number}"
+        ));
+    }
+    let permitted = [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+    ];
+    let mut permissions = BTreeSet::new();
+    let inner = value[1..value.len() - 1].trim();
+    if inner.is_empty() {
+        return Ok(permissions);
+    }
+    for raw_permission in inner.split(',') {
+        let permission = raw_permission.trim();
+        if permission.len() < 2 || !permission.starts_with('"') || !permission.ends_with('"') {
+            return Err(format!(
+                "P1049: Android permissions must be quoted strings on line {line_number}"
+            ));
+        }
+        let permission = permission[1..permission.len() - 1].to_string();
+        if !permitted.contains(&permission.as_str()) {
+            return Err(format!(
+                "P1049: Android permission `{permission}` is not in Padma's reviewed allowlist"
+            ));
+        }
+        if !permissions.insert(permission.clone()) {
+            return Err(format!(
+                "P1049: duplicate Android permission `{permission}` on line {line_number}"
+            ));
+        }
+    }
+    Ok(permissions)
+}
+
+fn parse_android_build_manifest(source: &str) -> Result<AndroidBuildManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    let mut permissions = BTreeSet::new();
+    let mut permissions_seen = false;
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if !matches!(section.as_str(), "android" | "permissions") {
+                return Err(format!(
+                    "P1049: unsupported Android manifest section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1049: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        if section == "permissions" {
+            if key != "names" || permissions_seen {
+                return Err(format!(
+                    "P1049: only one `permissions.names` field is allowed on line {}",
+                    line_number + 1
+                ));
+            }
+            permissions_seen = true;
+            permissions = parse_android_permission_list(raw_value, line_number + 1)?;
+            continue;
+        }
+        if section != "android"
+            || !matches!(
+                key,
+                "version"
+                    | "application_id"
+                    | "min_sdk"
+                    | "target_sdk"
+                    | "artifact"
+                    | "signing_key_env"
+                    | "signing_cert_sha256"
+            )
+        {
+            return Err(format!(
+                "P1049: unsupported Android manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        let value = raw_value.trim();
+        let value = if matches!(key, "min_sdk" | "target_sdk") {
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(format!(
+                    "P1049: Android `{key}` must be an unsigned integer on line {}",
+                    line_number + 1
+                ));
+            }
+            value.to_string()
+        } else {
+            if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
+                return Err(format!(
+                    "P1049: Android `{key}` must be a quoted string on line {}",
+                    line_number + 1
+                ));
+            }
+            value[1..value.len() - 1].to_string()
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(format!(
+                "P1049: duplicate Android manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1049: missing `[android]` field `{key}`"))
+    };
+    if required("version")? != "1" {
+        return Err("P1049: Android manifest version must be `1`".to_string());
+    }
+    let application_id = required("application_id")?;
+    if !is_safe_android_application_id(&application_id) {
+        return Err("P1049: Android application_id must be a dotted identifier".to_string());
+    }
+    let min_sdk = required("min_sdk")?
+        .parse::<u32>()
+        .map_err(|_| "P1049: Android min_sdk must be an unsigned integer".to_string())?;
+    let target_sdk = required("target_sdk")?
+        .parse::<u32>()
+        .map_err(|_| "P1049: Android target_sdk must be an unsigned integer".to_string())?;
+    if !(23..=35).contains(&min_sdk) || !(min_sdk..=35).contains(&target_sdk) {
+        return Err(
+            "P1049: Android SDK levels must be 23 through 35 with target_sdk >= min_sdk"
+                .to_string(),
+        );
+    }
+    let artifact = required("artifact")?;
+    safe_gui_relative_path(&artifact, Some(".apk")).map_err(|_| {
+        "P1049: Android artifact must be a project-relative `.apk` path".to_string()
+    })?;
+    let signing_key_env = required("signing_key_env")?;
+    if !is_safe_environment_name(&signing_key_env) {
+        return Err(
+            "P1049: Android signing_key_env must be a safe environment variable name".to_string(),
+        );
+    }
+    let signing_cert_sha256 = required("signing_cert_sha256")?;
+    if !is_sha256_digest(&signing_cert_sha256) {
+        return Err(
+            "P1049: Android signing_cert_sha256 must use a lowercase sha256 digest".to_string(),
+        );
+    }
+    Ok(AndroidBuildManifest {
+        application_id,
+        min_sdk,
+        target_sdk,
+        artifact,
+        signing_key_env,
+        signing_cert_sha256,
+        permissions,
     })
 }
 
@@ -5225,6 +5685,293 @@ fn inspect_deployment_plan(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn render_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("deployment:render") {
+        return Ok(());
+    }
+    let locale = if project.locale == "bn" {
+        Locale::Bangla
+    } else {
+        Locale::English
+    };
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "deployment:render");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_render_release_manifest(
+    directory: &Path,
+) -> Result<
+    (
+        ProjectManifest,
+        DeploymentManifest,
+        RenderReleaseManifest,
+        String,
+    ),
+    String,
+> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1048: cannot resolve project root: {error}"))?;
+    let (project, project_entry) = load_project_manifest(&root)?;
+    render_capability_error(&project)?;
+    let deployment_path = root.join("padma-deploy.toml");
+    let deployment_metadata = fs::symlink_metadata(&deployment_path)
+        .map_err(|error| format!("P1048: cannot inspect deployment manifest: {error}"))?;
+    if deployment_metadata.file_type().is_symlink() || !deployment_metadata.is_file() {
+        return Err("P1048: deployment manifest must be a regular project file".to_string());
+    }
+    let deployment = parse_deployment_manifest(
+        &fs::read_to_string(&deployment_path)
+            .map_err(|error| format!("P1048: cannot read deployment manifest: {error}"))?,
+    )?;
+    if deployment.entry != project.entry {
+        return Err("P1048: deployment entry must match `[padma] entry`".to_string());
+    }
+    if !matches!(deployment.target.as_str(), "static" | "container") {
+        return Err(
+            "P1048: Render releases require `static` or `container` deployment target".to_string(),
+        );
+    }
+    let manifest_path = root.join("padma-render.toml");
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|error| format!("P1048: cannot inspect Render manifest: {error}"))?;
+    if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+        return Err("P1048: Render manifest must be a regular project file".to_string());
+    }
+    let render = parse_render_release_manifest(
+        &fs::read_to_string(&manifest_path)
+            .map_err(|error| format!("P1048: cannot read Render manifest: {error}"))?,
+    )?;
+    let source_digest = deployment_source_digest(&root, &project_entry)?;
+    Ok((project, deployment, render, source_digest))
+}
+
+fn render_release_plan_contents(directory: &Path) -> Result<String, String> {
+    let (project, deployment, render, source_digest) = load_render_release_manifest(directory)?;
+    serde_json::to_string_pretty(&serde_json::json!({
+        "renderPlanVersion": 1,
+        "mode": "git-linked-release-plan",
+        "project": {"name": project.name, "version": project.version},
+        "provider": "render",
+        "service": render.service,
+        "git": {"repository": render.repository, "branch": render.branch, "commit": render.commit},
+        "deployment": {"target": deployment.target, "baseUrl": deployment.base_url, "environmentNames": deployment.environment_names.into_iter().collect::<Vec<_>>()},
+        "artifact": {"sourceDigest": source_digest, "localBuild": "disabled", "artifactUpload": "disabled", "providerBuild": "requires-render-dashboard-confirmation"},
+        "rollback": {"descriptor": deployment.rollback, "targetDeploy": render.rollback_deploy, "execution": "disabled"},
+        "confirmation": {"required": true, "method": "render-dashboard", "status": "not-confirmed"},
+        "network": "disabled",
+        "providerApi": "disabled",
+        "remoteMutation": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1048: cannot encode Render release plan: {error}"))
+}
+
+fn inspect_render_release_plan(directory: &Path) -> Result<(), String> {
+    let plan = render_release_plan_contents(directory)?;
+    println!("Padma Render release plan (inspection only)");
+    println!("{plan}");
+    Ok(())
+}
+
+fn load_render_api_manifest(
+    directory: &Path,
+) -> Result<
+    (
+        ProjectManifest,
+        DeploymentManifest,
+        RenderReleaseManifest,
+        RenderApiManifest,
+        String,
+    ),
+    String,
+> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1048: cannot resolve project root: {error}"))?;
+    let (project, deployment, release, source_digest) = load_render_release_manifest(&root)?;
+    let manifest_path = root.join("padma-render-api.toml");
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|error| format!("P1048: cannot inspect Render API manifest: {error}"))?;
+    if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+        return Err("P1048: Render API manifest must be a regular project file".to_string());
+    }
+    let api = parse_render_api_manifest(
+        &fs::read_to_string(&manifest_path)
+            .map_err(|error| format!("P1048: cannot read Render API manifest: {error}"))?,
+    )?;
+    if api.service != release.service || api.commit != release.commit {
+        return Err(
+            "P1048: Render API service and commit must match the reviewed git-linked manifest"
+                .to_string(),
+        );
+    }
+    if release.rollback_deploy.as_deref() != Some(api.rollback_deploy.as_str()) {
+        return Err(
+            "P1048: Render API rollback_deploy must match the reviewed git-linked manifest"
+                .to_string(),
+        );
+    }
+    Ok((project, deployment, release, api, source_digest))
+}
+
+fn render_confirmation_token(
+    action: &str,
+    service: &str,
+    commit: &str,
+    rollback_deploy: &str,
+    source_digest: &str,
+) -> String {
+    let material = format!(
+        "padma-render-confirmation-v1\0{action}\0{service}\0{commit}\0{rollback_deploy}\0{source_digest}"
+    );
+    format!("render-{}", &sha256_hex(material.as_bytes())[..24])
+}
+
+fn render_api_plan_contents(directory: &Path) -> Result<String, String> {
+    let (project, deployment, release, api, source_digest) = load_render_api_manifest(directory)?;
+    let deploy_confirmation = render_confirmation_token(
+        "deploy",
+        &api.service,
+        &api.commit,
+        &api.rollback_deploy,
+        &source_digest,
+    );
+    let rollback_confirmation = render_confirmation_token(
+        "rollback",
+        &api.service,
+        &api.commit,
+        &api.rollback_deploy,
+        &source_digest,
+    );
+    serde_json::to_string_pretty(&serde_json::json!({
+        "renderApiPlanVersion": 1,
+        "project": {"name": project.name, "version": project.version},
+        "provider": "render",
+        "service": api.service,
+        "git": {"repository": release.repository, "branch": release.branch, "commit": api.commit},
+        "deployment": {"target": deployment.target, "baseUrl": deployment.base_url, "sourceDigest": source_digest},
+        "credential": {"environmentName": api.token_env, "value": "not-read-in-planning-mode", "manifestStorage": "prohibited"},
+        "deploy": {"request": "POST /v1/services/{serviceId}/deploys", "body": {"commitId": api.commit, "clearCache": api.clear_cache}, "confirmationToken": deploy_confirmation},
+        "rollback": {"request": "POST /v1/services/{serviceId}/rollback", "body": {"deployId": api.rollback_deploy}, "confirmationToken": rollback_confirmation},
+        "artifactUpload": "disabled",
+        "localBuild": "disabled",
+        "network": "disabled-in-planning-mode",
+        "remoteMutation": "disabled-in-planning-mode"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1048: cannot encode Render API plan: {error}"))
+}
+
+fn render_api_curl_config(url: &str, token: &str, body: &str) -> Result<String, String> {
+    if token.len() < 20
+        || token.len() > 512
+        || token
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return Err("P1048: Render API token is missing or has an unsafe format".to_string());
+    }
+    let escape = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
+    Ok(format!(
+        "url = \"{}\"\nrequest = \"POST\"\nheader = \"accept: application/json\"\nheader = \"content-type: application/json\"\nheader = \"authorization: Bearer {}\"\ndata = \"{}\"\n",
+        escape(url),
+        escape(token),
+        escape(body),
+    ))
+}
+
+fn run_render_api_request(
+    action: &str,
+    directory: &Path,
+    confirmation: &str,
+) -> Result<(), String> {
+    let (_, _, _, api, source_digest) = load_render_api_manifest(directory)?;
+    let expected_confirmation = render_confirmation_token(
+        action,
+        &api.service,
+        &api.commit,
+        &api.rollback_deploy,
+        &source_digest,
+    );
+    if confirmation != expected_confirmation {
+        return Err(format!(
+            "P1048: confirmation token does not match the current reviewed `{action}` plan; run `padma render api-plan` again"
+        ));
+    }
+    let token = env::var(&api.token_env).map_err(|_| {
+        format!(
+            "P1048: required Render API credential `{}` is not set",
+            api.token_env
+        )
+    })?;
+    let (path, body) = match action {
+        "deploy" => (
+            format!("/v1/services/{}/deploys", api.service),
+            serde_json::json!({"commitId": api.commit, "clearCache": api.clear_cache}).to_string(),
+        ),
+        "rollback" => (
+            format!("/v1/services/{}/rollback", api.service),
+            serde_json::json!({"deployId": api.rollback_deploy}).to_string(),
+        ),
+        _ => return Err("P1048: unsupported Render API action".to_string()),
+    };
+    let url = format!("https://api.render.com{path}");
+    let config = render_api_curl_config(&url, &token, &body)?;
+    let mut child = process::Command::new("curl")
+        .args([
+            "--fail-with-body",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "60",
+            "--config",
+            "-",
+        ])
+        .stdin(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("P1048: cannot start curl for Render API request: {error}"))?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "P1048: cannot open secure curl configuration input".to_string())?
+        .write_all(config.as_bytes())
+        .map_err(|error| {
+            format!("P1048: cannot provide Render API request configuration: {error}")
+        })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("P1048: Render API request did not finish: {error}"))?;
+    let response = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .replace(&token, "[REDACTED]");
+    if !output.status.success() {
+        return Err(format!(
+            "P1048: Render API {action} request failed (curl status {}): {}",
+            output.status,
+            response.trim().chars().take(8_192).collect::<String>()
+        ));
+    }
+    println!(
+        "Render {action} request accepted. Provider response:\n{}",
+        response.trim().chars().take(8_192).collect::<String>()
+    );
+    Ok(())
+}
+
 fn gui_capability_error(project: &ProjectManifest) -> Result<(), String> {
     if project.capabilities.contains("gui:local") {
         return Ok(());
@@ -5398,6 +6145,120 @@ fn run_gui_inspect(directory: &Path) -> Result<(), String> {
 
 fn run_gui_plan(directory: &Path) -> Result<(), String> {
     print!("{}", gui_plan_contents(directory)?);
+    Ok(())
+}
+
+fn android_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("android:plan") {
+        return Ok(());
+    }
+    let locale = if project.locale == "bn" {
+        Locale::Bangla
+    } else {
+        Locale::English
+    };
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "android:plan");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_android_build_manifest(
+    directory: &Path,
+) -> Result<(ProjectManifest, GuiManifest, AndroidBuildManifest, String), String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1049: cannot resolve project root: {error}"))?;
+    let (project, gui, entry, assets) = load_gui_manifest(&root)?;
+    android_capability_error(&project)?;
+    let manifest_path = root.join("padma-android.toml");
+    let metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|error| format!("P1049: cannot inspect Android manifest: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("P1049: Android manifest must be a regular project file".to_string());
+    }
+    let manifest = parse_android_build_manifest(
+        &fs::read_to_string(&manifest_path)
+            .map_err(|error| format!("P1049: cannot read Android manifest: {error}"))?,
+    )?;
+    let artifact = root.join(safe_gui_relative_path(&manifest.artifact, Some(".apk"))?);
+    if artifact.exists() {
+        let artifact_metadata = fs::symlink_metadata(&artifact)
+            .map_err(|error| format!("P1049: cannot inspect Android artifact path: {error}"))?;
+        if artifact_metadata.file_type().is_symlink() || !artifact_metadata.is_file() {
+            return Err(
+                "P1049: existing Android artifact path must be a regular project file".to_string(),
+            );
+        }
+    }
+    let source_digest = gui_source_digest(&root, &entry, &assets)?;
+    Ok((project, gui, manifest, source_digest))
+}
+
+fn android_inspect_contents(directory: &Path) -> Result<String, String> {
+    let (_project, gui, manifest, _source_digest) = load_android_build_manifest(directory)?;
+    Ok(format!(
+        "Padma Android build manifest (read-only)\n  application_id: {}\n  GUI entry: {}\n  min_sdk: {}\n  target_sdk: {}\n  artifact: {}\n  declared permissions: {}\n",
+        manifest.application_id,
+        gui.entry,
+        manifest.min_sdk,
+        manifest.target_sdk,
+        manifest.artifact,
+        if manifest.permissions.is_empty() {
+            "(none)".to_string()
+        } else {
+            manifest.permissions.iter().cloned().collect::<Vec<_>>().join(", ")
+        }
+    ))
+}
+
+fn android_build_plan_contents(directory: &Path) -> Result<String, String> {
+    let (project, gui, manifest, source_digest) = load_android_build_manifest(directory)?;
+    let runtime_permissions = manifest
+        .permissions
+        .iter()
+        .filter(|permission| {
+            matches!(
+                permission.as_str(),
+                "android.permission.CAMERA"
+                    | "android.permission.RECORD_AUDIO"
+                    | "android.permission.POST_NOTIFICATIONS"
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "androidBuildPlanVersion": 1,
+        "mode": "read-only-build-plan",
+        "project": {"name": project.name, "version": project.version},
+        "application": {"id": manifest.application_id, "minSdk": manifest.min_sdk, "targetSdk": manifest.target_sdk},
+        "gui": {"backend": gui.backend, "entry": gui.entry, "assets": gui.assets, "sourceDigest": source_digest},
+        "artifact": {"expectedPath": manifest.artifact, "apkBuild": "disabled", "artifactWrite": "disabled"},
+        "signing": {"keyEnvironmentName": manifest.signing_key_env, "certificateSha256": manifest.signing_cert_sha256, "keyRead": "disabled", "signing": "disabled"},
+        "permissions": {"declared": manifest.permissions.into_iter().collect::<Vec<_>>(), "runtimeConsentRequired": runtime_permissions, "automaticGrant": "disabled"},
+        "device": {"adb": "disabled", "install": "disabled", "control": "disabled"},
+        "nativeCode": {"execution": "disabled", "jni": "disabled", "hooks": "disabled"},
+        "network": "disabled",
+        "rendererLaunch": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1049: cannot encode Android build plan: {error}"))
+}
+
+fn run_android_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", android_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_android_build_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", android_build_plan_contents(directory)?);
     Ok(())
 }
 
@@ -5936,10 +6797,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma gui plan .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma gui plan .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -6104,6 +6965,54 @@ fn main() {
         }
         return;
     }
+    if arguments.get(1).map(String::as_str) == Some("render") {
+        let command = arguments.get(2).map(String::as_str);
+        let result = match command {
+            Some("plan") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                render_release_plan_contents(&directory).map(|plan| print!("{plan}"))
+            }
+            Some("inspect") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                inspect_render_release_plan(&directory)
+            }
+            Some("api-plan") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                render_api_plan_contents(&directory).map(|plan| print!("{plan}"))
+            }
+            Some("deploy") | Some("rollback") => {
+                if !(5..=6).contains(&arguments.len())
+                    || arguments.get(3).map(String::as_str) != Some("--confirm")
+                {
+                    eprintln!("{}", usage(Locale::English));
+                    process::exit(64);
+                }
+                let directory = arguments
+                    .get(5)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_render_api_request(command.unwrap(), &directory, &arguments[4])
+            }
+            _ => {
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        if let Err(error) = result {
+            eprintln!("{error}");
+            process::exit(1);
+        }
+        return;
+    }
     if arguments.get(1).map(String::as_str) == Some("gui") {
         let command = arguments.get(2).map(String::as_str);
         let result = match command {
@@ -6120,6 +7029,34 @@ fn main() {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("."));
                 run_gui_plan(&directory)
+            }
+            _ => {
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        if let Err(error) = result {
+            eprintln!("{error}");
+            process::exit(1);
+        }
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("android") {
+        let command = arguments.get(2).map(String::as_str);
+        let result = match command {
+            Some("inspect") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_android_inspect(&directory)
+            }
+            Some("plan") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_android_build_plan(&directory)
             }
             _ => {
                 eprintln!("{}", usage(Locale::English));
@@ -6885,6 +7822,152 @@ mod tests {
     }
 
     #[test]
+    fn render_release_manifest_requires_an_immutable_git_link_and_safe_identifiers() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let manifest = parse_render_release_manifest(&format!(
+            "[render]\nversion = \"1\"\nmode = \"git-linked\"\nservice = \"srv-abc123\"\nrepository = \"OfficialBiohub/padma-lang\"\nbranch = \"main\"\ncommit = \"{commit}\"\nrollback_deploy = \"dep-abc123\"\n"
+        ))
+        .unwrap();
+        assert_eq!(manifest.repository, "OfficialBiohub/padma-lang");
+        assert_eq!(manifest.commit, commit);
+        assert_eq!(manifest.rollback_deploy.as_deref(), Some("dep-abc123"));
+
+        let unsafe_branch = parse_render_release_manifest(
+            "[render]\nversion = \"1\"\nmode = \"git-linked\"\nservice = \"srv-abc123\"\nrepository = \"OfficialBiohub/padma-lang\"\nbranch = \"../production\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n",
+        )
+        .unwrap_err();
+        assert!(unsafe_branch.starts_with("P1048"));
+
+        let mutable_commit = parse_render_release_manifest(
+            "[render]\nversion = \"1\"\nmode = \"git-linked\"\nservice = \"srv-abc123\"\nrepository = \"OfficialBiohub/padma-lang\"\nbranch = \"main\"\ncommit = \"main\"\n",
+        )
+        .unwrap_err();
+        assert!(mutable_commit.starts_with("P1048"));
+    }
+
+    #[test]
+    fn render_release_plan_is_capability_gated_and_dashboard_confirmed_only() {
+        let root = module_fixture_dir("render-release-plan");
+        fs::create_dir_all(root.join("deploy")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"render-demo\"\nversion = \"0.1.0\"\nentry = \"src/main.pd\"\nlocale = \"en\"\n\n[capabilities]\ndeployment = [\"render\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join("padma-deploy.toml"),
+            "[deployment]\nversion = \"1\"\nentry = \"src/main.pd\"\ntarget = \"static\"\nbase_url = \"https://padma.example\"\nrollback = \"deploy/rollback.json\"\n\n[environment]\nnames = [\"RENDER_API_TOKEN\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-render.toml"),
+            "[render]\nversion = \"1\"\nmode = \"git-linked\"\nservice = \"srv-abc123\"\nrepository = \"OfficialBiohub/padma-lang\"\nbranch = \"main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\nrollback_deploy = \"dep-abc123\"\n",
+        )
+        .unwrap();
+        let plan = render_release_plan_contents(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert!(plan.contains("\"mode\": \"git-linked-release-plan\""));
+        assert!(plan.contains("\"method\": \"render-dashboard\""));
+        assert!(plan.contains("\"providerApi\": \"disabled\""));
+        assert!(plan.contains("\"remoteMutation\": \"disabled\""));
+        assert!(plan.contains("sha256:"));
+    }
+
+    #[test]
+    fn render_api_plan_binds_immutable_commit_without_reading_or_exposing_token_value() {
+        let root = module_fixture_dir("render-api-plan");
+        fs::create_dir_all(root.join("deploy")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"render-api-demo\"\nversion = \"0.1.0\"\nentry = \"src/main.pd\"\nlocale = \"en\"\n\n[capabilities]\ndeployment = [\"render\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join("padma-deploy.toml"),
+            "[deployment]\nversion = \"1\"\nentry = \"src/main.pd\"\ntarget = \"static\"\nbase_url = \"https://padma.example\"\nrollback = \"deploy/rollback.json\"\n\n[environment]\nnames = [\"RENDER_API_TOKEN\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-render.toml"),
+            format!("[render]\nversion = \"1\"\nmode = \"git-linked\"\nservice = \"srv-abc123\"\nrepository = \"OfficialBiohub/padma-lang\"\nbranch = \"main\"\ncommit = \"{commit}\"\nrollback_deploy = \"dep-abc123\"\n"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-render-api.toml"),
+            format!("[render_api]\nversion = \"1\"\nservice = \"srv-abc123\"\ntoken_env = \"RENDER_API_TOKEN\"\ncommit = \"{commit}\"\nclear_cache = \"do_not_clear\"\nrollback_deploy = \"dep-abc123\"\n"),
+        )
+        .unwrap();
+
+        let plan = render_api_plan_contents(&root).unwrap();
+        let confirmation = serde_json::from_str::<JsonValue>(&plan).unwrap()["deploy"]
+            ["confirmationToken"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let confirmation_error =
+            run_render_api_request("deploy", &root, "wrong-confirmation").unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(plan.contains("\"commitId\": \"0123456789abcdef0123456789abcdef01234567\""));
+        assert!(plan.contains("\"value\": \"not-read-in-planning-mode\""));
+        assert!(!plan.contains("RENDER_API_TOKEN_VALUE"));
+        assert!(confirmation.starts_with("render-"));
+        assert!(confirmation_error.contains("confirmation token does not match"));
+    }
+
+    #[test]
+    fn render_api_manifest_rejects_unsafe_credentials_mutable_commit_and_unknown_fields() {
+        let unsafe_token = parse_render_api_manifest(
+            "[render_api]\nversion = \"1\"\nservice = \"srv-abc123\"\ntoken_env = \"token;curl\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\nclear_cache = \"do_not_clear\"\nrollback_deploy = \"dep-abc123\"\n",
+        )
+        .unwrap_err();
+        assert!(unsafe_token.starts_with("P1048"));
+
+        let mutable_commit = parse_render_api_manifest(
+            "[render_api]\nversion = \"1\"\nservice = \"srv-abc123\"\ntoken_env = \"RENDER_API_TOKEN\"\ncommit = \"main\"\nclear_cache = \"do_not_clear\"\nrollback_deploy = \"dep-abc123\"\n",
+        )
+        .unwrap_err();
+        assert!(mutable_commit.starts_with("P1048"));
+
+        let unknown_field = parse_render_api_manifest(
+            "[render_api]\nversion = \"1\"\nservice = \"srv-abc123\"\ntoken_env = \"RENDER_API_TOKEN\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\nclear_cache = \"do_not_clear\"\nrollback_deploy = \"dep-abc123\"\ncommand = \"curl\"\n",
+        )
+        .unwrap_err();
+        assert!(unknown_field.starts_with("P1048"));
+    }
+
+    #[test]
+    fn render_release_plan_rejects_projects_without_render_capability() {
+        let root = module_fixture_dir("render-capability-denied");
+        fs::create_dir_all(root.join("deploy")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"render-denied\"\nversion = \"0.1.0\"\nentry = \"src/main.pd\"\nlocale = \"en\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join("padma-deploy.toml"),
+            "[deployment]\nversion = \"1\"\nentry = \"src/main.pd\"\ntarget = \"static\"\nbase_url = \"https://padma.example\"\nrollback = \"deploy/rollback.json\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-render.toml"),
+            "[render]\nversion = \"1\"\nmode = \"git-linked\"\nservice = \"srv-abc123\"\nrepository = \"OfficialBiohub/padma-lang\"\nbranch = \"main\"\ncommit = \"0123456789abcdef0123456789abcdef01234567\"\n",
+        )
+        .unwrap();
+        let error = render_release_plan_contents(&root).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("deployment:render"));
+    }
+
+    #[test]
     fn gui_manifest_accepts_a_scoped_static_renderer_and_emits_read_only_plan() {
         let root = module_fixture_dir("gui-valid");
         fs::create_dir_all(root.join("ui/assets")).unwrap();
@@ -6920,6 +8003,66 @@ mod tests {
         assert!(plan.contains("\"rendererLaunch\": \"disabled\""));
         assert!(plan.contains("\"network\": \"disabled\""));
         assert!(plan.contains("sha256:"));
+    }
+
+    #[test]
+    fn android_build_plan_binds_gui_integrity_without_building_or_reading_signing_key() {
+        let root = module_fixture_dir("android-build-plan");
+        fs::create_dir_all(root.join("ui/assets")).unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"android-demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\ngui = [\"local\"]\nandroid = [\"plan\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join("padma-gui.toml"),
+            "[gui]\nversion = 1\nbackend = \"html-static\"\nentry = \"ui/index.html\"\nassets = \"ui/assets\"\ntitle = \"Padma Android\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("ui/index.html"),
+            "<!doctype html><title>Padma</title>\n",
+        )
+        .unwrap();
+        fs::write(root.join("ui/assets/logo.svg"), "<svg/>\n").unwrap();
+        fs::write(
+            root.join("padma-android.toml"),
+            "[android]\nversion = \"1\"\napplication_id = \"org.officialbiohub.padma\"\nmin_sdk = 26\ntarget_sdk = 35\nartifact = \"build/padma-release.apk\"\nsigning_key_env = \"PADMA_ANDROID_SIGNING_KEY\"\nsigning_cert_sha256 = \"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[permissions]\nnames = [\"android.permission.INTERNET\", \"android.permission.POST_NOTIFICATIONS\"]\n",
+        )
+        .unwrap();
+
+        let inspect = android_inspect_contents(&root).unwrap();
+        let plan = android_build_plan_contents(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert!(inspect.contains("org.officialbiohub.padma"));
+        assert!(plan.contains("\"apkBuild\": \"disabled\""));
+        assert!(plan.contains("\"keyRead\": \"disabled\""));
+        assert!(plan.contains("\"automaticGrant\": \"disabled\""));
+        assert!(plan.contains("\"install\": \"disabled\""));
+        assert!(plan.contains("\"android.permission.POST_NOTIFICATIONS\""));
+        assert!(plan.contains("sha256:"));
+    }
+
+    #[test]
+    fn android_build_manifest_rejects_unsafe_permissions_commands_and_artifact_paths() {
+        let unsafe_permission = parse_android_build_manifest(
+            "[android]\nversion = \"1\"\napplication_id = \"org.padma.demo\"\nmin_sdk = 26\ntarget_sdk = 35\nartifact = \"build/demo.apk\"\nsigning_key_env = \"PADMA_SIGNING_KEY\"\nsigning_cert_sha256 = \"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[permissions]\nnames = [\"android.permission.MANAGE_EXTERNAL_STORAGE\"]\n",
+        )
+        .unwrap_err();
+        assert!(unsafe_permission.starts_with("P1049"));
+
+        let unsafe_artifact = parse_android_build_manifest(
+            "[android]\nversion = \"1\"\napplication_id = \"org.padma.demo\"\nmin_sdk = 26\ntarget_sdk = 35\nartifact = \"../demo.apk\"\nsigning_key_env = \"PADMA_SIGNING_KEY\"\nsigning_cert_sha256 = \"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n",
+        )
+        .unwrap_err();
+        assert!(unsafe_artifact.starts_with("P1049"));
+
+        let native_command = parse_android_build_manifest(
+            "[android]\nversion = \"1\"\napplication_id = \"org.padma.demo\"\nmin_sdk = 26\ntarget_sdk = 35\nartifact = \"build/demo.apk\"\nsigning_key_env = \"PADMA_SIGNING_KEY\"\nsigning_cert_sha256 = \"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nadb_command = \"install\"\n",
+        )
+        .unwrap_err();
+        assert!(native_command.starts_with("P1049"));
     }
 
     #[test]

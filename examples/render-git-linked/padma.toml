@@ -1,9 +1,8 @@
 [padma]
-name = "padma-gui-static"
+name = "padma-render-git-linked"
 version = "0.1.0"
 entry = "src/main.pd"
 locale = "bn"
 
 [capabilities]
-gui = ["local"]
-android = ["plan"]
+deployment = ["render"]

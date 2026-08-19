@@ -152,10 +152,16 @@
   - [x] Define and validate a versioned deployment manifest with project-relative entry, bounded target metadata, public base URL policy, and approved environment-variable names only.
   - [x] Add deterministic `padma deploy plan` and read-only `padma deploy inspect` commands; never transmit credentials, build artifacts, or application data.
   - [x] Record a source digest and rollback descriptor in a local deployment plan, while rejecting secret values, shell commands, remote URLs, and unbounded providers.
+  - [ ] Define provider-specific remote deployment contracts, isolated artifact build inputs, credential handoff by environment-variable name only, a user-visible confirmation token, and rollback execution semantics before enabling any remote action.
+  - [ ] Add an explicit adapter boundary that cannot send artifacts, invoke provider APIs, or execute a rollback unless a reviewed provider module and an interactive user confirmation path are present.
+  - [x] Add a Render Git-linked release contract that validates repository identity, branch, immutable commit SHA, service identifier, build isolation record, and provider dashboard confirmation without sending a provider request.
+  - [x] Add a Render API adapter plan that validates only a Render service ID, a token environment-variable name, an immutable commit SHA, confirmation token, and explicit rollback deploy ID; no secret value or provider request is permitted in planning mode.
 - [ ] Define GUI/mobile application bridges as opt-in adapter contracts with no automatic Android permission elevation, then validate a small Termux-friendly renderer example.
   - [x] Define a versioned project-scoped renderer manifest with fixed local backends, project-relative entry and asset roots, and no executable hooks or native permission requests.
   - [x] Add read-only `padma gui inspect` and deterministic `padma gui plan` commands that validate manifest constraints without starting a renderer or device process.
   - [x] Add a small Termux-friendly HTML renderer example and negative tests for unsafe paths, unknown backends, external URLs, permissions, and command injection fields.
+  - [ ] Define separately reviewed Android adapter contracts for explicit permission declarations, signed APK build inputs, device transport consent, and native-code boundaries; do not add automatic elevation, APK build, device control, or native-code execution to the core CLI.
+  - [x] Add a read-only Android build-plan manifest validator with approved Android permissions, signed artifact metadata fields, and strict rejection of install, ADB/device commands, native hooks, and automatic permission elevation.
 - [ ] Add provider-neutral AI workflow helpers for structured responses and local model adapters, bounded by explicit network/process capabilities and never executing model output as code.
 - [ ] Add bounded browser automation using reviewed action plans, domain allowlists, confirmation before side effects, redaction of sensitive fields, and no CAPTCHA or login bypass behavior.
 - [ ] Add Bangla-English diagnostics, negative security tests, Termux copy-paste examples, and release gates for every M9 component before marking it stable.

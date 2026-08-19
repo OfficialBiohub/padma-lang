@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "provider": "render",
+  "notice": "এটি rollback metadata; Padma এখনো কোনো provider API call বা rollback চালায় না।"
+}

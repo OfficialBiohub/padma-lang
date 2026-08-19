@@ -1,0 +1,11 @@
+[android]
+version = "1"
+application_id = "org.officialbiohub.padma.gui"
+min_sdk = 26
+target_sdk = 35
+artifact = "build/padma-gui-release.apk"
+signing_key_env = "PADMA_ANDROID_SIGNING_KEY"
+signing_cert_sha256 = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+[permissions]
+names = ["android.permission.POST_NOTIFICATIONS"]

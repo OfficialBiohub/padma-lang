@@ -1,0 +1,9 @@
+[deployment]
+version = "1"
+entry = "src/main.pd"
+target = "static"
+base_url = "https://replace-with-your-domain.example"
+rollback = "deploy/rollback.json"
+
+[environment]
+names = ["RENDER_API_TOKEN"]
