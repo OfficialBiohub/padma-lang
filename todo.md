@@ -145,6 +145,9 @@
   - [x] Add deterministic local dependency resolution and a canonical `padma.lock` writer that records resolved source paths and digests.
   - [x] Add an opt-in project-local cache inspector with strict path scope and digest verification; do not download or execute packages automatically.
 - [ ] Add an optional identity/session layer using password hashing, signed expiring sessions, CSRF controls, secure cookie defaults, and secret names sourced from environment variables rather than source code.
+  - [ ] Define a local, deterministic password-record validation and creation contract that stores an algorithm-tagged salted digest, never a plaintext password.
+  - [ ] Add signed, versioned, expiring session envelopes and explicit verification without a network auth server or default cookie emission.
+  - [ ] Define CSRF token and secure-cookie construction policy as pure, reviewed helpers; reject secret literals and untrusted environment-variable names.
 - [ ] Add deployment manifests and dry-run adapters before any remote deployment integration; preserve clear ownership, secret isolation, build reproducibility, rollback metadata, and explicit user confirmation for remote actions.
 - [ ] Define GUI/mobile application bridges as opt-in adapter contracts with no automatic Android permission elevation, then validate a small Termux-friendly renderer example.
 - [ ] Add provider-neutral AI workflow helpers for structured responses and local model adapters, bounded by explicit network/process capabilities and never executing model output as code.

@@ -250,6 +250,12 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1042") => ("SQLite did not return valid JSON rows".into(), Some("Check the database file and Padma-managed records.".into())),
         (Locale::Bangla, "P1043") => (format!("SQLite কাজের নিরাপদ সীমা অতিক্রম করেছে: `{detail}`"), Some("request ছোট করুন এবং কাজটি 5 সেকেন্ডের মধ্যে শেষ করুন।".into())),
         (Locale::English, "P1043") => (format!("SQLite work exceeded a safety limit: `{detail}`"), Some("Reduce the request and make it complete within 5 seconds.".into())),
+        (Locale::Bangla, "P1045") => (format!("identity data নিরাপদ বা সঠিক নয়: `{detail}`"), Some("password record, subject, অথবা environment secret name পরীক্ষা করুন; plaintext secret source code-এ লিখবেন না।".into())),
+        (Locale::English, "P1045") => (format!("Identity data is unsafe or invalid: `{detail}`"), Some("Check the password record, subject, or environment secret name; do not place plaintext secrets in source code.".into())),
+        (Locale::Bangla, "P1046") => ("session token সঠিক নয়, পরিবর্তিত হয়েছে, অথবা মেয়াদ শেষ হয়েছে".into(), Some("আবার sign in করে একটি নতুন session নিন।".into())),
+        (Locale::English, "P1046") => ("The session token is invalid, modified, or expired".into(), Some("Sign in again to obtain a new session.".into())),
+        (Locale::Bangla, "P1047") => ("নিরাপদ random data তৈরি করা যায়নি".into(), Some("Termux OS entropy source পরীক্ষা করে আবার চেষ্টা করুন।".into())),
+        (Locale::English, "P1047") => ("Could not create secure random data".into(), Some("Check the Termux OS entropy source and try again.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -2873,6 +2879,178 @@ impl Interpreter {
                         String::from_utf8_lossy(&result.stdout).to_string(),
                     ));
                 }
+                if name == "auth.password_hash" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    if matches!(&arguments[0], Expr::Literal(Value::String(_), _)) {
+                        return Err(error_for(
+                            self.locale,
+                            "P1045",
+                            *position,
+                            "password literal",
+                        ));
+                    }
+                    let password = self.evaluate(&arguments[0])?;
+                    let password = expect_string(&password, self.locale, *position, "password")?;
+                    return Ok(Value::String(password_record_from_secret(
+                        password,
+                        self.locale,
+                        *position,
+                    )?));
+                }
+                if name == "auth.password_verify" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    if matches!(&arguments[1], Expr::Literal(Value::String(_), _)) {
+                        return Err(error_for(
+                            self.locale,
+                            "P1045",
+                            *position,
+                            "password literal",
+                        ));
+                    }
+                    let record = self.evaluate(&arguments[0])?;
+                    let record = expect_string(&record, self.locale, *position, "password record")?;
+                    let password = self.evaluate(&arguments[1])?;
+                    let password = expect_string(&password, self.locale, *position, "password")?;
+                    return Ok(Value::Boolean(verify_password_record(record, password)));
+                }
+                if name == "auth.session_issue" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    let subject = self.evaluate(&arguments[0])?;
+                    let subject =
+                        expect_string(&subject, self.locale, *position, "session subject")?;
+                    let environment_name = self.evaluate(&arguments[1])?;
+                    let environment_name = expect_string(
+                        &environment_name,
+                        self.locale,
+                        *position,
+                        "session secret environment name",
+                    )?;
+                    let ttl = self.evaluate(&arguments[2])?;
+                    let Value::Number(ttl) = ttl else {
+                        return Err(error_for(
+                            self.locale,
+                            "P1010",
+                            *position,
+                            "session lifetime",
+                        ));
+                    };
+                    if ttl.fract() != 0.0 || ttl < 0.0 {
+                        return Err(error_for(
+                            self.locale,
+                            "P1045",
+                            *position,
+                            "session lifetime",
+                        ));
+                    }
+                    let secret =
+                        session_secret_from_environment(environment_name, self.locale, *position)?;
+                    return Ok(Value::String(issue_signed_session(
+                        subject,
+                        &secret,
+                        ttl as u64,
+                        self.locale,
+                        *position,
+                    )?));
+                }
+                if name == "auth.session_verify" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    let environment_name = self.evaluate(&arguments[0])?;
+                    let environment_name = expect_string(
+                        &environment_name,
+                        self.locale,
+                        *position,
+                        "session secret environment name",
+                    )?;
+                    let token = self.evaluate(&arguments[1])?;
+                    let token = expect_string(&token, self.locale, *position, "session token")?;
+                    let secret =
+                        session_secret_from_environment(environment_name, self.locale, *position)?;
+                    let (subject, expires_at) =
+                        verify_signed_session(token, &secret).ok_or_else(|| {
+                            error_for(self.locale, "P1046", *position, "session token")
+                        })?;
+                    let mut session = BTreeMap::new();
+                    session.insert("subject".to_string(), Value::String(subject));
+                    session.insert("expires_at".to_string(), Value::Number(expires_at as f64));
+                    session.insert("version".to_string(), Value::Number(1.0));
+                    return Ok(Value::Map(session));
+                }
+                if name == "auth.csrf_token" {
+                    if !arguments.is_empty() {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    let token = secure_random_bytes(32)
+                        .map_err(|_| error_for(self.locale, "P1047", *position, "CSRF token"))?;
+                    return Ok(Value::String(hex_encode(&token)));
+                }
+                if name == "auth.csrf_verify" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    let expected = self.evaluate(&arguments[0])?;
+                    let expected = expect_string(&expected, self.locale, *position, "CSRF token")?;
+                    let provided = self.evaluate(&arguments[1])?;
+                    let provided = expect_string(&provided, self.locale, *position, "CSRF token")?;
+                    if expected.len() > 128 || provided.len() > 128 {
+                        return Err(error_for(
+                            self.locale,
+                            "P1045",
+                            *position,
+                            "CSRF token size",
+                        ));
+                    }
+                    return Ok(Value::Boolean(constant_time_eq(
+                        expected.as_bytes(),
+                        provided.as_bytes(),
+                    )));
+                }
+                if name == "auth.cookie" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("identity:local", name, *position)?;
+                    let cookie_name = self.evaluate(&arguments[0])?;
+                    let cookie_name =
+                        expect_string(&cookie_name, self.locale, *position, "cookie name")?;
+                    let token = self.evaluate(&arguments[1])?;
+                    let token = expect_string(&token, self.locale, *position, "session token")?;
+                    let environment_name = self.evaluate(&arguments[2])?;
+                    let environment_name = expect_string(
+                        &environment_name,
+                        self.locale,
+                        *position,
+                        "session secret environment name",
+                    )?;
+                    if !is_safe_cookie_name(cookie_name) || token.contains(['\r', '\n', ';']) {
+                        return Err(error_for(self.locale, "P1045", *position, "cookie"));
+                    }
+                    let secret =
+                        session_secret_from_environment(environment_name, self.locale, *position)?;
+                    let (_, expires_at) =
+                        verify_signed_session(token, &secret).ok_or_else(|| {
+                            error_for(self.locale, "P1046", *position, "session token")
+                        })?;
+                    let now = unix_seconds()
+                        .map_err(|_| error_for(self.locale, "P1047", *position, "system clock"))?;
+                    return Ok(Value::String(format!(
+                        "{cookie_name}={token}; Path=/; Max-Age={}; HttpOnly; Secure; SameSite=Strict",
+                        expires_at.saturating_sub(now)
+                    )));
+                }
                 if name == "db.version" {
                     if arguments.len() != 1 {
                         return Err(error_for(self.locale, "P1009", *position, name));
@@ -3702,6 +3880,9 @@ const PROCESS_CAPABILITIES: [&str; 7] = [
 const LINT_RULES: [&str; 3] = ["L1001", "L1002", "L1003"];
 const PACKAGE_MAX_FILES: usize = 256;
 const PACKAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+const AUTH_PBKDF2_ITERATIONS: u32 = 600_000;
+const AUTH_PASSWORD_MAX_BYTES: usize = 1_024;
+const AUTH_SESSION_MAX_SECONDS: u64 = 86_400;
 
 fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
     let value = value.trim();
@@ -3735,6 +3916,7 @@ fn capability_grants_for_field(
 ) -> Result<BTreeSet<String>, String> {
     let permitted: &[&str] = match key {
         "database" => &["sqlite"],
+        "identity" => &["local"],
         "filesystem" => &["read", "write"],
         "network" => &["http", "ai"],
         "server" => &["local"],
@@ -4048,7 +4230,7 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
     })
 }
 
-fn sha256_hex(input: &[u8]) -> String {
+fn sha256_bytes(input: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
         0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
@@ -4124,7 +4306,238 @@ fn sha256_hex(input: &[u8]) -> String {
             *target = target.wrapping_add(value);
         }
     }
-    hash.iter().map(|word| format!("{word:08x}")).collect()
+    let mut output = [0u8; 32];
+    for (index, word) in hash.iter().enumerate() {
+        output[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    output
+}
+
+fn hex_encode(input: &[u8]) -> String {
+    input.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hex_decode(input: &str) -> Option<Vec<u8>> {
+    if input.len() % 2 != 0 || !input.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..input.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&input[index..index + 2], 16).ok())
+        .collect()
+}
+
+fn sha256_hex(input: &[u8]) -> String {
+    hex_encode(&sha256_bytes(input))
+}
+
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut normalized = [0u8; 64];
+    if key.len() > normalized.len() {
+        normalized[..32].copy_from_slice(&sha256_bytes(key));
+    } else {
+        normalized[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = [0u8; 64];
+    let mut outer = [0u8; 64];
+    for index in 0..64 {
+        inner[index] = normalized[index] ^ 0x36;
+        outer[index] = normalized[index] ^ 0x5c;
+    }
+    let mut inner_input = Vec::with_capacity(64 + message.len());
+    inner_input.extend_from_slice(&inner);
+    inner_input.extend_from_slice(message);
+    let inner_hash = sha256_bytes(&inner_input);
+    let mut outer_input = Vec::with_capacity(96);
+    outer_input.extend_from_slice(&outer);
+    outer_input.extend_from_slice(&inner_hash);
+    sha256_bytes(&outer_input)
+}
+
+fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32) -> [u8; 32] {
+    let mut block = Vec::with_capacity(salt.len() + 4);
+    block.extend_from_slice(salt);
+    block.extend_from_slice(&1u32.to_be_bytes());
+    let mut value = hmac_sha256(password, &block);
+    let mut derived = value;
+    for _ in 1..iterations {
+        value = hmac_sha256(password, &value);
+        for index in 0..derived.len() {
+            derived[index] ^= value[index];
+        }
+    }
+    derived
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        let left_byte = left.get(index).copied().unwrap_or(0);
+        let right_byte = right.get(index).copied().unwrap_or(0);
+        difference |= usize::from(left_byte ^ right_byte);
+    }
+    difference == 0
+}
+
+fn secure_random_bytes(length: usize) -> Result<Vec<u8>, ()> {
+    let mut random = vec![0u8; length];
+    fs::File::open("/dev/urandom")
+        .and_then(|mut source| source.read_exact(&mut random))
+        .map_err(|_| ())?;
+    Ok(random)
+}
+
+fn is_safe_secret_environment_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            0 => byte.is_ascii_uppercase(),
+            _ => byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_',
+        })
+}
+
+fn session_secret_from_environment(
+    environment_name: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<u8>, PadmaError> {
+    if !is_safe_secret_environment_name(environment_name) {
+        return Err(error_for(
+            locale,
+            "P1045",
+            position,
+            "session secret environment name",
+        ));
+    }
+    let secret = env::var(environment_name)
+        .map_err(|_| error_for(locale, "P1045", position, environment_name))?;
+    if secret.len() < 32 || secret.len() > 4_096 {
+        return Err(error_for(locale, "P1045", position, environment_name));
+    }
+    Ok(secret.into_bytes())
+}
+
+fn password_record_from_secret(
+    password: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    if password.is_empty() || password.len() > AUTH_PASSWORD_MAX_BYTES || password.contains('\0') {
+        return Err(error_for(locale, "P1045", position, "password"));
+    }
+    let salt = secure_random_bytes(16)
+        .map_err(|_| error_for(locale, "P1047", position, "password salt"))?;
+    let digest = pbkdf2_sha256(password.as_bytes(), &salt, AUTH_PBKDF2_ITERATIONS);
+    Ok(format!(
+        "$padma-pbkdf2-sha256${}${}${}",
+        AUTH_PBKDF2_ITERATIONS,
+        hex_encode(&salt),
+        hex_encode(&digest)
+    ))
+}
+
+fn verify_password_record(record: &str, password: &str) -> bool {
+    let pieces = record.split('$').collect::<Vec<_>>();
+    if pieces.len() != 5
+        || pieces[0] != ""
+        || pieces[1] != "padma-pbkdf2-sha256"
+        || pieces[2] != AUTH_PBKDF2_ITERATIONS.to_string()
+        || password.is_empty()
+        || password.len() > AUTH_PASSWORD_MAX_BYTES
+    {
+        return false;
+    }
+    let Some(salt) = hex_decode(pieces[3]) else {
+        return false;
+    };
+    let Some(expected) = hex_decode(pieces[4]) else {
+        return false;
+    };
+    salt.len() == 16
+        && expected.len() == 32
+        && constant_time_eq(
+            &pbkdf2_sha256(password.as_bytes(), &salt, AUTH_PBKDF2_ITERATIONS),
+            &expected,
+        )
+}
+
+fn unix_seconds() -> Result<u64, ()> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| ())
+}
+
+fn is_safe_session_subject(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && !value.chars().any(|character| character.is_control())
+}
+
+fn issue_signed_session(
+    subject: &str,
+    secret: &[u8],
+    ttl_seconds: u64,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    if !is_safe_session_subject(subject) || !(60..=AUTH_SESSION_MAX_SECONDS).contains(&ttl_seconds)
+    {
+        return Err(error_for(
+            locale,
+            "P1045",
+            position,
+            "session subject or lifetime",
+        ));
+    }
+    let expires_at = unix_seconds()
+        .map_err(|_| error_for(locale, "P1047", position, "system clock"))?
+        .checked_add(ttl_seconds)
+        .ok_or_else(|| error_for(locale, "P1045", position, "session lifetime"))?;
+    let nonce = secure_random_bytes(16)
+        .map_err(|_| error_for(locale, "P1047", position, "session nonce"))?;
+    let unsigned = format!(
+        "v1.{}.{}.{}",
+        hex_encode(subject.as_bytes()),
+        expires_at,
+        hex_encode(&nonce)
+    );
+    Ok(format!(
+        "{unsigned}.{}",
+        hex_encode(&hmac_sha256(secret, unsigned.as_bytes()))
+    ))
+}
+
+fn verify_signed_session(token: &str, secret: &[u8]) -> Option<(String, u64)> {
+    let pieces = token.split('.').collect::<Vec<_>>();
+    if pieces.len() != 5 || pieces[0] != "v1" || pieces[2].is_empty() || pieces[3].len() != 32 {
+        return None;
+    }
+    let expires_at = pieces[2].parse::<u64>().ok()?;
+    if unix_seconds().ok()? >= expires_at {
+        return None;
+    }
+    let subject = String::from_utf8(hex_decode(pieces[1])?).ok()?;
+    if !is_safe_session_subject(&subject) || hex_decode(pieces[3])?.len() != 16 {
+        return None;
+    }
+    let signature = hex_decode(pieces[4])?;
+    if signature.len() != 32 {
+        return None;
+    }
+    let unsigned = pieces[..4].join(".");
+    if !constant_time_eq(&signature, &hmac_sha256(secret, unsigned.as_bytes())) {
+        return None;
+    }
+    Some((subject, expires_at))
+}
+
+fn is_safe_cookie_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 fn safe_project_relative_path(value: &str) -> Result<PathBuf, String> {
@@ -4210,7 +4623,7 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\ndatabase = []\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\nserver = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\ndatabase = []\nidentity = []\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\nserver = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
             manifest.name, manifest.version, manifest.entry, manifest.locale
         ),
     )
@@ -4434,18 +4847,22 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "range" | "পরিসর" | "media.download" => Some((1, 2)),
         "process.run" => Some((1, usize::MAX)),
         "bridge.call" => Some((3, 3)),
+        "auth.session_issue" | "auth.cookie" => Some((3, 3)),
+        "auth.password_verify" | "auth.session_verify" | "auth.csrf_verify" => Some((2, 2)),
         "db.get" | "db.delete" | "db.list" => Some((3, 3)),
         "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
         | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
         | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
-        | "math.abs" | "math.round" | "math.floor" | "math.ceil" => Some((1, 1)),
+        | "math.abs" | "math.round" | "math.floor" | "math.ceil" | "auth.password_hash" => {
+            Some((1, 1))
+        }
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" => Some((2, 2)),
         "text.replace" => Some((3, 3)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
-        "time.now" => Some((0, 0)),
+        "time.now" | "auth.csrf_token" => Some((0, 0)),
         _ => None,
     }
 }
@@ -6492,5 +6909,63 @@ mod tests {
         let cycle_error = run_file(&module_a).unwrap_err();
         fs::remove_dir_all(directory).unwrap();
         assert_eq!(cycle_error.code, "P1024");
+    }
+
+    #[test]
+    fn identity_primitives_are_capability_gated_and_preserve_security_boundaries() {
+        let position = Position::new(1, 1);
+        let record =
+            password_record_from_secret("test-password", Locale::English, position).unwrap();
+        assert!(record.starts_with("$padma-pbkdf2-sha256$600000$"));
+        assert!(verify_password_record(&record, "test-password"));
+        assert!(!verify_password_record(&record, "wrong-password"));
+
+        let secret = b"0123456789abcdef0123456789abcdef";
+        let token = issue_signed_session("rafi", secret, 60, Locale::English, position).unwrap();
+        assert_eq!(
+            verify_signed_session(&token, secret).map(|value| value.0),
+            Some("rafi".into())
+        );
+        assert!(verify_signed_session(&token, b"abcdef0123456789abcdef0123456789").is_none());
+        assert!(constant_time_eq(b"csrf", b"csrf"));
+        assert!(!constant_time_eq(b"csrf", b"other"));
+
+        let missing_capability = compile("print auth.csrf_token()\n").unwrap();
+        let mut denied = Interpreter::new(missing_capability.1);
+        assert_eq!(denied.run(&missing_capability.0).unwrap_err().code, "P1034");
+
+        let root = module_fixture_dir("identity-runtime");
+        let environment_name = "PADMA_IDENTITY_TEST_SESSION_SECRET";
+        unsafe { env::set_var(environment_name, "0123456789abcdef0123456789abcdef") };
+        let source = format!(
+            "let token = auth.session_issue(\"rafi\", \"{environment_name}\", 60)\nprint auth.session_verify(\"{environment_name}\", token)[\"subject\"]\nlet csrf = auth.csrf_token()\nprint auth.csrf_verify(csrf, csrf)\nprint auth.cookie(\"padma_session\", token, \"{environment_name}\")\n"
+        );
+        let (program, locale) = compile(&source).unwrap();
+        let mut permitted = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::from(["identity:local".into()]),
+        );
+        permitted.run(&program).unwrap();
+        assert_eq!(permitted.output[0], "rafi");
+        assert_eq!(permitted.output[1], "true");
+        assert!(permitted.output[2].contains("HttpOnly; Secure; SameSite=Strict"));
+
+        let (literal_program, literal_locale) =
+            compile("auth.password_hash(\"hard-coded\")\n").unwrap();
+        let mut literal = Interpreter::with_project_capabilities(
+            literal_locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::from(["identity:local".into()]),
+        );
+        assert_eq!(literal.run(&literal_program).unwrap_err().code, "P1045");
+        unsafe { env::remove_var(environment_name) };
+        fs::remove_dir_all(root).unwrap();
+
+        assert_eq!(static_builtin_arity("auth.password_hash"), Some((1, 1)));
+        assert_eq!(static_builtin_arity("auth.session_issue"), Some((3, 3)));
+        assert_eq!(static_builtin_arity("auth.csrf_token"), Some((0, 0)));
     }
 }
