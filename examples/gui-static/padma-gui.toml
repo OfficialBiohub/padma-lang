@@ -1,0 +1,6 @@
+[gui]
+version = 1
+backend = "html-static"
+entry = "ui/index.html"
+assets = "ui/assets"
+title = "Padma GUI পরিকল্পনা"

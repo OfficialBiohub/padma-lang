@@ -3883,6 +3883,15 @@ struct DeploymentManifest {
     rollback: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GuiManifest {
+    version: u32,
+    backend: String,
+    entry: String,
+    assets: String,
+    title: String,
+}
+
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
@@ -3894,6 +3903,8 @@ const AUTH_PASSWORD_MAX_BYTES: usize = 1_024;
 const AUTH_SESSION_MAX_SECONDS: u64 = 86_400;
 const DEPLOYMENT_MAX_SOURCE_FILES: usize = 256;
 const DEPLOYMENT_MAX_SOURCE_BYTES: usize = 5 * 1024 * 1024;
+const GUI_MAX_SOURCE_FILES: usize = 256;
+const GUI_MAX_SOURCE_BYTES: usize = 5 * 1024 * 1024;
 
 fn parse_manifest_string_list(value: &str, line_number: usize) -> Result<Vec<String>, String> {
     let value = value.trim();
@@ -3928,6 +3939,7 @@ fn capability_grants_for_field(
     let permitted: &[&str] = match key {
         "database" => &["sqlite"],
         "identity" => &["local"],
+        "gui" => &["local"],
         "filesystem" => &["read", "write"],
         "network" => &["http", "ai"],
         "server" => &["local"],
@@ -4232,6 +4244,123 @@ fn parse_deployment_manifest(source: &str) -> Result<DeploymentManifest, String>
         base_url,
         environment_names,
         rollback,
+    })
+}
+
+fn safe_gui_relative_path(value: &str, extension: Option<&str>) -> Result<PathBuf, String> {
+    let path = Path::new(value);
+    let forbidden_location = value.to_ascii_lowercase().contains("@downloads")
+        || value.contains(':')
+        || value.contains('\\')
+        || value.contains("://");
+    if value.is_empty()
+        || value.len() > 512
+        || forbidden_location
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir
+                    | std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+        || extension.is_some_and(|extension| !value.ends_with(extension))
+    {
+        return Err(
+            "P1047: GUI path must be a project-relative local path without `..`, URLs, `@downloads`, or symlink indirection"
+                .to_string(),
+        );
+    }
+    Ok(path.to_path_buf())
+}
+
+fn parse_gui_manifest(source: &str) -> Result<GuiManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "gui" {
+                return Err(format!(
+                    "P1047: unsupported GUI manifest section `{section}` on line {}",
+                    line_number + 1
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("P1047: expected `key = value` on line {}", line_number + 1))?;
+        let key = key.trim();
+        if section != "gui" || !matches!(key, "version" | "backend" | "entry" | "assets" | "title")
+        {
+            return Err(format!(
+                "P1047: unsupported GUI manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+        let value = raw_value.trim();
+        let value = if key == "version" {
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(format!(
+                    "P1047: GUI version must be an unsigned integer on line {}",
+                    line_number + 1
+                ));
+            }
+            value.to_string()
+        } else {
+            if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
+                return Err(format!(
+                    "P1047: GUI values must be quoted strings on line {}",
+                    line_number + 1
+                ));
+            }
+            value[1..value.len() - 1].to_string()
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(format!(
+                "P1047: duplicate GUI manifest field `{key}` on line {}",
+                line_number + 1
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("P1047: missing `[gui]` field `{key}`"))
+    };
+    let version = required("version")?
+        .parse::<u32>()
+        .map_err(|_| "P1047: GUI version must be an unsigned integer".to_string())?;
+    if version != 1 {
+        return Err("P1047: GUI manifest version must be `1`".to_string());
+    }
+    let backend = required("backend")?;
+    if backend != "html-static" {
+        return Err("P1047: GUI backend must be `html-static`".to_string());
+    }
+    let entry = required("entry")?;
+    safe_gui_relative_path(&entry, Some(".html"))?;
+    let assets = required("assets")?;
+    safe_gui_relative_path(&assets, None)?;
+    let title = required("title")?;
+    if title.chars().count() > 128 || title.chars().any(char::is_control) {
+        return Err("P1047: GUI title must contain at most 128 printable characters".to_string());
+    }
+    Ok(GuiManifest {
+        version,
+        backend,
+        entry,
+        assets,
+        title,
     })
 }
 
@@ -4776,7 +4905,7 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\ndatabase = []\nidentity = []\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\nserver = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\ndatabase = []\nidentity = []\ngui = []\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\nserver = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
             manifest.name, manifest.version, manifest.entry, manifest.locale
         ),
     )
@@ -5093,6 +5222,182 @@ fn inspect_deployment_plan(directory: &Path) -> Result<(), String> {
     let plan = deployment_plan_contents(directory)?;
     println!("Padma deployment plan (inspection only)");
     println!("{plan}");
+    Ok(())
+}
+
+fn gui_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("gui:local") {
+        return Ok(());
+    }
+    let locale = if project.locale == "bn" {
+        Locale::Bangla
+    } else {
+        Locale::English
+    };
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "gui:local");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_gui_manifest(
+    directory: &Path,
+) -> Result<(ProjectManifest, GuiManifest, PathBuf, PathBuf), String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1047: cannot resolve project root: {error}"))?;
+    let (project, _) = load_project_manifest(&root)?;
+    gui_capability_error(&project)?;
+    let manifest_path = root.join("padma-gui.toml");
+    let manifest_metadata = fs::symlink_metadata(&manifest_path)
+        .map_err(|error| format!("P1047: cannot inspect GUI manifest: {error}"))?;
+    if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+        return Err("P1047: GUI manifest must be a regular project file".to_string());
+    }
+    let source = fs::read_to_string(&manifest_path)
+        .map_err(|error| format!("P1047: cannot read GUI manifest: {error}"))?;
+    let manifest = parse_gui_manifest(&source)?;
+
+    let entry = root.join(safe_gui_relative_path(&manifest.entry, Some(".html"))?);
+    let entry_metadata = fs::symlink_metadata(&entry)
+        .map_err(|error| format!("P1047: cannot inspect GUI entry: {error}"))?;
+    if entry_metadata.file_type().is_symlink() || !entry_metadata.is_file() {
+        return Err("P1047: GUI entry must be a regular project `.html` file".to_string());
+    }
+    let entry = fs::canonicalize(&entry)
+        .map_err(|error| format!("P1047: cannot resolve GUI entry: {error}"))?;
+    if !entry.starts_with(&root) {
+        return Err("P1047: GUI entry escaped the project root".to_string());
+    }
+
+    let assets = root.join(safe_gui_relative_path(&manifest.assets, None)?);
+    let assets_metadata = fs::symlink_metadata(&assets)
+        .map_err(|error| format!("P1047: cannot inspect GUI assets: {error}"))?;
+    if assets_metadata.file_type().is_symlink() || !assets_metadata.is_dir() {
+        return Err("P1047: GUI assets must be a regular project directory".to_string());
+    }
+    let assets = fs::canonicalize(&assets)
+        .map_err(|error| format!("P1047: cannot resolve GUI assets: {error}"))?;
+    if !assets.starts_with(&root) {
+        return Err("P1047: GUI assets escaped the project root".to_string());
+    }
+    Ok((project, manifest, entry, assets))
+}
+
+fn gui_source_digest(directory: &Path, entry: &Path, assets: &Path) -> Result<String, String> {
+    fn insert_file(
+        root: &Path,
+        path: &Path,
+        entries: &mut BTreeMap<String, Vec<u8>>,
+        total: &mut usize,
+    ) -> Result<(), String> {
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| "P1047: GUI source escaped the project root".to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if entries.contains_key(&relative) {
+            return Ok(());
+        }
+        let contents = fs::read(path)
+            .map_err(|error| format!("P1047: cannot read GUI source `{relative}`: {error}"))?;
+        *total = total.saturating_add(contents.len());
+        if entries.len() >= GUI_MAX_SOURCE_FILES || *total > GUI_MAX_SOURCE_BYTES {
+            return Err("P1047: GUI source exceeds file or byte limit".to_string());
+        }
+        entries.insert(relative, contents);
+        Ok(())
+    }
+
+    fn collect(
+        root: &Path,
+        current: &Path,
+        entries: &mut BTreeMap<String, Vec<u8>>,
+        total: &mut usize,
+    ) -> Result<(), String> {
+        for item in fs::read_dir(current)
+            .map_err(|error| format!("P1047: cannot inspect GUI assets: {error}"))?
+        {
+            let item = item.map_err(|error| format!("P1047: cannot read GUI asset: {error}"))?;
+            let path = item.path();
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("P1047: cannot inspect GUI asset: {error}"))?;
+            if metadata.file_type().is_symlink() {
+                return Err("P1047: symbolic links are not allowed in GUI assets".to_string());
+            }
+            if metadata.is_dir() {
+                collect(root, &path, entries, total)?;
+            } else if metadata.is_file() {
+                insert_file(root, &path, entries, total)?;
+            } else {
+                return Err("P1047: GUI assets may contain only regular files".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1047: cannot resolve project root: {error}"))?;
+    let mut entries = BTreeMap::new();
+    let mut total = 0usize;
+    collect(&root, assets, &mut entries, &mut total)?;
+    insert_file(&root, entry, &mut entries, &mut total)?;
+    let mut canonical = Vec::new();
+    for (path, contents) in entries {
+        canonical.extend_from_slice(path.as_bytes());
+        canonical.push(0);
+        canonical.extend_from_slice(&(contents.len() as u64).to_be_bytes());
+        canonical.extend_from_slice(&contents);
+    }
+    Ok(format!("sha256:{}", sha256_hex(&canonical)))
+}
+
+fn gui_inspect_contents(directory: &Path) -> Result<String, String> {
+    let (_project, manifest, _entry, _assets) = load_gui_manifest(directory)?;
+    Ok(format!(
+        "Padma GUI renderer manifest (read-only)\n  version: {}\n  backend: {}\n  entry: {}\n  assets: {}\n  title: {}\n",
+        manifest.version, manifest.backend, manifest.entry, manifest.assets, manifest.title
+    ))
+}
+
+fn gui_plan_contents(directory: &Path) -> Result<String, String> {
+    let (project, manifest, entry, assets) = load_gui_manifest(directory)?;
+    let source_digest = gui_source_digest(directory, &entry, &assets)?;
+    serde_json::to_string_pretty(&serde_json::json!({
+        "guiPlanVersion": 1,
+        "mode": "read-only",
+        "project": {"name": project.name, "version": project.version},
+        "renderer": {
+            "backend": manifest.backend,
+            "entry": manifest.entry,
+            "assets": manifest.assets,
+            "title": manifest.title
+        },
+        "sourceDigest": source_digest,
+        "network": "disabled",
+        "rendererLaunch": "disabled",
+        "javascriptExecution": "not-requested",
+        "nativeBridge": "disabled",
+        "androidPermissions": "not-requested"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1047: cannot encode GUI plan: {error}"))
+}
+
+fn run_gui_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", gui_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_gui_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", gui_plan_contents(directory)?);
     Ok(())
 }
 
@@ -5631,10 +5936,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma gui plan .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma gui plan .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -5787,6 +6092,34 @@ fn main() {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("."));
                 inspect_deployment_plan(&directory)
+            }
+            _ => {
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        if let Err(error) = result {
+            eprintln!("{error}");
+            process::exit(1);
+        }
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("gui") {
+        let command = arguments.get(2).map(String::as_str);
+        let result = match command {
+            Some("inspect") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_gui_inspect(&directory)
+            }
+            Some("plan") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_gui_plan(&directory)
             }
             _ => {
                 eprintln!("{}", usage(Locale::English));
@@ -6549,6 +6882,88 @@ mod tests {
         assert!(plan.contains("PADMA_DEPLOY_TOKEN"));
         assert!(!plan.contains("token=value"));
         assert!(plan.contains("sha256:"));
+    }
+
+    #[test]
+    fn gui_manifest_accepts_a_scoped_static_renderer_and_emits_read_only_plan() {
+        let root = module_fixture_dir("gui-valid");
+        fs::create_dir_all(root.join("ui/assets")).unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"gui-demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\ngui = [\"local\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join("padma-gui.toml"),
+            "[gui]\nversion = 1\nbackend = \"html-static\"\nentry = \"ui/index.html\"\nassets = \"ui/assets\"\ntitle = \"Padma GUI\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("ui/index.html"),
+            "<!doctype html><title>Padma</title>\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("ui/assets/logo.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"/>\n",
+        )
+        .unwrap();
+
+        let manifest =
+            parse_gui_manifest(&fs::read_to_string(root.join("padma-gui.toml")).unwrap()).unwrap();
+        assert_eq!(manifest.backend, "html-static");
+        let inspect = gui_inspect_contents(&root).unwrap();
+        let plan = gui_plan_contents(&root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert!(inspect.contains("read-only"));
+        assert!(plan.contains("\"rendererLaunch\": \"disabled\""));
+        assert!(plan.contains("\"network\": \"disabled\""));
+        assert!(plan.contains("sha256:"));
+    }
+
+    #[test]
+    fn gui_manifest_rejects_unknown_backend_and_unsafe_paths() {
+        let invalid_backend = parse_gui_manifest(
+            "[gui]\nversion = 1\nbackend = \"webview\"\nentry = \"ui/index.html\"\nassets = \"ui/assets\"\ntitle = \"Padma\"\n",
+        )
+        .unwrap_err();
+        assert!(invalid_backend.starts_with("P1047"));
+        assert!(invalid_backend.contains("html-static"));
+
+        let escaped_entry = parse_gui_manifest(
+            "[gui]\nversion = 1\nbackend = \"html-static\"\nentry = \"../outside.html\"\nassets = \"ui/assets\"\ntitle = \"Padma\"\n",
+        )
+        .unwrap_err();
+        assert!(escaped_entry.starts_with("P1047"));
+
+        let external_assets = parse_gui_manifest(
+            "[gui]\nversion = 1\nbackend = \"html-static\"\nentry = \"ui/index.html\"\nassets = \"https://example.test/assets\"\ntitle = \"Padma\"\n",
+        )
+        .unwrap_err();
+        assert!(external_assets.starts_with("P1047"));
+    }
+
+    #[test]
+    fn gui_manifest_rejects_missing_or_non_regular_entry_files() {
+        let root = module_fixture_dir("gui-missing-entry");
+        fs::create_dir_all(root.join("ui/assets")).unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"gui-demo\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"bn\"\n\n[capabilities]\ngui = [\"local\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("main.pd"), "দেখাও \"নিরাপদ\"\n").unwrap();
+        fs::write(
+            root.join("padma-gui.toml"),
+            "[gui]\nversion = 1\nbackend = \"html-static\"\nentry = \"ui/missing.html\"\nassets = \"ui/assets\"\ntitle = \"Padma\"\n",
+        )
+        .unwrap();
+
+        let error = gui_inspect_contents(&root).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(error.starts_with("P1047"));
+        assert!(error.contains("GUI entry"));
     }
 
     #[test]

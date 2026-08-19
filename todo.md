@@ -153,6 +153,9 @@
   - [x] Add deterministic `padma deploy plan` and read-only `padma deploy inspect` commands; never transmit credentials, build artifacts, or application data.
   - [x] Record a source digest and rollback descriptor in a local deployment plan, while rejecting secret values, shell commands, remote URLs, and unbounded providers.
 - [ ] Define GUI/mobile application bridges as opt-in adapter contracts with no automatic Android permission elevation, then validate a small Termux-friendly renderer example.
+  - [x] Define a versioned project-scoped renderer manifest with fixed local backends, project-relative entry and asset roots, and no executable hooks or native permission requests.
+  - [x] Add read-only `padma gui inspect` and deterministic `padma gui plan` commands that validate manifest constraints without starting a renderer or device process.
+  - [x] Add a small Termux-friendly HTML renderer example and negative tests for unsafe paths, unknown backends, external URLs, permissions, and command injection fields.
 - [ ] Add provider-neutral AI workflow helpers for structured responses and local model adapters, bounded by explicit network/process capabilities and never executing model output as code.
 - [ ] Add bounded browser automation using reviewed action plans, domain allowlists, confirmation before side effects, redaction of sensitive fields, and no CAPTCHA or login bypass behavior.
 - [ ] Add Bangla-English diagnostics, negative security tests, Termux copy-paste examples, and release gates for every M9 component before marking it stable.

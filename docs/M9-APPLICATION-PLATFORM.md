@@ -37,6 +37,10 @@ The first deployment increment is inspection-only. A versioned `padma-deploy.tom
 
 Secrets are referenced only by validated uppercase environment-variable names and are not emitted by plan/inspect output. OWASP warns against hardcoding plaintext secrets in source or configuration and recommends least-privilege, standardized secret handling; a source digest and a redacted plan let a Termux user review deployment intent without exposing credential material.[11] OpenSSF’s source-management guidance similarly emphasizes restrictive CI/CD action trust and least-privilege defaults; Padma’s initial plan therefore has no workflow execution authority at all.[12]
 
+The first GUI/mobile increment is a read-only, project-local `padma-gui.toml` contract—not a device runtime. It permits only a fixed `html-static` renderer backend with project-root HTML and asset paths, and rejects arbitrary WebView settings, native bridges, permissions, external URLs, command hooks, plugins, and symlink escapes. This avoids exposing Android local files through broad WebView file access and avoids injecting a native object into untrusted WebView frames.[13] [14]
+
+Future Android adapters must remain separately reviewed. They must use least permissions, restrict navigated web content by allowlist, prohibit wildcard message origins, and require explicit confirmation before sensitive native actions. Android’s security guidance recommends scoped asset access instead of unrestricted local file URLs and warns against WebView JavaScript interfaces for untrusted content.[13] [14]
+
 No M9 component silently opens a public port, uses a secret literal from Padma source, launches a background daemon, installs an unverified package, or performs browser side effects. Each external action is capability-gated and surfaces a localized diagnostic.
 
 ## Termux operation boundary
@@ -57,3 +61,5 @@ No M9 component silently opens a public port, uses a secret literal from Padma s
 [10]: https://slsa.dev/ "SLSA — Supply-chain Levels for Software Artifacts"
 [11]: https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html "OWASP Secrets Management Cheat Sheet"
 [12]: https://best.openssf.org/SCM-BestPractices/ "OpenSSF Source Code Management Platform Configuration Best Practices"
+[13]: https://developer.android.com/privacy-and-security/risks/webview-unsafe-file-inclusion "Android: WebViews – Unsafe File Inclusion"
+[14]: https://developer.android.com/privacy-and-security/risks/insecure-webview-native-bridges "Android: WebView – Native bridges"
