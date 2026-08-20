@@ -221,7 +221,7 @@
   - [x] Document that training execution needs a separately installed, reviewed local backend and cannot silently use remote compute, device controls, or unbounded data collection.
 - [x] Define a separately reviewed browser navigation action-adapter contract that begins only after an exact-origin local plan and a fresh, user-visible confirmation for each bounded navigation session.
   - [x] Implement a local-only browser confirmation-session manifest and `inspect|plan` command that bind one exact existing browser plan digest to one GET-only reviewed destination without starting a browser.
-  - [x] Require a short-lived, single-use, locally generated confirmation challenge; reject missing, expired, reused, model-supplied, or plan/origin-mismatched confirmations without reading a profile, cookie, credential, or environment value.
+  - [x] Reserve a short-lived, single-use, locally generated confirmation-challenge contract for a future runner; the current descriptor marks model-supplied approval rejected and issues no token, while reading no profile, cookie, credential, or environment value.
   - [x] Emit deterministic redacted session descriptors with `browser: "not-started"`, `network: "disabled"`, `dns: "disabled"`, `session: "awaiting-confirmation"`, cancellation support, and no action executor.
   - [ ] Begin browser action-adapter implementation only after the preceding AI tool and training planning layers pass their security regression tests and repository verification.
   - [ ] Preserve exact HTTPS origin matching, revalidate each redirect and destination immediately before use, prohibit login credential capture, CAPTCHA bypass, JavaScript injection, cookie/profile exfiltration, unsafe downloads, and automatic form submission.
