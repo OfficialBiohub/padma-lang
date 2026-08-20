@@ -52,12 +52,14 @@ padma
 তারপর prompt-এ লিখুন:
 
 ```text
+padma> ১ + ১
+2
 padma> দেখাও ২ + ৩
 5
 padma> বের হও
 ```
 
-বা `exit()` লিখুন। Multi-line `যদি`, `যতক্ষণ`, বা `ফাংশন` লিখলে closing `}` পর্যন্ত `...` prompt দেখা যাবে।
+Python-এর `>>> 1 + 1`-এর মতো Padma-তেও এক লাইনের bare expression লিখলে তার non-null result দেখা যাবে। `দেখাও`/`print` এখনও explicit output statement; আর `ধরি x = ...`-এর মতো declaration অথবা `null` কোনো output দেখায় না। Multi-line `যদি`, `যতক্ষণ`, বা `ফাংশন` লিখলে closing `}` পর্যন্ত `...` prompt দেখা যাবে।
 
 ## ৪. Run করার আগে ভুল ধরুন
 

@@ -9389,6 +9389,27 @@ fn brace_delta(line: &str) -> isize {
     delta
 }
 
+fn run_repl_submission(
+    interpreter: &mut Interpreter,
+    source: &str,
+) -> Result<Vec<String>, PadmaError> {
+    let (program, locale) = compile(source)?;
+    interpreter.locale = locale;
+    interpreter.return_value = None;
+    let output_start = interpreter.output.len();
+
+    if let [Stmt::Expression { value }] = program.as_slice() {
+        let value = interpreter.evaluate(value)?;
+        return Ok(match value {
+            Value::Null => Vec::new(),
+            value => vec![value.to_string()],
+        });
+    }
+
+    interpreter.run(&program)?;
+    Ok(interpreter.output[output_start..].to_vec())
+}
+
 fn repl() {
     println!("Padma 0.1.0 (Bangla-English hybrid programming language)");
     println!("Interactive shell: help, copyright, credits, license; exit with exit() or বের হও.");
@@ -9417,7 +9438,7 @@ fn repl() {
                 println!("  credits              show project credits");
                 println!("  license              show the MIT license notice");
                 println!("  exit() / বের হও      leave the shell");
-                println!("Examples: দেখাও ২ + ৩ | print \"hello\" | ধরি x = 10");
+                println!("Examples: ১ + ১ | দেখাও ২ + ৩ | print \"hello\" | ধরি x = 10");
                 continue;
             }
             (true, "copyright" | "copyright()") => {
@@ -9445,18 +9466,10 @@ fn repl() {
         }
         let source = std::mem::take(&mut buffer);
         open_braces = 0;
-        match compile(&source) {
-            Ok((program, locale)) => {
-                interpreter.locale = locale;
-                interpreter.return_value = None;
-                let output_start = interpreter.output.len();
-                match interpreter.run(&program) {
-                    Ok(()) => {
-                        for output in &interpreter.output[output_start..] {
-                            println!("{output}");
-                        }
-                    }
-                    Err(error) => eprintln!("{}", error.message),
+        match run_repl_submission(&mut interpreter, &source) {
+            Ok(output) => {
+                for output in output {
+                    println!("{output}");
                 }
             }
             Err(error) => eprintln!("{}", error.message),
@@ -10629,6 +10642,40 @@ mod tests {
         assert_eq!(brace_delta("if true {"), 1);
         assert_eq!(brace_delta("print \"{not a block}\" # }"), 0);
         assert_eq!(brace_delta("}"), -1);
+    }
+
+    #[test]
+    fn repl_displays_bare_expression_values_without_changing_statement_output() {
+        let mut interpreter = Interpreter::new(Locale::Bangla);
+
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "1 + 1\n").unwrap(),
+            vec!["2"]
+        );
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "২ + 3\n").unwrap(),
+            vec!["5"]
+        );
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "কিছুইনা\n").unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "ধরি সংখ্যা = ৭\n").unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "সংখ্যা + 1\n").unwrap(),
+            vec!["8"]
+        );
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "দেখাও ২ + ৩\n").unwrap(),
+            vec!["5"]
+        );
+
+        let error = run_repl_submission(&mut interpreter, "অজানা\n").unwrap_err();
+        assert_eq!(error.code, "P1007");
+        assert!(error.message.contains("কোনো variable পাওয়া যায়নি"));
     }
 
     #[test]

@@ -122,6 +122,8 @@
 - [x] Match Python-style interactive shell banner and `padma>` prompt behavior.
 - [x] Support REPL commands `help`, `copyright`, `credits`, `license`, `exit()`, `quit()`, and `বের হও`.
 - [x] Add persistent REPL examples and command-level smoke tests.
+- [x] Make the interactive REPL display a non-null bare expression value, matching Python-style `1 + 1` evaluation while preserving explicit `print`/`দেখাও` statements and localized errors.
+  - [x] Add English, Bangla-digit, mixed-expression, null-result, assignment, and error-path REPL regression tests.
 - [x] Improve installer PATH detection and print actionable recovery instructions.
 - [ ] Submit and track the Padma recipe in an actual Termux package repository before claiming `pkg install padma -y` availability.
 - [ ] Add safe interoperability paths for Python, JavaScript/TypeScript, C, and shell instead of claiming automatic conversion.
