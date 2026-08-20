@@ -1,0 +1,8 @@
+[padma]
+name = "browser-handoff"
+version = "0.1.0"
+entry = "main.pd"
+locale = "en"
+
+[capabilities]
+browser = ["plan", "confirm-plan", "handoff"]

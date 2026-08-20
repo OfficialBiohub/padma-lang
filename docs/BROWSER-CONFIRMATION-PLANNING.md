@@ -1,8 +1,8 @@
 # Browser confirmation-session planning foundation
 
-Padma provides a **local confirmation-session planning foundation** that binds one already reviewed browser-plan destination to a short, future confirmation session descriptor. It does not issue a confirmation token, start a browser, resolve DNS, contact a URL, or create an execution session.
+Padma provides a **local confirmation-session planning foundation** that binds one already reviewed browser-plan destination to a short, future confirmation session descriptor. It does not issue a confirmation token, start a browser, resolve DNS, contact a URL, or create an execution session by itself.
 
-> **A confirmation-session plan is not confirmation and is not navigation authority.** `browser:confirm-plan` only validates two local manifest files and produces a deterministic descriptor with `session: "awaiting-confirmation"`. No browser action runner exists in this release.
+> **A confirmation-session plan is not confirmation and is not broad navigation authority.** `browser:confirm-plan` only validates two local manifest files and produces a deterministic descriptor with `session: "awaiting-confirmation"`. The separately gated Android Browser Handoff may use that descriptor only after a fresh terminal `OPEN` confirmation to pass one reviewed URL to the fixed visible Termux opener; it does not control the browser.
 
 ## Project setup
 
@@ -91,7 +91,7 @@ Form submission, post/message, upload, download, account modification, deletion,
 | `P1060` | The confirmation manifest is missing, malformed, unsafe, uses an unsupported mode, has an invalid/mismatched digest, or references an unavailable reviewed URL. Raw sensitive values are not echoed. |
 | `P1061` | Browser confirmation or navigation execution is unavailable or prohibited in this Padma version. |
 
-For a credential-free Termux example, see [`examples/browser-confirmation-plan`](../examples/browser-confirmation-plan/). The accompanying [browser navigation action-adapter design](BROWSER-ACTION-ADAPTER-DESIGN.md) lists the additional runner, revalidation, confirmation, cancellation, and audit requirements required before any future browser action implementation can be reviewed.
+For a credential-free planning example, see [`examples/browser-confirmation-plan`](../examples/browser-confirmation-plan/). For the implemented visible one-URL Termux handoff, see [`ANDROID-BROWSER-HANDOFF.md`](ANDROID-BROWSER-HANDOFF.md) and [`examples/browser-handoff`](../examples/browser-handoff/). The accompanying [browser navigation action-adapter design](BROWSER-ACTION-ADAPTER-DESIGN.md) lists the additional session, revalidation, cancellation, and audit requirements required before any future browser-control implementation can be reviewed.
 
 ## References
 

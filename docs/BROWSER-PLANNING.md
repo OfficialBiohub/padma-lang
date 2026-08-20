@@ -117,3 +117,5 @@ padma .
 ```
 
 The final command prints a local reminder that no browser will be launched. The two planning commands only read `padma.toml` and `padma-browser.toml` beneath the project directory.
+
+For Android/Termux users who need to visibly open one already reviewed URL, the separately granted [Android Browser Handoff](ANDROID-BROWSER-HANDOFF.md) can pass exactly one digest-bound destination to the fixed local `termux-open-url` command after the user types `OPEN`. It is a user-visible handoff, not browser control, and it does not change the no-network/no-DNS behavior of `padma browser inspect|plan`.

@@ -56,6 +56,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1059 | AI training execution boundary | A training execution path is unavailable or prohibited in this Padma version. Only local `padma ai training inspect` and `padma ai training plan` commands are supported. |
 | P1060 | Browser confirmation planning safety | `padma-browser-confirm.toml` is missing, malformed, unsafe, uses an unsupported mode, has an invalid/mismatched digest, or references an unavailable reviewed URL. Raw sensitive values are not echoed. |
 | P1061 | Browser confirmation and navigation boundary | A browser confirmation or navigation execution path is unavailable or prohibited in this Padma version. Only local `padma browser confirm inspect` and `padma browser confirm plan` commands are supported. |
+| P1062 | Android Browser Handoff safety | A handoff request is unsafe, unsupported, not freshly confirmed, or no longer bound to one reviewed browser-plan destination. Raw URLs and approval input are not echoed. |
+| P1063 | Android Browser Handoff runtime | The fixed local `termux-open-url` opener was unavailable or failed. Padma does not retry, use another executable, or fall back to a remote browser service. |
 
 ## Example
 

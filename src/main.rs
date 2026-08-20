@@ -288,6 +288,10 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1060") => (format!("Browser confirmation-session manifest is unsafe or invalid: `{detail}`"), Some("Use a reviewed browser-plan digest, navigation index, and short-lived local confirmation policy.".into())),
         (Locale::Bangla, "P1061") => ("browser confirmation বা navigation action এই Padma version-এ নিষিদ্ধ".into(), Some("শুধু `padma browser confirm inspect` অথবা `padma browser confirm plan` ব্যবহার করুন; browser, DNS, network, cookie, বা credential ব্যবহার হবে না।".into())),
         (Locale::English, "P1061") => ("Browser confirmation or navigation action is prohibited in this Padma version".into(), Some("Use only `padma browser confirm inspect` or `padma browser confirm plan`; no browser, DNS, network, cookie, or credential will be used.".into())),
+        (Locale::Bangla, "P1062") => ("Android browser handoff অনুমোদিত হয়নি বা বাতিল করা হয়েছে".into(), Some("reviewed URL দেখে foreground terminal-এ `OPEN` লিখুন; অন্য কোনো input browser খুলবে না।".into())),
+        (Locale::English, "P1062") => ("Android Browser Handoff was not authorized or was cancelled".into(), Some("Review the URL and type `OPEN` in the foreground terminal; no other input will open a browser.".into())),
+        (Locale::Bangla, "P1063") => ("Android browser handoff চালু করা যায়নি".into(), Some("Termux-এর `termux-open-url` command আছে কি না পরীক্ষা করুন; Padma retry বা fallback browser service ব্যবহার করবে না।".into())),
+        (Locale::English, "P1063") => ("Could not start Android Browser Handoff".into(), Some("Check that Termux provides `termux-open-url`; Padma will not retry or use a fallback browser service.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -4214,7 +4218,7 @@ fn capability_grants_for_field(
         "identity" => &["local"],
         "gui" => &["local"],
         "android" => &["plan"],
-        "browser" => &["plan", "confirm-plan"],
+        "browser" => &["plan", "confirm-plan", "handoff"],
         "ai" => &["tools", "training-plan"],
         "deployment" => &["render"],
         "filesystem" => &["read", "write"],
@@ -5386,6 +5390,10 @@ fn browser_confirmation_error(locale: Locale, code: &'static str, detail: &str) 
         ),
         None => format!("{}: {}", diagnostic.code, diagnostic.message),
     }
+}
+
+fn browser_handoff_error(locale: Locale, code: &'static str, detail: &str) -> String {
+    browser_confirmation_error(locale, code, detail)
 }
 
 fn parse_browser_quoted_value(
@@ -8310,6 +8318,25 @@ fn browser_confirmation_capability_error(project: &ProjectManifest) -> Result<()
     ))
 }
 
+fn browser_handoff_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("browser:handoff") {
+        return Ok(());
+    }
+    let locale = browser_plan_locale(project);
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "browser:handoff");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
 fn load_browser_confirmation_plan_manifest(
     directory: &Path,
 ) -> Result<
@@ -8429,6 +8456,84 @@ fn run_browser_confirmation_inspect(directory: &Path) -> Result<(), String> {
 
 fn run_browser_confirmation_plan(directory: &Path) -> Result<(), String> {
     print!("{}", browser_confirmation_plan_json(directory)?);
+    Ok(())
+}
+
+fn load_browser_handoff_destination(directory: &Path) -> Result<(Locale, String), String> {
+    let (project, browser_plan, confirmation) = load_browser_confirmation_plan_manifest(directory)?;
+    browser_handoff_capability_error(&project)?;
+    let destination = browser_plan.navigation_urls[confirmation.navigation_index - 1].clone();
+    Ok((browser_plan_locale(&project), destination))
+}
+
+fn browser_handoff_confirmation_prompt(locale: Locale, destination: &str) -> Result<(), String> {
+    let message = match locale {
+        Locale::Bangla => format!(
+            "\nAndroid Browser Handoff\nReview করা HTTPS URL: {destination}\nPadma শুধু Android browser-এ এই URL handoff করবে। এটি cookie, credential, profile, page content, JavaScript, form, post, upload, download, বা payment access করবে না।\nBrowser খুলতে OPEN লিখে Enter চাপুন; বাতিল করতে অন্য কিছু লিখুন: "
+        ),
+        Locale::English => format!(
+            "\nAndroid Browser Handoff\nReviewed HTTPS URL: {destination}\nPadma will only hand this URL to the Android browser. It will not access cookies, credentials, profiles, page content, JavaScript, forms, posts, uploads, downloads, or payments.\nType OPEN and press Enter to open the browser; type anything else to cancel: "
+        ),
+    };
+    print!("{message}");
+    io::stdout().flush().map_err(|_| {
+        browser_handoff_error(locale, "P1062", "cannot display confirmation prompt")
+    })?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer).map_err(|_| {
+        browser_handoff_error(locale, "P1062", "cannot read foreground confirmation")
+    })?;
+    if answer.trim() != "OPEN" {
+        return Err(browser_handoff_error(
+            locale,
+            "P1062",
+            "confirmation was not granted",
+        ));
+    }
+    Ok(())
+}
+
+fn termux_browser_handoff_command(path: &std::ffi::OsStr, destination: &str) -> process::Command {
+    let mut command = process::Command::new("termux-open-url");
+    command
+        .env_clear()
+        .env("PATH", path)
+        .stdin(process::Stdio::null())
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .arg(destination);
+    command
+}
+
+fn termux_browser_handoff(destination: &str, locale: Locale) -> Result<(), String> {
+    let path = env::var_os("PATH").ok_or_else(|| {
+        browser_handoff_error(locale, "P1063", "Termux command path is unavailable")
+    })?;
+    let status = termux_browser_handoff_command(&path, destination)
+        .status()
+        .map_err(|_| browser_handoff_error(locale, "P1063", "termux-open-url is unavailable"))?;
+    if !status.success() {
+        return Err(browser_handoff_error(
+            locale,
+            "P1063",
+            "termux-open-url returned a failure status",
+        ));
+    }
+    Ok(())
+}
+
+fn run_browser_handoff(directory: &Path) -> Result<(), String> {
+    let (locale, destination) = load_browser_handoff_destination(directory)?;
+    browser_handoff_confirmation_prompt(locale, &destination)?;
+    termux_browser_handoff(&destination, locale)?;
+    match locale {
+        Locale::Bangla => println!(
+            "Android browser handoff অনুরোধ করা হয়েছে। Padma browser content, cookie, credential, বা profile দেখতে বা নিয়ন্ত্রণ করতে পারে না।"
+        ),
+        Locale::English => println!(
+            "Android Browser Handoff was requested. Padma cannot view or control browser content, cookies, credentials, or profiles."
+        ),
+    }
     Ok(())
 }
 
@@ -9335,6 +9440,13 @@ fn main() {
                     process::exit(64);
                 }
             },
+            Some("handoff") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_browser_handoff(&directory)
+            }
             _ => {
                 eprintln!("{}", usage(Locale::English));
                 process::exit(64);
@@ -11819,6 +11931,67 @@ mod tests {
         assert!(error.contains("no browser, DNS, network, cookie, or credential will be used"));
         assert!(!usage(Locale::English).contains("browser navigate"));
         assert!(!usage(Locale::English).contains("browser confirm execute"));
+    }
+
+    fn write_browser_handoff_project(root: &Path, granted: bool, manifest: &str) {
+        let capabilities = if granted {
+            "browser = [\"plan\", \"confirm-plan\", \"handoff\"]"
+        } else {
+            "browser = [\"plan\", \"confirm-plan\"]"
+        };
+        fs::write(
+            root.join("padma.toml"),
+            format!(
+                "[padma]\nname = \"browser-handoff-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\n{capabilities}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-browser.toml"),
+            valid_browser_plan_manifest(),
+        )
+        .unwrap();
+        fs::write(root.join("padma-browser-confirm.toml"), manifest).unwrap();
+    }
+
+    #[test]
+    fn browser_handoff_requires_a_separate_capability_and_uses_one_reviewed_destination() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let manifest = valid_browser_confirmation_manifest(&browser_plan_digest(&browser_plan));
+
+        let denied_root = module_fixture_dir("browser-handoff-capability-denied");
+        write_browser_handoff_project(&denied_root, false, &manifest);
+        let error = load_browser_handoff_destination(&denied_root).unwrap_err();
+        fs::remove_dir_all(&denied_root).unwrap();
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("browser:handoff"));
+
+        let granted_root = module_fixture_dir("browser-handoff-destination");
+        write_browser_handoff_project(&granted_root, true, &manifest);
+        let (locale, destination) = load_browser_handoff_destination(&granted_root).unwrap();
+        fs::remove_dir_all(&granted_root).unwrap();
+        assert_eq!(locale, Locale::English);
+        assert_eq!(destination, "https://docs.python.org/3/tutorial/");
+    }
+
+    #[test]
+    fn browser_handoff_uses_only_the_fixed_termux_opener_and_reviewed_url_argument() {
+        let command = termux_browser_handoff_command(
+            std::ffi::OsStr::new("/data/data/com.termux/files/usr/bin"),
+            "https://docs.python.org/3/tutorial/",
+        );
+        assert_eq!(
+            command.get_program(),
+            std::ffi::OsStr::new("termux-open-url")
+        );
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("https://docs.python.org/3/tutorial/")]
+        );
+        assert!(command
+            .get_envs()
+            .all(|(key, value)| key == std::ffi::OsStr::new("PATH") && value.is_some()));
     }
 
     fn valid_ai_tool_plan_manifest() -> &'static str {
