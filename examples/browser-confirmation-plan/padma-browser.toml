@@ -1,0 +1,17 @@
+[browser]
+version = "1"
+intent = "navigation-review"
+redirect_policy = "deny"
+max_steps = 2
+
+[allowlist]
+origins = [
+  "https://docs.python.org",
+  "https://www.rust-lang.org"
+]
+
+[navigation]
+urls = [
+  "https://docs.python.org/3/tutorial/",
+  "https://www.rust-lang.org/learn"
+]

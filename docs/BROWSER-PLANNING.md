@@ -49,7 +49,7 @@ padma browser inspect .
 padma browser plan .
 ```
 
-`inspect` prints the heading `Padma browser plan manifest (inspection-only)` followed by the plan. `plan` prints only the JSON descriptor. Neither command launches a browser or contacts a destination.
+`inspect` prints the heading `Padma browser plan manifest (inspection-only)` followed by the plan. `plan` prints only the JSON descriptor. Neither command launches a browser or contacts a destination. The output includes a deterministic `planDigest`, which is the only value a separate local confirmation-session plan may reference.
 
 ## Version 1 manifest rules
 
@@ -79,6 +79,17 @@ The JSON plan preserves navigation order and sorts the reviewed origins. It incl
 | `environmentRead` and `childProcess` | `"disabled"` |
 | `redirectFollowing` and `unsafeActionExecution` | `"disabled"` |
 
+## Local confirmation-session planning
+
+An optional, separate `browser:confirm-plan` capability can bind one reviewed navigation URL to a **local, not-yet-issued** confirmation-session descriptor. It is not browser automation and does not issue an approval token. Add `"confirm-plan"` alongside `"plan"` in `padma.toml`, copy the browser plan’s `planDigest` into `padma-browser-confirm.toml`, then run:
+
+```bash
+padma browser confirm inspect .
+padma browser confirm plan .
+```
+
+The resulting descriptor records `session: "awaiting-confirmation"`, `confirmation.status: "not-issued"`, and all browser/network/profile/action fields as disabled or not-read. It is intended to prevent a future runner from changing a reviewed destination after planning, not to authorize execution. See [Browser confirmation-session planning foundation](BROWSER-CONFIRMATION-PLANNING.md) for the strict manifest, digest binding, and privacy contract.
+
 The manifest has no secret, cookie, header, proxy, selector, JavaScript, or action field. Invalid raw origins and URLs are not repeated in diagnostics, so a malformed value containing userinfo or a token-like string is not copied into output.
 
 ## Diagnostics and future boundary
@@ -89,6 +100,8 @@ The manifest has no secret, cookie, header, proxy, selector, JavaScript, or acti
 | `P1053` | The browser planning manifest is malformed or violates the strict origin/policy contract. |
 | `P1054` | A navigation URL violates the reviewed exact-origin/path policy. |
 | `P1055` | A browser execution path is unavailable or prohibited in this Padma version. |
+| `P1060` | A local browser confirmation-session manifest is missing, unsafe, malformed, or not bound to the reviewed browser plan. |
+| `P1061` | Browser confirmation or navigation execution is unavailable or prohibited in this Padma version. |
 
 Browser execution is deliberately not part of this milestone. A future action adapter would require a new capability, a versioned manifest, destination revalidation immediately before a connection, a fresh visible confirmation for one bounded action, and a separate security review. `browser:plan` has no implicit upgrade path to browsing, login, posting, purchase, upload, download, or any other remote action.
 

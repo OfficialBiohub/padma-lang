@@ -55,6 +55,8 @@ Projects may separately declare `ai = ["training-plan"]` and use `padma ai train
 
 Projects may separately declare `browser = ["plan"]` and use `padma browser inspect|plan` to validate one strict `padma-browser.toml` manifest. These browser commands read only local project files and render a deterministic plan. They do not read environment values, resolve DNS, connect to a network, start a process, launch a browser, fetch a page, access a profile, cookies, or credentials, or execute page/model output.
 
+Projects may additionally declare `browser = ["plan", "confirm-plan"]` and use `padma browser confirm inspect|plan` to bind one exact reviewed browser-plan digest and one existing GET navigation index to a local confirmation-session descriptor. It does not issue a confirmation challenge, start a browser, resolve DNS, connect to a network, read cookies/credentials/profile/environment values, or invoke an action runner.
+
 | Authority | Manifest grant | Current bound | Authoritative contract |
 |---|---|---|---|
 | AI inspection-only workflow | Existing `network = ["ai"]` | One validated HTTPS JSON workflow descriptor, environment variable name only, bounded metadata, and no network/model/output action. | [AI workflow foundation](AI-WORKFLOW.md) |
@@ -62,6 +64,7 @@ Projects may separately declare `browser = ["plan"]` and use `padma browser insp
 | AI tool planning | Existing `ai = ["tools"]` plus each declared tool's existing grant | Local manifest validation and deterministic tool/runbook descriptor only; no tool invocation, agent loop, retry, persistence, audit write, environment read, process, network, or output execution. | [AI tool planning foundation](AI-TOOLS-PLANNING.md) |
 | AI training planning | Existing `ai = ["training-plan"]` | Local manifest validation and deterministic dataset/artifact/resource descriptor only; no dataset read, artifact write, backend process, remote compute, training, environment read, or output execution. | [AI training planning foundation](AI-TRAINING-PLANNING.md) |
 | Browser navigation planning | Existing `browser = ["plan"]` | Local exact-origin/navigation validation only; no DNS, browser launch, page fetch, login, form submit, upload/download, post, or payment. | [Browser planning foundation](BROWSER-PLANNING.md) |
+| Browser confirmation-session planning | Existing `browser = ["plan", "confirm-plan"]` | Local digest/index/session metadata validation only; no issued approval, browser/DNS/network action, cookie/profile/credential/environment read, script, form, post, payment, upload, download, or action runner. | [Browser confirmation-session planning](BROWSER-CONFIRMATION-PLANNING.md) |
 
 The browser design intentionally does not widen `network = ["http"]` or create a broad browser privilege. A future `browser:navigate` adapter, if separately approved, requires a fresh grant, strict destination verification, a bounded operation, and visible user confirmation immediately before navigation. The planning contract reserves no implicit upgrade path from `browser:plan` to any action authority.
 

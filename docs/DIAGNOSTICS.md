@@ -54,6 +54,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1057 | AI tool and agent execution boundary | A tool or agent execution path is unavailable or prohibited in this Padma version. Only local `padma ai tools inspect` and `padma ai tools plan` commands are supported. |
 | P1058 | AI training planning safety | `padma-ai-training.toml` is missing, malformed, unsafe, outside resource limits, or requests an execution mode. Unsafe raw paths are not echoed. |
 | P1059 | AI training execution boundary | A training execution path is unavailable or prohibited in this Padma version. Only local `padma ai training inspect` and `padma ai training plan` commands are supported. |
+| P1060 | Browser confirmation planning safety | `padma-browser-confirm.toml` is missing, malformed, unsafe, uses an unsupported mode, has an invalid/mismatched digest, or references an unavailable reviewed URL. Raw sensitive values are not echoed. |
+| P1061 | Browser confirmation and navigation boundary | A browser confirmation or navigation execution path is unavailable or prohibited in this Padma version. Only local `padma browser confirm inspect` and `padma browser confirm plan` commands are supported. |
 
 ## Example
 

@@ -284,6 +284,10 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1058") => (format!("AI training planning manifest is unsafe or invalid: `{detail}`"), Some("Use project-relative paths, bounded resource limits, and the plan-only policy in padma-ai-training.toml.".into())),
         (Locale::Bangla, "P1059") => ("AI training execution এই Padma version-এ নিষিদ্ধ".into(), Some("শুধু `padma ai training inspect` অথবা `padma ai training plan` ব্যবহার করুন; dataset পড়া বা training চালু হবে না।".into())),
         (Locale::English, "P1059") => ("AI training execution is prohibited in this Padma version".into(), Some("Use only `padma ai training inspect` or `padma ai training plan`; no dataset will be read and no training will be started.".into())),
+        (Locale::Bangla, "P1060") => (format!("browser confirmation-session manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("reviewed browser plan digest, navigation index, এবং short-lived local confirmation policy ব্যবহার করুন।".into())),
+        (Locale::English, "P1060") => (format!("Browser confirmation-session manifest is unsafe or invalid: `{detail}`"), Some("Use a reviewed browser-plan digest, navigation index, and short-lived local confirmation policy.".into())),
+        (Locale::Bangla, "P1061") => ("browser confirmation বা navigation action এই Padma version-এ নিষিদ্ধ".into(), Some("শুধু `padma browser confirm inspect` অথবা `padma browser confirm plan` ব্যবহার করুন; browser, DNS, network, cookie, বা credential ব্যবহার হবে না।".into())),
+        (Locale::English, "P1061") => ("Browser confirmation or navigation action is prohibited in this Padma version".into(), Some("Use only `padma browser confirm inspect` or `padma browser confirm plan`; no browser, DNS, network, cookie, or credential will be used.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -4154,6 +4158,13 @@ struct BrowserPlanManifest {
     navigation_urls: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserConfirmationPlanManifest {
+    browser_plan_digest: String,
+    navigation_index: usize,
+    max_session_seconds: u32,
+}
+
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
@@ -4203,7 +4214,7 @@ fn capability_grants_for_field(
         "identity" => &["local"],
         "gui" => &["local"],
         "android" => &["plan"],
-        "browser" => &["plan"],
+        "browser" => &["plan", "confirm-plan"],
         "ai" => &["tools", "training-plan"],
         "deployment" => &["render"],
         "filesystem" => &["read", "write"],
@@ -5361,6 +5372,22 @@ fn browser_plan_error(locale: Locale, code: &'static str, detail: &str) -> Strin
     }
 }
 
+fn browser_confirmation_error(locale: Locale, code: &'static str, detail: &str) -> String {
+    let diagnostic = error_for(locale, code, Position::new(1, 1), detail);
+    let label = if locale == Locale::Bangla {
+        "পরামর্শ"
+    } else {
+        "help"
+    };
+    match diagnostic.hint {
+        Some(hint) => format!(
+            "{}: {}\n  = {label}: {hint}",
+            diagnostic.code, diagnostic.message
+        ),
+        None => format!("{}: {}", diagnostic.code, diagnostic.message),
+    }
+}
+
 fn parse_browser_quoted_value(
     raw_value: &str,
     locale: Locale,
@@ -5618,6 +5645,174 @@ fn parse_browser_plan_manifest(
         max_steps,
         origins,
         navigation_urls,
+    })
+}
+
+fn browser_plan_digest(manifest: &BrowserPlanManifest) -> String {
+    let mut canonical = Vec::new();
+    canonical.extend_from_slice(b"padma-browser-plan-v1\0");
+    canonical.extend_from_slice(manifest.intent.as_bytes());
+    canonical.push(0);
+    canonical.extend_from_slice(manifest.redirect_policy.as_bytes());
+    canonical.push(0);
+    canonical.extend_from_slice(manifest.max_steps.to_string().as_bytes());
+    canonical.push(0);
+    for origin in &manifest.origins {
+        canonical.extend_from_slice(origin.as_bytes());
+        canonical.push(0);
+    }
+    canonical.push(0);
+    for url in &manifest.navigation_urls {
+        canonical.extend_from_slice(url.as_bytes());
+        canonical.push(0);
+    }
+    format!("sha256:{}", sha256_hex(&canonical))
+}
+
+fn parse_browser_confirmation_quoted_value(
+    raw_value: &str,
+    locale: Locale,
+    line_number: usize,
+) -> Result<String, String> {
+    let raw_value = raw_value.trim();
+    if raw_value.len() < 2
+        || !raw_value.starts_with('"')
+        || !raw_value.ends_with('"')
+        || raw_value[1..raw_value.len() - 1].contains('"')
+    {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            &format!("expected a quoted string on line {line_number}"),
+        ));
+    }
+    Ok(raw_value[1..raw_value.len() - 1].to_string())
+}
+
+fn parse_browser_confirmation_plan_manifest(
+    source: &str,
+    locale: Locale,
+) -> Result<BrowserConfirmationPlanManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "confirmation" {
+                return Err(browser_confirmation_error(
+                    locale,
+                    "P1060",
+                    &format!("unsupported section on line {}", line_number + 1),
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line.split_once('=').ok_or_else(|| {
+            browser_confirmation_error(
+                locale,
+                "P1060",
+                &format!("expected `key = value` on line {}", line_number + 1),
+            )
+        })?;
+        let key = key.trim();
+        if section != "confirmation"
+            || !matches!(
+                key,
+                "version"
+                    | "mode"
+                    | "browser_plan_digest"
+                    | "navigation_index"
+                    | "max_session_seconds"
+            )
+        {
+            return Err(browser_confirmation_error(
+                locale,
+                "P1060",
+                &format!("unsupported field on line {}", line_number + 1),
+            ));
+        }
+        let value = if matches!(key, "navigation_index" | "max_session_seconds") {
+            let value = raw_value.trim();
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(browser_confirmation_error(
+                    locale,
+                    "P1060",
+                    &format!("{key} must be an unsigned integer"),
+                ));
+            }
+            value.to_string()
+        } else {
+            parse_browser_confirmation_quoted_value(raw_value, locale, line_number + 1)?
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(browser_confirmation_error(
+                locale,
+                "P1060",
+                "duplicate confirmation field",
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                browser_confirmation_error(
+                    locale,
+                    "P1060",
+                    &format!("missing [confirmation] field `{key}`"),
+                )
+            })
+    };
+    if required("version")? != "1" || required("mode")? != "local-session-plan" {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            "confirmation policy fields do not match version 1",
+        ));
+    }
+    let browser_plan_digest = required("browser_plan_digest")?;
+    if !is_sha256_digest(&browser_plan_digest) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            "browser_plan_digest must use a lowercase sha256 digest",
+        ));
+    }
+    let navigation_index = required("navigation_index")?
+        .parse::<usize>()
+        .map_err(|_| {
+            browser_confirmation_error(
+                locale,
+                "P1060",
+                "navigation_index must be an unsigned integer",
+            )
+        })?;
+    let max_session_seconds = required("max_session_seconds")?
+        .parse::<u32>()
+        .map_err(|_| {
+            browser_confirmation_error(
+                locale,
+                "P1060",
+                "max_session_seconds must be an unsigned integer",
+            )
+        })?;
+    if navigation_index == 0 || !(15..=300).contains(&max_session_seconds) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            "navigation_index or max_session_seconds is outside the local session policy",
+        ));
+    }
+    Ok(BrowserConfirmationPlanManifest {
+        browser_plan_digest,
+        navigation_index,
+        max_session_seconds,
     })
 }
 
@@ -8055,6 +8250,7 @@ fn browser_plan_json(directory: &Path) -> Result<String, String> {
         "browserPlanVersion": 1,
         "mode": "inspection-only",
         "project": {"name": project.name, "version": project.version},
+        "planDigest": browser_plan_digest(&manifest),
         "intent": manifest.intent,
         "allowlistedOrigins": manifest.origins,
         "navigation": navigation,
@@ -8092,6 +8288,147 @@ fn run_browser_inspect(directory: &Path) -> Result<(), String> {
 
 fn run_browser_plan(directory: &Path) -> Result<(), String> {
     print!("{}", browser_plan_json(directory)?);
+    Ok(())
+}
+
+fn browser_confirmation_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("browser:confirm-plan") {
+        return Ok(());
+    }
+    let locale = browser_plan_locale(project);
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "browser:confirm-plan");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_browser_confirmation_plan_manifest(
+    directory: &Path,
+) -> Result<
+    (
+        ProjectManifest,
+        BrowserPlanManifest,
+        BrowserConfirmationPlanManifest,
+    ),
+    String,
+> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1060: cannot resolve project root: {error}"))?;
+    let (project, browser_plan) = load_browser_plan_manifest(&root)?;
+    browser_confirmation_capability_error(&project)?;
+    let locale = browser_plan_locale(&project);
+    let manifest_path = root.join("padma-browser-confirm.toml");
+    let metadata = fs::symlink_metadata(&manifest_path).map_err(|error| {
+        browser_confirmation_error(
+            locale,
+            "P1060",
+            &format!("cannot inspect `padma-browser-confirm.toml`: {error}"),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            "padma-browser-confirm.toml must be a regular project file",
+        ));
+    }
+    let source = fs::read_to_string(&manifest_path).map_err(|error| {
+        browser_confirmation_error(
+            locale,
+            "P1060",
+            &format!("cannot read `padma-browser-confirm.toml`: {error}"),
+        )
+    })?;
+    let confirmation = parse_browser_confirmation_plan_manifest(&source, locale)?;
+    if confirmation.browser_plan_digest != browser_plan_digest(&browser_plan) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            "browser_plan_digest does not match the reviewed local browser plan",
+        ));
+    }
+    if confirmation.navigation_index > browser_plan.navigation_urls.len() {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1060",
+            "navigation_index does not identify a reviewed browser-plan URL",
+        ));
+    }
+    Ok((project, browser_plan, confirmation))
+}
+
+fn browser_confirmation_plan_json(directory: &Path) -> Result<String, String> {
+    let (project, browser_plan, confirmation) = load_browser_confirmation_plan_manifest(directory)?;
+    let destination = browser_plan.navigation_urls[confirmation.navigation_index - 1].clone();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "browserConfirmationPlanVersion": 1,
+        "mode": "local-confirmation-session-planning",
+        "project": {"name": project.name, "version": project.version},
+        "browserPlan": {
+            "digest": browser_plan_digest(&browser_plan),
+            "navigationIndex": confirmation.navigation_index,
+            "method": "GET",
+            "url": destination,
+            "redirectPolicy": "deny"
+        },
+        "confirmation": {
+            "required": true,
+            "status": "not-issued",
+            "challenge": "local-runner-required",
+            "singleUse": true,
+            "maxSessionSeconds": confirmation.max_session_seconds,
+            "modelSupplied": "rejected"
+        },
+        "session": "awaiting-confirmation",
+        "cancellation": "available-before-execution",
+        "browser": "not-started",
+        "network": "disabled",
+        "dns": "disabled",
+        "cookies": "not-read",
+        "credentials": "not-read",
+        "browserProfile": "not-read",
+        "environmentRead": "disabled",
+        "childProcess": "disabled",
+        "javascriptExecution": "disabled",
+        "formSubmission": "disabled",
+        "posting": "disabled",
+        "payment": "disabled",
+        "upload": "disabled",
+        "download": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1060: cannot encode browser confirmation plan: {error}"))
+}
+
+fn browser_confirmation_inspect_contents(directory: &Path) -> Result<String, String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1060: cannot resolve project root: {error}"))?;
+    let (project, _, _) = load_browser_confirmation_plan_manifest(&root)?;
+    let heading = match browser_plan_locale(&project) {
+        Locale::Bangla => "Padma browser confirmation session (শুধু inspection)\n",
+        Locale::English => "Padma browser confirmation session (inspection-only)\n",
+    };
+    Ok(format!(
+        "{heading}{}",
+        browser_confirmation_plan_json(&root)?
+    ))
+}
+
+fn run_browser_confirmation_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", browser_confirmation_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_browser_confirmation_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", browser_confirmation_plan_json(directory)?);
     Ok(())
 }
 
@@ -8978,6 +9315,26 @@ fn main() {
                     .unwrap_or_else(|| PathBuf::from("."));
                 run_browser_plan(&directory)
             }
+            Some("confirm") => match arguments.get(3).map(String::as_str) {
+                Some("inspect") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_browser_confirmation_inspect(&directory)
+                }
+                Some("plan") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_browser_confirmation_plan(&directory)
+                }
+                _ => {
+                    eprintln!("{}", usage(Locale::English));
+                    process::exit(64);
+                }
+            },
             _ => {
                 eprintln!("{}", usage(Locale::English));
                 process::exit(64);
@@ -11257,6 +11614,7 @@ mod tests {
 
         assert_eq!(plan["browserPlanVersion"], 1);
         assert_eq!(plan["mode"], "inspection-only");
+        assert!(plan["planDigest"].as_str().is_some_and(is_sha256_digest));
         assert_eq!(plan["intent"], "navigation-review");
         assert_eq!(
             plan["allowlistedOrigins"],
@@ -11344,6 +11702,123 @@ mod tests {
         assert!(error.starts_with("P1055: Browser execution is prohibited"));
         assert!(error.contains("no browser will be launched"));
         assert!(!usage(Locale::English).contains("browser navigate"));
+    }
+
+    fn valid_browser_confirmation_manifest(digest: &str) -> String {
+        format!(
+            "[confirmation]\nversion = \"1\"\nmode = \"local-session-plan\"\nbrowser_plan_digest = \"{digest}\"\nnavigation_index = 1\nmax_session_seconds = 60\n"
+        )
+    }
+
+    fn write_browser_confirmation_project(root: &Path, granted: bool, manifest: &str) {
+        let capabilities = if granted {
+            "browser = [\"plan\", \"confirm-plan\"]"
+        } else {
+            "browser = [\"plan\"]"
+        };
+        fs::write(
+            root.join("padma.toml"),
+            format!(
+                "[padma]\nname = \"browser-confirmation-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\n{capabilities}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-browser.toml"),
+            valid_browser_plan_manifest(),
+        )
+        .unwrap();
+        fs::write(root.join("padma-browser-confirm.toml"), manifest).unwrap();
+    }
+
+    #[test]
+    fn browser_confirmation_plan_binds_one_reviewed_get_destination_without_execution() {
+        let root = module_fixture_dir("browser-confirmation-valid");
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let manifest = valid_browser_confirmation_manifest(&browser_plan_digest(&browser_plan));
+        write_browser_confirmation_project(&root, true, &manifest);
+
+        let plan: JsonValue =
+            serde_json::from_str(&browser_confirmation_plan_json(&root).unwrap()).unwrap();
+        let inspect = browser_confirmation_inspect_contents(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(plan["browserConfirmationPlanVersion"], 1);
+        assert_eq!(plan["mode"], "local-confirmation-session-planning");
+        assert_eq!(plan["browserPlan"]["method"], "GET");
+        assert_eq!(
+            plan["browserPlan"]["url"],
+            "https://docs.python.org/3/tutorial/"
+        );
+        assert_eq!(plan["browserPlan"]["redirectPolicy"], "deny");
+        assert_eq!(plan["confirmation"]["required"], true);
+        assert_eq!(plan["confirmation"]["status"], "not-issued");
+        assert_eq!(plan["confirmation"]["singleUse"], true);
+        assert_eq!(plan["confirmation"]["modelSupplied"], "rejected");
+        assert_eq!(plan["session"], "awaiting-confirmation");
+        assert_eq!(plan["browser"], "not-started");
+        assert_eq!(plan["network"], "disabled");
+        assert_eq!(plan["dns"], "disabled");
+        assert_eq!(plan["cookies"], "not-read");
+        assert_eq!(plan["credentials"], "not-read");
+        assert_eq!(plan["browserProfile"], "not-read");
+        assert_eq!(plan["javascriptExecution"], "disabled");
+        assert_eq!(plan["formSubmission"], "disabled");
+        assert_eq!(plan["payment"], "disabled");
+        assert!(inspect.starts_with("Padma browser confirmation session (inspection-only)"));
+    }
+
+    #[test]
+    fn browser_confirmation_plan_requires_its_own_narrow_capability() {
+        let root = module_fixture_dir("browser-confirmation-capability-denied");
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let manifest = valid_browser_confirmation_manifest(&browser_plan_digest(&browser_plan));
+        write_browser_confirmation_project(&root, false, &manifest);
+
+        let error = browser_confirmation_plan_json(&root).unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("browser:confirm-plan"));
+    }
+
+    #[test]
+    fn browser_confirmation_plan_rejects_unbound_or_unsafe_manifest_data() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let digest = browser_plan_digest(&browser_plan);
+        for manifest in [
+            valid_browser_confirmation_manifest(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            valid_browser_confirmation_manifest(&digest)
+                .replace("navigation_index = 1", "navigation_index = 3"),
+            valid_browser_confirmation_manifest(&digest)
+                .replace("mode = \"local-session-plan\"", "mode = \"navigate\""),
+            valid_browser_confirmation_manifest(&digest).replace(
+                "max_session_seconds = 60",
+                "max_session_seconds = 60\nmax_session_seconds = 61",
+            ),
+            valid_browser_confirmation_manifest(&digest)
+                .replace("max_session_seconds = 60", "max_session_seconds = 301"),
+        ] {
+            let root = module_fixture_dir("browser-confirmation-invalid");
+            write_browser_confirmation_project(&root, true, &manifest);
+            let error = browser_confirmation_plan_json(&root).unwrap_err();
+            fs::remove_dir_all(&root).unwrap();
+            assert!(error.starts_with("P1060"));
+        }
+    }
+
+    #[test]
+    fn browser_confirmation_and_navigation_execution_remain_prohibited() {
+        let error = browser_confirmation_error(Locale::English, "P1061", "");
+        assert!(error.starts_with("P1061: Browser confirmation or navigation action is prohibited"));
+        assert!(error.contains("no browser, DNS, network, cookie, or credential will be used"));
+        assert!(!usage(Locale::English).contains("browser navigate"));
+        assert!(!usage(Locale::English).contains("browser confirm execute"));
     }
 
     fn valid_ai_tool_plan_manifest() -> &'static str {

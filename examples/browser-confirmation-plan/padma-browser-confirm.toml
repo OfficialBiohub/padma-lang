@@ -1,0 +1,6 @@
+[confirmation]
+version = "1"
+mode = "local-session-plan"
+browser_plan_digest = "sha256:ea28e85f828890c644a52a8b2867a9f2b92bc303ed0f03950f1706736d1769c0"
+navigation_index = 1
+max_session_seconds = 60
