@@ -256,6 +256,12 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1046") => ("The session token is invalid, modified, or expired".into(), Some("Sign in again to obtain a new session.".into())),
         (Locale::Bangla, "P1047") => ("নিরাপদ random data তৈরি করা যায়নি".into(), Some("Termux OS entropy source পরীক্ষা করে আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1047") => ("Could not create secure random data".into(), Some("Check the Termux OS entropy source and try again.".into())),
+        (Locale::Bangla, "P1050") => (format!("AI workflow manifest বা request descriptor নিরাপদ বা সঠিক নয়: `{detail}`"), Some("padma-ai.toml-এ reviewed HTTPS endpoint, environment variable-এর নাম এবং নির্ধারিত সীমা ব্যবহার করুন।".into())),
+        (Locale::English, "P1050") => (format!("AI workflow manifest or request descriptor is unsafe or invalid: `{detail}`"), Some("Use a reviewed HTTPS endpoint, an environment-variable name, and the declared limits in padma-ai.toml.".into())),
+        (Locale::Bangla, "P1051") => (format!("AI workflow transport ব্যর্থ হয়েছে: `{detail}`"), Some("endpoint, network availability, timeout এবং provider gateway পরীক্ষা করুন; secret value output-এ দেবেন না।".into())),
+        (Locale::English, "P1051") => (format!("AI workflow transport failed: `{detail}`"), Some("Check the endpoint, network availability, timeout, and provider gateway; do not place a secret value in output.".into())),
+        (Locale::Bangla, "P1052") => (format!("AI workflow response সঠিক বা নিরাপদ নয়: `{detail}`"), Some("provider gateway-কে Padma AI workflow v1 JSON protocol ও response limit মানতে হবে।".into())),
+        (Locale::English, "P1052") => (format!("AI workflow response is invalid or unsafe: `{detail}`"), Some("The provider gateway must follow the Padma AI workflow v1 JSON protocol and response limit.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -3921,6 +3927,17 @@ struct AndroidBuildManifest {
     permissions: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AiWorkflowManifest {
+    endpoint: String,
+    secret_env: String,
+    model: String,
+    timeout_seconds: u32,
+    max_input_bytes: usize,
+    max_response_bytes: usize,
+    retry_policy: String,
+}
+
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
@@ -4143,6 +4160,285 @@ fn is_safe_environment_name(value: &str) -> bool {
         && chars.all(|character| {
             character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
         })
+}
+
+fn is_safe_ai_endpoint(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 2_048
+        || !value.is_ascii()
+        || value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+        || !value.starts_with("https://")
+        || value.contains(['@', '?', '#', '\\', '%'])
+    {
+        return false;
+    }
+    let authority_and_path = &value["https://".len()..];
+    let (host, path) = authority_and_path
+        .split_once('/')
+        .map_or((authority_and_path, ""), |(host, path)| (host, path));
+    if host.is_empty()
+        || host.len() > 253
+        || host.contains([':', '[', ']'])
+        || !host.contains('.')
+        || host
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+    {
+        return false;
+    }
+    let normalized_host = host.to_ascii_lowercase();
+    if normalized_host == "localhost"
+        || normalized_host.ends_with(".localhost")
+        || normalized_host.ends_with(".local")
+        || normalized_host.ends_with(".internal")
+    {
+        return false;
+    }
+    if !host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    }) {
+        return false;
+    }
+    !path.contains("//") && !path.split('/').any(|segment| matches!(segment, "." | ".."))
+}
+
+fn is_safe_ai_model_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.starts_with('.')
+        && !value.contains("..")
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/')
+        })
+}
+
+fn ai_workflow_error(locale: Locale, code: &'static str, detail: &str) -> String {
+    let diagnostic = error_for(locale, code, Position::new(1, 1), detail);
+    let label = if locale == Locale::Bangla {
+        "পরামর্শ"
+    } else {
+        "help"
+    };
+    match diagnostic.hint {
+        Some(hint) => format!(
+            "{}: {}\n  = {label}: {hint}",
+            diagnostic.code, diagnostic.message
+        ),
+        None => format!("{}: {}", diagnostic.code, diagnostic.message),
+    }
+}
+
+fn parse_ai_workflow_manifest(source: &str, locale: Locale) -> Result<AiWorkflowManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "workflow" {
+                return Err(ai_workflow_error(
+                    locale,
+                    "P1050",
+                    &format!(
+                        "unsupported section `{section}` on line {}",
+                        line_number + 1
+                    ),
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line.split_once('=').ok_or_else(|| {
+            ai_workflow_error(
+                locale,
+                "P1050",
+                &format!("expected `key = value` on line {}", line_number + 1),
+            )
+        })?;
+        let key = key.trim();
+        if section != "workflow"
+            || !matches!(
+                key,
+                "version"
+                    | "adapter"
+                    | "endpoint"
+                    | "secret_env"
+                    | "model"
+                    | "timeout_seconds"
+                    | "max_input_bytes"
+                    | "max_response_bytes"
+                    | "retry_policy"
+            )
+        {
+            return Err(ai_workflow_error(
+                locale,
+                "P1050",
+                &format!("unsupported field `{key}` on line {}", line_number + 1),
+            ));
+        }
+        let raw_value = raw_value.trim();
+        let value = if matches!(
+            key,
+            "timeout_seconds" | "max_input_bytes" | "max_response_bytes"
+        ) {
+            if raw_value.is_empty() || !raw_value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ai_workflow_error(
+                    locale,
+                    "P1050",
+                    &format!(
+                        "`{key}` must be an unsigned integer on line {}",
+                        line_number + 1
+                    ),
+                ));
+            }
+            raw_value.to_string()
+        } else {
+            if raw_value.len() < 2
+                || !raw_value.starts_with('"')
+                || !raw_value.ends_with('"')
+                || raw_value[1..raw_value.len() - 1].contains('"')
+            {
+                return Err(ai_workflow_error(
+                    locale,
+                    "P1050",
+                    &format!(
+                        "`{key}` must be a quoted string on line {}",
+                        line_number + 1
+                    ),
+                ));
+            }
+            raw_value[1..raw_value.len() - 1].to_string()
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(ai_workflow_error(
+                locale,
+                "P1050",
+                &format!("duplicate field `{key}` on line {}", line_number + 1),
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ai_workflow_error(
+                    locale,
+                    "P1050",
+                    &format!("missing `[workflow]` field `{key}`"),
+                )
+            })
+    };
+    if required("version")? != "1" {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "workflow version must be `1`",
+        ));
+    }
+    if required("adapter")? != "json-http-v1" {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "workflow adapter must be `json-http-v1`",
+        ));
+    }
+    let endpoint = required("endpoint")?;
+    if !is_safe_ai_endpoint(&endpoint) {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "endpoint must be a public HTTPS DNS URL without credentials, query, fragment, port, or traversal",
+        ));
+    }
+    let secret_env = required("secret_env")?;
+    if !is_safe_environment_name(&secret_env) {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "secret_env must be a safe uppercase environment variable name",
+        ));
+    }
+    let model = required("model")?;
+    if !is_safe_ai_model_identifier(&model) {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "model must be a bounded printable identifier",
+        ));
+    }
+    let timeout_seconds = required("timeout_seconds")?.parse::<u32>().map_err(|_| {
+        ai_workflow_error(
+            locale,
+            "P1050",
+            "timeout_seconds must be an unsigned integer",
+        )
+    })?;
+    if !(1..=30).contains(&timeout_seconds) {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "timeout_seconds must be between 1 and 30",
+        ));
+    }
+    let max_input_bytes = required("max_input_bytes")?.parse::<usize>().map_err(|_| {
+        ai_workflow_error(
+            locale,
+            "P1050",
+            "max_input_bytes must be an unsigned integer",
+        )
+    })?;
+    if !(1..=32_768).contains(&max_input_bytes) {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "max_input_bytes must be between 1 and 32768",
+        ));
+    }
+    let max_response_bytes = required("max_response_bytes")?
+        .parse::<usize>()
+        .map_err(|_| {
+            ai_workflow_error(
+                locale,
+                "P1050",
+                "max_response_bytes must be an unsigned integer",
+            )
+        })?;
+    if !(1..=65_536).contains(&max_response_bytes) {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "max_response_bytes must be between 1 and 65536",
+        ));
+    }
+    let retry_policy = required("retry_policy")?;
+    if retry_policy != "never" {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "retry_policy must be `never` in workflow version 1",
+        ));
+    }
+    Ok(AiWorkflowManifest {
+        endpoint,
+        secret_env,
+        model,
+        timeout_seconds,
+        max_input_bytes,
+        max_response_bytes,
+        retry_policy,
+    })
 }
 
 fn safe_public_https_url(value: &str) -> bool {
@@ -6138,6 +6434,135 @@ fn gui_plan_contents(directory: &Path) -> Result<String, String> {
     .map_err(|error| format!("P1047: cannot encode GUI plan: {error}"))
 }
 
+fn ai_workflow_locale(project: &ProjectManifest) -> Locale {
+    if project.locale == "bn" {
+        Locale::Bangla
+    } else {
+        Locale::English
+    }
+}
+
+fn ai_workflow_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("network:ai") {
+        return Ok(());
+    }
+    let locale = ai_workflow_locale(project);
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "network:ai");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_ai_workflow_manifest(
+    directory: &Path,
+) -> Result<(ProjectManifest, AiWorkflowManifest), String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1050: cannot resolve project root: {error}"))?;
+    let (project, _) = load_project_manifest(&root)?;
+    ai_workflow_capability_error(&project)?;
+    let locale = ai_workflow_locale(&project);
+    let manifest_path = root.join("padma-ai.toml");
+    let metadata = fs::symlink_metadata(&manifest_path).map_err(|error| {
+        ai_workflow_error(
+            locale,
+            "P1050",
+            &format!("cannot inspect `padma-ai.toml`: {error}"),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ai_workflow_error(
+            locale,
+            "P1050",
+            "padma-ai.toml must be a regular project file",
+        ));
+    }
+    let source = fs::read_to_string(&manifest_path).map_err(|error| {
+        ai_workflow_error(
+            locale,
+            "P1050",
+            &format!("cannot read `padma-ai.toml`: {error}"),
+        )
+    })?;
+    let manifest = parse_ai_workflow_manifest(&source, locale)?;
+    Ok((project, manifest))
+}
+
+fn ai_workflow_plan_contents(directory: &Path) -> Result<String, String> {
+    let (project, manifest) = load_ai_workflow_manifest(directory)?;
+    serde_json::to_string_pretty(&serde_json::json!({
+        "aiWorkflowPlanVersion": 1,
+        "mode": "inspection-only",
+        "project": {"name": project.name, "version": project.version},
+        "adapter": "json-http-v1",
+        "endpoint": manifest.endpoint,
+        "secret": {"environmentName": manifest.secret_env, "value": "not-read"},
+        "limits": {
+            "timeoutSeconds": manifest.timeout_seconds,
+            "maxInputBytes": manifest.max_input_bytes,
+            "maxResponseBytes": manifest.max_response_bytes,
+            "retryPolicy": manifest.retry_policy
+        },
+        "model": manifest.model,
+        "network": "disabled",
+        "environmentRead": "disabled",
+        "dnsResolution": "disabled",
+        "childProcess": "disabled",
+        "modelExecution": "disabled",
+        "generatedOutputExecution": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1050: cannot encode AI workflow plan: {error}"))
+}
+
+fn ai_workflow_inspect_contents(directory: &Path) -> Result<String, String> {
+    let (project, manifest) = load_ai_workflow_manifest(directory)?;
+    let heading = match ai_workflow_locale(&project) {
+        Locale::Bangla => "Padma AI workflow manifest (শুধু inspection)\n",
+        Locale::English => "Padma AI workflow manifest (inspection-only)\n",
+    };
+    let plan = serde_json::to_string_pretty(&serde_json::json!({
+        "aiWorkflowPlanVersion": 1,
+        "mode": "inspection-only",
+        "project": {"name": project.name, "version": project.version},
+        "adapter": "json-http-v1",
+        "endpoint": manifest.endpoint,
+        "secret": {"environmentName": manifest.secret_env, "value": "not-read"},
+        "limits": {
+            "timeoutSeconds": manifest.timeout_seconds,
+            "maxInputBytes": manifest.max_input_bytes,
+            "maxResponseBytes": manifest.max_response_bytes,
+            "retryPolicy": manifest.retry_policy
+        },
+        "model": manifest.model,
+        "network": "disabled",
+        "environmentRead": "disabled",
+        "dnsResolution": "disabled",
+        "childProcess": "disabled",
+        "modelExecution": "disabled",
+        "generatedOutputExecution": "disabled"
+    }))
+    .map_err(|error| format!("P1050: cannot encode AI workflow inspection: {error}"))?;
+    Ok(format!("{heading}{plan}\n"))
+}
+
+fn run_ai_workflow_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", ai_workflow_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_ai_workflow_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", ai_workflow_plan_contents(directory)?);
+    Ok(())
+}
+
 fn run_gui_inspect(directory: &Path) -> Result<(), String> {
     print!("{}", gui_inspect_contents(directory)?);
     Ok(())
@@ -6797,10 +7222,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma ai inspect [project]  AI workflow manifest নিরাপদভাবে inspect করুন\n  padma ai plan [project]  network ছাড়া AI workflow plan দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma ai plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma ai inspect [project]  inspect an AI workflow manifest safely\n  padma ai plan [project]  print an AI workflow plan without network access\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma ai plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -6925,6 +7350,34 @@ fn main() {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("."));
                 inspect_local_package(&directory, &arguments[3])
+            }
+            _ => {
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        if let Err(error) = result {
+            eprintln!("{error}");
+            process::exit(1);
+        }
+        return;
+    }
+    if arguments.get(1).map(String::as_str) == Some("ai") {
+        let command = arguments.get(2).map(String::as_str);
+        let result = match command {
+            Some("inspect") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_ai_workflow_inspect(&directory)
+            }
+            Some("plan") if arguments.len() <= 4 => {
+                let directory = arguments
+                    .get(3)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."));
+                run_ai_workflow_plan(&directory)
             }
             _ => {
                 eprintln!("{}", usage(Locale::English));
@@ -8878,5 +9331,86 @@ mod tests {
         assert_eq!(static_builtin_arity("auth.password_hash"), Some((1, 1)));
         assert_eq!(static_builtin_arity("auth.session_issue"), Some((3, 3)));
         assert_eq!(static_builtin_arity("auth.csrf_token"), Some((0, 0)));
+    }
+
+    #[test]
+    fn ai_workflow_manifest_accepts_one_bounded_provider_neutral_contract() {
+        let manifest = parse_ai_workflow_manifest(
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PADMA_AI_KEY\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 32768\nmax_response_bytes = 65536\nretry_policy = \"never\"\n",
+            Locale::English,
+        )
+        .unwrap();
+        assert_eq!(manifest.endpoint, "https://ai-gateway.example.com/v1/padma");
+        assert_eq!(manifest.secret_env, "PADMA_AI_KEY");
+        assert_eq!(manifest.timeout_seconds, 30);
+        assert_eq!(manifest.max_input_bytes, 32_768);
+        assert_eq!(manifest.max_response_bytes, 65_536);
+        assert_eq!(manifest.retry_policy, "never");
+    }
+
+    #[test]
+    fn ai_workflow_manifest_rejects_unsafe_endpoint_secret_and_unknown_fields() {
+        let private_endpoint = parse_ai_workflow_manifest(
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://127.0.0.1/v1/padma\"\nsecret_env = \"PADMA_AI_KEY\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 1\nmax_response_bytes = 1\nretry_policy = \"never\"\n",
+            Locale::English,
+        )
+        .unwrap_err();
+        assert!(private_endpoint.starts_with("P1050"));
+
+        let unsafe_secret = parse_ai_workflow_manifest(
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PADMA_AI_KEY=secret\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 1\nmax_response_bytes = 1\nretry_policy = \"never\"\n",
+            Locale::English,
+        )
+        .unwrap_err();
+        assert!(unsafe_secret.starts_with("P1050"));
+
+        let unknown_field = parse_ai_workflow_manifest(
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PADMA_AI_KEY\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 1\nmax_response_bytes = 1\nretry_policy = \"never\"\ncommand = \"curl\"\n",
+            Locale::Bangla,
+        )
+        .unwrap_err();
+        assert!(unknown_field.starts_with("P1050"));
+        assert!(unknown_field.contains("নিরাপদ"));
+    }
+
+    #[test]
+    fn ai_workflow_plan_is_capability_gated_and_never_reads_or_exposes_secret_values() {
+        let root = module_fixture_dir("ai-workflow-plan");
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"study-helper\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nnetwork = [\"ai\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-ai.toml"),
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PADMA_AI_TEST_SECRET\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 32768\nmax_response_bytes = 65536\nretry_policy = \"never\"\n",
+        )
+        .unwrap();
+        let plan = ai_workflow_plan_contents(&root).unwrap();
+        let inspect = ai_workflow_inspect_contents(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(plan.contains("\"mode\": \"inspection-only\""));
+        assert!(plan.contains("\"value\": \"not-read\""));
+        assert!(plan.contains("\"network\": \"disabled\""));
+        assert!(plan.contains("\"environmentRead\": \"disabled\""));
+        assert!(plan.contains("\"childProcess\": \"disabled\""));
+        assert!(!plan.contains("PADMA_AI_TEST_SECRET_VALUE"));
+        assert!(inspect.starts_with("Padma AI workflow manifest (inspection-only)"));
+
+        let denied = module_fixture_dir("ai-workflow-capability-denied");
+        fs::write(
+            denied.join("padma.toml"),
+            "[padma]\nname = \"denied\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nnetwork = [\"http\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            denied.join("padma-ai.toml"),
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PADMA_AI_TEST_SECRET\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 1\nmax_response_bytes = 1\nretry_policy = \"never\"\n",
+        )
+        .unwrap();
+        let error = ai_workflow_plan_contents(&denied).unwrap_err();
+        fs::remove_dir_all(&denied).unwrap();
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("network:ai"));
     }
 }

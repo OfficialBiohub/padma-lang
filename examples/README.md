@@ -13,6 +13,7 @@ Every file and folder in this directory is intended to be runnable from the repo
 | `capabilities/` | Manifest capability grants | `cd examples/capabilities && padma .` |
 | `gui-static/` | Static GUI and Android planning manifests | `cd examples/gui-static && padma gui plan . && padma android plan .` |
 | `render-git-linked/` | Render planning manifests | `cd examples/render-git-linked && padma render plan .` |
+| `ai-workflow-plan/` | Provider-neutral AI workflow inspection-only manifest | `cd examples/ai-workflow-plan && padma ai plan .` |
 | `authorized-media-download/` | Authorized `yt-dlp` media download | `cd examples/authorized-media-download && padma .` |
 | `static-website-builder/` | Local static HTML file creation | `cd examples/static-website-builder && padma .` |
 | `backend-response-pipeline/` | Validated JSON backend response output | `cd examples/backend-response-pipeline && padma .` |

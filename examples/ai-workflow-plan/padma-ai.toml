@@ -1,0 +1,10 @@
+[workflow]
+version = "1"
+adapter = "json-http-v1"
+endpoint = "https://ai-gateway.example.com/v1/padma"
+secret_env = "PADMA_AI_KEY"
+model = "reviewed-model-id"
+timeout_seconds = 30
+max_input_bytes = 32768
+max_response_bytes = 65536
+retry_policy = "never"

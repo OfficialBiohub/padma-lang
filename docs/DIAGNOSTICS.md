@@ -44,6 +44,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1038 | Bridge runtime | Bridge process could not start or completed with a non-zero exit status. |
 | P1039 | Bridge safety | Bridge process exceeded the 10-second execution limit. |
 | P1040 | Bridge runtime | Bridge standard output was not one valid JSON-compatible value. |
+| P1050 | AI workflow safety | `padma-ai.toml` is missing, unsafe, malformed, or violates the strict inspection-only workflow contract. |
 
 ## Example
 
