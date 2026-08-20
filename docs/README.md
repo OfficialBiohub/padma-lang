@@ -26,6 +26,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Identity and session](IDENTITY-SESSION.md) | Local password, session, CSRF, and cookie primitives |
 | [Deployment trust](DEPLOYMENT-TRUST.md) | Provider-independent dry-run deployment boundary |
 | [AI workflow foundation](AI-WORKFLOW.md) | Strict provider-neutral AI workflow inspection and no-side-effect planning |
+| [Browser planning foundation](BROWSER-PLANNING.md) | Strict domain-allowlisted local navigation planning with no browser execution |
 
 ## Platform and application planning
 

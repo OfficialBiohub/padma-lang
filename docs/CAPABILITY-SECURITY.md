@@ -45,17 +45,17 @@ No broader capability may be implemented merely by adding a new string that user
 
 Sensitive values such as API tokens must never appear in a capability listing, diagnostics, command arguments, or a future audit log. Capabilities identify **authority**, not secrets.
 
-## M9 AI foundation and browser design
+## M9 AI workflow and browser planning
 
-Padma currently implements only the narrow local-review foundation for provider-neutral AI workflows. Projects may declare `network = ["ai"]` and use `padma ai inspect|plan` to validate one strict `padma-ai.toml` manifest. These commands load only project files and render a deterministic plan; they do not read the named secret value, resolve DNS, connect to the network, start a process, invoke a model, or execute model output.
+Padma implements a narrow provider-neutral AI workflow boundary and an independent browser planning boundary. Projects may declare `network = ["ai"]` and use `padma ai inspect|plan` to validate a strict `padma-ai.toml` manifest; `ai.workflow` uses one bounded, fixed-shape `json-http-v1` request and returns generated data as inert Padma values.
 
-`ai.workflow` transport and browser planning remain design targets. Until their corresponding implementation, tests, release notes, and `padma --help` changes land, `padma.toml` continues to reject `browser`, no `ai.workflow` builtin exists, and no `browser inspect|plan` command exists.
+Projects may separately declare `browser = ["plan"]` and use `padma browser inspect|plan` to validate one strict `padma-browser.toml` manifest. These browser commands read only local project files and render a deterministic plan. They do not read environment values, resolve DNS, connect to a network, start a process, launch a browser, fetch a page, access a profile, cookies, or credentials, or execute page/model output.
 
 | Authority | Manifest grant | Current bound | Authoritative contract |
 |---|---|---|---|
 | AI inspection-only workflow | Existing `network = ["ai"]` | One validated HTTPS JSON workflow descriptor, environment variable name only, bounded metadata, and no network/model/output action. | [AI workflow foundation](AI-WORKFLOW.md) |
-| Provider-neutral AI runtime | Existing `network = ["ai"]` | Planned future one-shot bounded transport with structured response validation and no output execution. | [M9 AI and browser design](M9-AI-BROWSER-DESIGN.md) |
-| Browser navigation planning | Future `browser = ["plan"]` | Local exact-origin/navigation validation only; no DNS, browser launch, page fetch, login, form submit, upload/download, post, or payment. | [M9 AI and browser design](M9-AI-BROWSER-DESIGN.md) |
+| Provider-neutral AI runtime | Existing `network = ["ai"]` | One fixed `json-http-v1` transport with bounded structured input/output; model output remains inert data. | [AI workflow foundation](AI-WORKFLOW.md) |
+| Browser navigation planning | Existing `browser = ["plan"]` | Local exact-origin/navigation validation only; no DNS, browser launch, page fetch, login, form submit, upload/download, post, or payment. | [Browser planning foundation](BROWSER-PLANNING.md) |
 
 The browser design intentionally does not widen `network = ["http"]` or create a broad browser privilege. A future `browser:navigate` adapter, if separately approved, requires a fresh grant, strict destination verification, a bounded operation, and visible user confirmation immediately before navigation. The planning contract reserves no implicit upgrade path from `browser:plan` to any action authority.
 

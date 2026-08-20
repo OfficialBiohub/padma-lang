@@ -47,6 +47,9 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1050 | AI workflow safety | `padma-ai.toml` or the structured workflow request is missing, unsafe, malformed, or outside the strict v1 contract. |
 | P1051 | AI workflow transport | The one-shot reviewed transport could not obtain a usable credential, start, complete, or stay within its configured bound. Secret values are never included in this diagnostic. |
 | P1052 | AI workflow response safety | The provider response is missing, oversized, malformed, too deeply nested, or outside the strict v1 structured-response schema. |
+| P1053 | Browser planning safety | `padma-browser.toml` is missing, unsafe, malformed, or outside the strict v1 exact-HTTPS-origin policy. Rejected raw origins and URLs are not echoed. |
+| P1054 | Browser navigation policy | A fixed navigation URL does not match a reviewed exact HTTPS origin or violates the simple-path policy. The command remains local and performs no navigation. |
+| P1055 | Browser execution boundary | A browser execution path is unavailable or prohibited in this Padma version. Only local `padma browser inspect` and `padma browser plan` commands are supported. |
 
 ## Example
 

@@ -199,7 +199,9 @@
     - [x] Implement one `json-http-v1` transport path with a fixed request shape, timeout/size limits, no retry, sanitized diagnostics, and secret exclusion from command arguments, output, logs, and child environment.
     - [x] Add transport mock tests for exactly-one request, missing/empty secret, timeout, non-zero exit, invalid response, redaction, and prohibition on generated-output execution.
   - [x] Publish an AI workflow security guide and a runnable local planning example with provider setup and data-handling limits.
-- [ ] Define and implement domain-allowlisted browser automation planning with explicit `browser:plan` capability gating, project-local manifest, no login or CAPTCHA bypass, no payment/posting, and no browser execution in the initial milestone.
-  - [ ] Add a versioned `padma-browser.toml` contract plus `padma browser inspect` and `padma browser plan` commands that validate allowlisted HTTPS origins, navigation-only intent, and redacted request descriptors.
-  - [ ] Add browser-plan policy tests for domain/subdomain matching, redirect boundaries, credentials, private-network targets, unsafe actions, malformed manifests, missing capability, secret redaction, and zero side effects.
-  - [ ] Publish the browser planning security guide, safe example, explicit confirmation boundary, and future execution-adapter requirements.
+- [x] Define and implement domain-allowlisted browser automation planning with explicit `browser:plan` capability gating, project-local manifest, no login or CAPTCHA bypass, no payment/posting, and no browser execution in the initial milestone.
+  - [x] Add a versioned `padma-browser.toml` contract plus `padma browser inspect` and `padma browser plan` commands that validate allowlisted HTTPS origins, navigation-only intent, and redacted request descriptors.
+    - [x] Implement bilingual `P1053`–`P1055` diagnostics, strict manifest data structures/parser, and exact HTTPS-origin validation that rejects credentials, fragments, path/query values, IP/private-network targets, and suffix matching.
+    - [x] Implement deterministic read-only plan JSON with `browser: "not-started"`, `network: "disabled"`, `dns: "disabled"`, `cookies: "not-read"`, and no URL fetch, environment read, child process, or browser-profile access.
+  - [x] Add browser-plan policy tests for domain/subdomain matching, redirect boundaries, credentials, private-network targets, unsafe actions, malformed manifests, missing capability, secret redaction, and zero side effects.
+  - [x] Publish the browser planning security guide, safe example, explicit confirmation boundary, and future execution-adapter requirements.
