@@ -114,6 +114,7 @@ Padma local projects use explicit capability grants in `padma.toml`. Sensitive o
 | [Projects](docs/PROJECTS.md) | `padma.toml`, lockfile, modules, and local project boundaries |
 | [Editor tooling](docs/EDITOR-TOOLING.md) | Tree-sitter, VS Code extension, and LSP |
 | [Platform guides](docs/README.md#platform-and-application-planning) | GUI, Android, identity, SQLite, Render, and deployment boundaries |
+| [M9 AI and browser design](docs/M9-AI-BROWSER-DESIGN.md) | Planned provider-neutral AI workflow and browser-plan security boundaries; no new runtime action enabled |
 | [Padma Agent Skill](docs/AGENT-SKILL.md) | Reusable language-first engineering guidance for agents and maintainers |
 
 ## Repository map

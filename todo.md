@@ -187,3 +187,14 @@
   - [x] Define the skill trigger, supported request categories, stable public contracts, non-goals, and mandatory safety boundary for Padma language work.
   - [x] Add modular reference guides for architecture, syntax/API verification, Termux distribution, capability security, examples, testing, and release procedure.
   - [x] Add a skill validation checklist and repository documentation that explain how contributors use and maintain the skill without treating it as a runtime language package.
+
+## M9 — AI Workflow and Browser Planning
+
+- [ ] Define and implement a provider-neutral AI workflow helper with project-local provider metadata, explicit `network:ai` capability gating, environment-variable-only secrets, bounded request/response JSON, and no automatic execution of generated output.
+  - [ ] Add a versioned `padma-ai.toml` contract plus `padma ai inspect` and `padma ai plan` commands that validate configuration without making network requests or reading secret values.
+  - [ ] Add a structured `ai.workflow` runtime contract with explicit provider selection, input/output schemas, bounded retry policy, localized diagnostics, redaction, positive tests, and security-negative tests.
+  - [ ] Publish an AI workflow security guide and a runnable local planning example with provider setup and data-handling limits.
+- [ ] Define and implement domain-allowlisted browser automation planning with explicit `browser:plan` capability gating, project-local manifest, no login or CAPTCHA bypass, no payment/posting, and no browser execution in the initial milestone.
+  - [ ] Add a versioned `padma-browser.toml` contract plus `padma browser inspect` and `padma browser plan` commands that validate allowlisted HTTPS origins, navigation-only intent, and redacted request descriptors.
+  - [ ] Add browser-plan policy tests for domain/subdomain matching, redirect boundaries, credentials, private-network targets, unsafe actions, malformed manifests, missing capability, secret redaction, and zero side effects.
+  - [ ] Publish the browser planning security guide, safe example, explicit confirmation boundary, and future execution-adapter requirements.

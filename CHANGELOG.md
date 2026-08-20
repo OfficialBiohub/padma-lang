@@ -10,6 +10,7 @@ All notable user-visible changes are recorded in this file. Padma follows a pre-
 |---|---|
 | Repository | Language-first repository architecture, documentation index, examples/tooling/test indexes, collaboration policies, issue forms, pull-request template, and repeatable quality scripts. |
 | Agent engineering | Versioned `padma-language` Agent Skill with modular architecture, security, Termux, examples, and verification guidance. |
+| M9 design | Provider-neutral AI workflow and domain-allowlisted browser-planning contract, including capability boundaries, manifest schemas, redaction, no-side-effect plans, regression matrix, and staged implementation order. No new AI or browser runtime authority is enabled by this documentation change. |
 | Quality | Repository hygiene, documentation-link, and Termux installer-contract checks integrated with CI. |
 
 ## 0.1.0

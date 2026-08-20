@@ -45,6 +45,17 @@ No broader capability may be implemented merely by adding a new string that user
 
 Sensitive values such as API tokens must never appear in a capability listing, diagnostics, command arguments, or a future audit log. Capabilities identify **authority**, not secrets.
 
+## M9 design contracts not yet implemented
+
+The following narrow grants are documented design targets, not current Padma capabilities. Until the corresponding implementation, tests, release notes, and `padma --help` changes land, `padma.toml` continues to reject them and no `ai inspect|plan`, `ai.workflow`, or `browser inspect|plan` command exists.
+
+| Planned authority | Proposed manifest grant | Proposed bound | Authoritative design |
+|---|---|---|---|
+| Provider-neutral AI workflow | Existing `network = ["ai"]` | One reviewed HTTPS JSON endpoint, named environment secret, bounded JSON data, and no output execution. | [M9 AI and browser design](M9-AI-BROWSER-DESIGN.md) |
+| Browser navigation planning | Future `browser = ["plan"]` | Local exact-origin/navigation validation only; no DNS, browser launch, page fetch, login, form submit, upload/download, post, or payment. | [M9 AI and browser design](M9-AI-BROWSER-DESIGN.md) |
+
+The browser design intentionally does not widen `network = ["http"]` or create a broad browser privilege. A future `browser:navigate` adapter, if separately approved, requires a fresh grant, strict destination verification, a bounded operation, and visible user confirmation immediately before navigation. The planning contract reserves no implicit upgrade path from `browser:plan` to any action authority.
+
 ## Android and Termux shared-storage boundary
 
 Android storage is a platform permission boundary, not an ordinary Padma path feature. Current project-mode behavior deliberately rejects `@downloads` so a manifest cannot quietly extend a project's write authority outside its canonical root. Direct scripts retain the existing `@downloads` compatibility alias only when the Termux host itself has already been granted storage access.
