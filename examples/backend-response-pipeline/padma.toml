@@ -1,0 +1,8 @@
+[padma]
+name = "backend-response-pipeline"
+version = "0.1.0"
+entry = "main.pd"
+locale = "en"
+
+[capabilities]
+filesystem = ["write"]

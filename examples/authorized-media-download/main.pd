@@ -1,0 +1,4 @@
+let url = input("Enter a video URL you are authorized to download: ")
+let result = media.download(url, "video-%(id)s.%(ext)s")
+print "yt-dlp output:"
+print result

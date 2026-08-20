@@ -173,3 +173,10 @@
   - [x] Add a clear root README, contribution guide, security policy, code-of-conduct policy, issue/PR templates, and release-maintenance documentation appropriate for an open-source language project.
   - [x] Establish stable directories for specifications, examples, tooling, tests, scripts, and release artifacts, then document ownership and supported compatibility boundaries.
   - [x] Add repeatable quality commands and CI checks for formatting, tests, release build, documentation links, repository hygiene, and Termux install smoke coverage.
+
+## Practical Project Examples
+
+- [ ] Publish a Termux-first practical project guide that explains runnable Padma examples, exact expected output, capability manifests, and current security limitations without overstating unsupported features.
+  - [x] Add a capability-gated authorized media-download example using `media.download`, with a clear ownership and platform-terms boundary.
+  - [x] Add static website, local backend response, SQLite persistence, local-server plan, and defensive security-inspection examples with line-by-line walkthroughs.
+  - [x] Add corresponding Bengali-English output samples and verify every documented command against the release binary before publishing.

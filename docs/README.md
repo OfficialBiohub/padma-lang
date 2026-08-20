@@ -14,6 +14,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Linting](LINTING.md) | Formatter, linter, and static-check behavior |
 | [Editor tooling](EDITOR-TOOLING.md) | Tree-sitter, VS Code, and LSP use |
 | [Interoperability](INTEROPERABILITY.md) | Python/JavaScript bridge boundaries |
+| [Practical project examples](PRACTICAL-PROJECT-EXAMPLES.md) | Runnable media, website, backend, SQLite, and defensive-security walkthroughs |
 
 ## Security and local runtime
 

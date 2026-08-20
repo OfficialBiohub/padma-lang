@@ -1,0 +1,12 @@
+let candidate = input("URL to inspect: ")
+let valid = url.is_valid(candidate)
+
+let report = {"candidate": candidate, "validSyntax": valid, "action": "manual-review-required"}
+
+if valid {
+  print "URL syntax is valid. Review ownership and destination before opening it."
+} else {
+  print "Rejected: the URL syntax is invalid."
+}
+
+print json.stringify(report)

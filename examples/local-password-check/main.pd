@@ -1,0 +1,5 @@
+let password = input("Choose a password for this local demonstration: ")
+let record = auth.password_hash(password)
+
+print "Password record created without printing the password."
+print auth.password_verify(record, password)

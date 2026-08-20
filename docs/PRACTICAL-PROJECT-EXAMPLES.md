@@ -1,0 +1,208 @@
+# Practical Padma Project Examples
+
+This guide contains small **runnable** Termux-first Padma projects. Each project uses only currently implemented APIs, declares its required capability grants, and distinguishes a real result from a plan or a future adapter. Start with the release binary built from this repository.
+
+```bash
+cd ~/padma-lang
+cargo build --release
+export PATH="$HOME/padma-lang/target/release:$PATH"
+```
+
+> **Important:** A capability grant is permission for one limited Padma operation, not unrestricted phone, network, browser, or server access. Run `padma capabilities .` inside a project to review its grants before running it.
+
+| Project | Directory | What it demonstrates | Current boundary |
+|---|---|---|---|
+| Authorized media download | `examples/authorized-media-download` | Interactive `media.download` with `yt-dlp` | Only content you own or are authorized to download; no platform bypass or shared-storage write in project mode. |
+| Static website builder | `examples/static-website-builder` | Writing an HTML file safely inside a project | It creates a website file; Padma does not publish it or operate a public host. |
+| Backend response pipeline | `examples/backend-response-pipeline` | Producing a validated JSON HTTP response envelope | It does not open a public server or receive requests. |
+| Student SQLite records | `examples/student-records-sqlite` | Local structured persistence without raw SQL | It is not an ORM, remote database, or arbitrary SQL console. |
+| Defensive URL inspector | `examples/defensive-url-inspector` | Input validation and manual-review report | It checks syntax only; it does not scan, attack, or prove a site is safe. |
+| Local password check | `examples/local-password-check` | Local password hash and verification boundary | It is not a hosted login, user database, password reset, or authentication server. |
+
+## 1. Authorized media download
+
+Before running this example, install `yt-dlp` in Termux:
+
+```bash
+pkg install python -y
+python -m pip install --upgrade yt-dlp
+cd ~/padma-lang/examples/authorized-media-download
+padma .
+```
+
+The program is:
+
+```padma
+let url = input("Enter a video URL you are authorized to download: ")
+let result = media.download(url, "video-%(id)s.%(ext)s")
+print "yt-dlp output:"
+print result
+```
+
+| Code | How it works |
+|---|---|
+| `input(...)` | Reads the URL only when the program is running. |
+| `media.download(...)` | Validates an HTTP(S) URL, checks `media:download` and `filesystem:write`, then invokes the fixed `yt-dlp` program without a shell. |
+| `video-%(id)s.%(ext)s` | Gives `yt-dlp` a safe project-relative output template. The downloaded file is created in the project directory. |
+| `print result` | Shows `yt-dlp`'s own successful output text. Exact lines depend on the permitted media and installed `yt-dlp` version. |
+
+An example interaction is:
+
+```text
+Enter a video URL you are authorized to download: https://example.org/my-permitted-video
+yt-dlp output:
+[download] Destination: video-example.mp4
+```
+
+The URL and output lines above are illustrative. Do not use this example to download content without the owner's permission or contrary to a service's terms.
+
+## 2. Static website builder
+
+```bash
+cd ~/padma-lang/examples/static-website-builder
+padma .
+python -m http.server 8000 --directory site
+```
+
+The Padma program writes a simple HTML page:
+
+```padma
+let page = "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><title>Padma Site</title></head>\n<body><main><h1>Hello from Padma</h1><p>This page was written by a Padma program.</p></main></body>\n</html>\n"
+file.write("site/index.html", page)
+print "Created site/index.html"
+```
+
+The output is:
+
+```text
+Created site/index.html
+Preview it with: python -m http.server 8000 --directory site
+```
+
+`file.write` may write only under the canonical project root because the manifest grants `filesystem = ["write"]`. The final Python command is optional local preview tooling; it is not a Padma public deployment command.
+
+## 3. Backend response pipeline
+
+```bash
+cd ~/padma-lang/examples/backend-response-pipeline
+padma .
+cat out/health-response.json
+```
+
+```padma
+let response = backend.response(
+  200,
+  {"Content-Type": "application/json"},
+  {"ok": true, "message": "Padma backend response prepared"}
+)
+
+automation.write_json("out/health-response.json", response)
+print json.stringify(response)
+```
+
+The generated output is equivalent to:
+
+```json
+{"body":{"message":"Padma backend response prepared","ok":true},"headers":{"Content-Type":"application/json"},"status":200.0}
+```
+
+`backend.response` validates the numeric status, text header map, and JSON-compatible body. `automation.write_json` stores the resulting response envelope under the project root. This is useful for a reviewed local adapter or job queue, but it does **not** expose a phone to the internet or create arbitrary HTTP routes.
+
+## 4. Student SQLite records
+
+Install the Termux SQLite command once, then run the project:
+
+```bash
+pkg install sqlite -y
+cd ~/padma-lang/examples/student-records-sqlite
+padma .
+```
+
+```padma
+ধরি সংরক্ষণ = db.put("data/ছাত্র.sqlite", "শ্রেণি", "রিমা", {
+  "নাম": "রিমা",
+  "ক্লাস": 6,
+  "বিষয়": ["গণিত", "বিজ্ঞান"]
+})
+
+দেখাও সংরক্ষণ
+দেখাও json.stringify(db.get("data/ছাত্র.sqlite", "শ্রেণি", "রিমা"))
+```
+
+Expected output is:
+
+```text
+true
+{"ক্লাস":6.0,"নাম":"রিমা","বিষয়":["গণিত","বিজ্ঞান"]}
+```
+
+`db.put` stores one JSON-compatible value under a namespace and key. `db.get` retrieves that value. The project grants only `database = ["sqlite"]`; Padma uses fixed operations and parameter binding instead of letting input become arbitrary SQL. [1]
+
+## 5. Defensive URL inspector
+
+```bash
+cd ~/padma-lang/examples/defensive-url-inspector
+padma .
+```
+
+```padma
+let candidate = input("URL to inspect: ")
+let valid = url.is_valid(candidate)
+
+let report = {
+  "candidate": candidate,
+  "validSyntax": valid,
+  "action": "manual-review-required"
+}
+
+if valid {
+  print "URL syntax is valid. Review ownership and destination before opening it."
+} else {
+  print "Rejected: the URL syntax is invalid."
+}
+
+print json.stringify(report)
+```
+
+For `https://example.org`, the output is:
+
+```text
+URL syntax is valid. Review ownership and destination before opening it.
+{"action":"manual-review-required","candidate":"https://example.org","validSyntax":true}
+```
+
+This is a defensive input-validation example. A syntactically valid URL is not proof that content is trustworthy, owned by the user, free of malware, or authorized to access. Padma does not implement port scanning, vulnerability exploitation, credential attacks, CAPTCHA bypass, or unauthorized browser automation.
+
+## 6. Local password check
+
+```bash
+cd ~/padma-lang/examples/local-password-check
+padma .
+```
+
+```padma
+let password = input("Choose a password for this local demonstration: ")
+let record = auth.password_hash(password)
+
+print "Password record created without printing the password."
+print auth.password_verify(record, password)
+```
+
+Expected output is:
+
+```text
+Choose a password for this local demonstration: ********
+Password record created without printing the password.
+true
+```
+
+The terminal may display typed characters depending on its input settings; the asterisks above are illustrative. Padma requires the password to come from a runtime variable rather than a hard-coded string literal. The resulting salted record can be verified locally, but this example does not create an online account system or a public login service. [2]
+
+## Before you expand an example
+
+Keep a project capability list as small as possible. A static website creator needs only filesystem write access; it does not need network, database, process, media, identity, server, Android, GUI, or deployment permission. The `padma capabilities .` command displays the active grants and their scope before you execute the program.
+
+## References
+
+[1]: ./SQLITE-PERSISTENCE.md "Padma Local SQLite Persistence"
+[2]: ./IDENTITY-SESSION.md "Padma Identity and Session Foundation"

@@ -1,0 +1,3 @@
+let response = backend.response(200, {"Content-Type": "application/json"}, {"ok": true, "message": "Padma backend response prepared"})
+automation.write_json("out/health-response.json", response)
+print json.stringify(response)

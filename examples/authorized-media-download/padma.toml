@@ -1,0 +1,9 @@
+[padma]
+name = "authorized-media-download"
+version = "0.1.0"
+entry = "main.pd"
+locale = "en"
+
+[capabilities]
+filesystem = ["write"]
+media = ["download"]

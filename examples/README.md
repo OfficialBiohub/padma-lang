@@ -1,6 +1,6 @@
 # Padma Examples
 
-Every file and folder in this directory is intended to be runnable from the repository root or from its own project folder. Examples use local data and conservative capability manifests; they must not contain real credentials, private URLs, or hidden side effects.
+Every file and folder in this directory is intended to be runnable from the repository root or from its own project folder. Examples use local data and conservative capability manifests; they must not contain real credentials, private URLs, or hidden side effects. The [Practical Padma Project Examples](../docs/PRACTICAL-PROJECT-EXAMPLES.md) guide explains selected projects, outputs, capability grants, and security boundaries in detail.
 
 | Location | Demonstrates | Run from repository root |
 |---|---|---|
@@ -13,6 +13,12 @@ Every file and folder in this directory is intended to be runnable from the repo
 | `capabilities/` | Manifest capability grants | `cd examples/capabilities && padma .` |
 | `gui-static/` | Static GUI and Android planning manifests | `cd examples/gui-static && padma gui plan . && padma android plan .` |
 | `render-git-linked/` | Render planning manifests | `cd examples/render-git-linked && padma render plan .` |
+| `authorized-media-download/` | Authorized `yt-dlp` media download | `cd examples/authorized-media-download && padma .` |
+| `static-website-builder/` | Local static HTML file creation | `cd examples/static-website-builder && padma .` |
+| `backend-response-pipeline/` | Validated JSON backend response output | `cd examples/backend-response-pipeline && padma .` |
+| `student-records-sqlite/` | Bangla local SQLite record storage | `cd examples/student-records-sqlite && padma .` |
+| `defensive-url-inspector/` | Defensive URL syntax validation | `cd examples/defensive-url-inspector && padma .` |
+| `local-password-check/` | Local password hash and verification | `cd examples/local-password-check && padma .` |
 
 The `youtube-download.pd` example requires an installed `yt-dlp` backend and must only be used for media a user is authorized to download. It does not bypass DRM or access controls.
 

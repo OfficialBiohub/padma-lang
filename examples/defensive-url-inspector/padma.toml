@@ -1,0 +1,5 @@
+[padma]
+name = "defensive-url-inspector"
+version = "0.1.0"
+entry = "main.pd"
+locale = "en"
