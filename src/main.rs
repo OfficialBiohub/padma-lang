@@ -276,6 +276,14 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1054") => (format!("Browser navigation descriptor violates the reviewed policy: `{detail}`"), Some("Each GET URL must use an exact allowlisted HTTPS origin and a simple absolute path.".into())),
         (Locale::Bangla, "P1055") => ("browser execution এই Padma version-এ নিষিদ্ধ".into(), Some("শুধু `padma browser inspect` অথবা `padma browser plan` ব্যবহার করুন; কোনো browser চালু হবে না।".into())),
         (Locale::English, "P1055") => ("Browser execution is prohibited in this Padma version".into(), Some("Use only `padma browser inspect` or `padma browser plan`; no browser will be launched.".into())),
+        (Locale::Bangla, "P1056") => (format!("AI tool planning manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("padma-ai-tools.toml-এ সীমাবদ্ধ tool, declared capability, এবং plan-only policy ব্যবহার করুন।".into())),
+        (Locale::English, "P1056") => (format!("AI tool planning manifest is unsafe or invalid: `{detail}`"), Some("Use only supported tools, their declared capabilities, and the plan-only policy in padma-ai-tools.toml.".into())),
+        (Locale::Bangla, "P1057") => ("AI tool বা agent execution এই Padma version-এ নিষিদ্ধ".into(), Some("শুধু `padma ai tools inspect` অথবা `padma ai tools plan` ব্যবহার করুন; কোনো tool বা agent চালু হবে না।".into())),
+        (Locale::English, "P1057") => ("AI tool or agent execution is prohibited in this Padma version".into(), Some("Use only `padma ai tools inspect` or `padma ai tools plan`; no tool or agent will be started.".into())),
+        (Locale::Bangla, "P1058") => (format!("AI training planning manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("padma-ai-training.toml-এ local path, resource limit, এবং plan-only policy ব্যবহার করুন।".into())),
+        (Locale::English, "P1058") => (format!("AI training planning manifest is unsafe or invalid: `{detail}`"), Some("Use project-relative paths, bounded resource limits, and the plan-only policy in padma-ai-training.toml.".into())),
+        (Locale::Bangla, "P1059") => ("AI training execution এই Padma version-এ নিষিদ্ধ".into(), Some("শুধু `padma ai training inspect` অথবা `padma ai training plan` ব্যবহার করুন; dataset পড়া বা training চালু হবে না।".into())),
+        (Locale::English, "P1059") => ("AI training execution is prohibited in this Padma version".into(), Some("Use only `padma ai training inspect` or `padma ai training plan`; no dataset will be read and no training will be started.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -4120,6 +4128,24 @@ struct AiWorkflowManifest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct AiToolPlanManifest {
+    max_steps: u32,
+    max_wall_seconds: u32,
+    tools: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AiTrainingPlanManifest {
+    dataset_path: String,
+    artifact_path: String,
+    max_epochs: u32,
+    max_wall_seconds: u32,
+    max_dataset_bytes: u64,
+    max_memory_mb: u32,
+    max_cpu_threads: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct BrowserPlanManifest {
     intent: String,
     redirect_policy: String,
@@ -4178,6 +4204,7 @@ fn capability_grants_for_field(
         "gui" => &["local"],
         "android" => &["plan"],
         "browser" => &["plan"],
+        "ai" => &["tools", "training-plan"],
         "deployment" => &["render"],
         "filesystem" => &["read", "write"],
         "network" => &["http", "ai"],
@@ -4820,6 +4847,501 @@ fn parse_ai_workflow_manifest(source: &str, locale: Locale) -> Result<AiWorkflow
         max_input_bytes,
         max_response_bytes,
         retry_policy,
+    })
+}
+
+fn ai_tool_plan_error(locale: Locale, code: &'static str, detail: &str) -> String {
+    let diagnostic = error_for(locale, code, Position::new(1, 1), detail);
+    let label = if locale == Locale::Bangla {
+        "পরামর্শ"
+    } else {
+        "help"
+    };
+    match diagnostic.hint {
+        Some(hint) => format!(
+            "{}: {}\n  = {label}: {hint}",
+            diagnostic.code, diagnostic.message
+        ),
+        None => format!("{}: {}", diagnostic.code, diagnostic.message),
+    }
+}
+
+fn parse_ai_tool_string_list(
+    lines: &[&str],
+    index: &mut usize,
+    locale: Locale,
+) -> Result<BTreeSet<String>, String> {
+    let mut tools = BTreeSet::new();
+    loop {
+        *index += 1;
+        let Some(raw_line) = lines.get(*index) else {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                "unterminated tools list",
+            ));
+        };
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line == "]" {
+            break;
+        }
+        if line.is_empty() {
+            continue;
+        }
+        let value = line.strip_suffix(',').unwrap_or(line).trim();
+        if value.len() < 2
+            || !value.starts_with('"')
+            || !value.ends_with('"')
+            || value[1..value.len() - 1].contains('"')
+        {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                &format!("tools list requires a quoted string on line {}", *index + 1),
+            ));
+        }
+        let tool = value[1..value.len() - 1].to_string();
+        if !matches!(tool.as_str(), "ai-workflow" | "file-read" | "http-request") {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                &format!("unsupported tool at list index {}", tools.len() + 1),
+            ));
+        }
+        if !tools.insert(tool) {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                &format!(
+                    "tools list contains a duplicate at index {}",
+                    tools.len() + 1
+                ),
+            ));
+        }
+        if tools.len() > 3 {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                "tools list exceeds the version 1 limit",
+            ));
+        }
+    }
+    if tools.is_empty() {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "tools list cannot be empty",
+        ));
+    }
+    Ok(tools)
+}
+
+fn parse_ai_tool_plan_manifest(source: &str, locale: Locale) -> Result<AiToolPlanManifest, String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut section = String::new();
+    let mut agent_fields = BTreeMap::new();
+    let mut tools: Option<BTreeSet<String>> = None;
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index].split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            index += 1;
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if !matches!(section.as_str(), "agent" | "toolset") {
+                return Err(ai_tool_plan_error(
+                    locale,
+                    "P1056",
+                    &format!("unsupported section on line {}", index + 1),
+                ));
+            }
+            index += 1;
+            continue;
+        }
+        let (key, raw_value) = line.split_once('=').ok_or_else(|| {
+            ai_tool_plan_error(
+                locale,
+                "P1056",
+                &format!("expected `key = value` on line {}", index + 1),
+            )
+        })?;
+        let key = key.trim();
+        let raw_value = raw_value.trim();
+        if section == "toolset" && key == "tools" {
+            if !raw_value.is_empty() && raw_value != "[" {
+                return Err(ai_tool_plan_error(
+                    locale,
+                    "P1056",
+                    &format!(
+                        "tools list must begin on a new list line at line {}",
+                        index + 1
+                    ),
+                ));
+            }
+            if tools.is_some() {
+                return Err(ai_tool_plan_error(
+                    locale,
+                    "P1056",
+                    &format!("duplicate tools field on line {}", index + 1),
+                ));
+            }
+            tools = Some(parse_ai_tool_string_list(&lines, &mut index, locale)?);
+            index += 1;
+            continue;
+        }
+        if section != "agent"
+            || !matches!(
+                key,
+                "version" | "mode" | "max_steps" | "max_wall_seconds" | "retry_policy"
+            )
+        {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                &format!("unsupported field on line {}", index + 1),
+            ));
+        }
+        let value = if matches!(key, "max_steps" | "max_wall_seconds") {
+            if raw_value.is_empty() || !raw_value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ai_tool_plan_error(
+                    locale,
+                    "P1056",
+                    &format!("`{key}` must be an unsigned integer on line {}", index + 1),
+                ));
+            }
+            raw_value.to_string()
+        } else {
+            if raw_value.len() < 2
+                || !raw_value.starts_with('"')
+                || !raw_value.ends_with('"')
+                || raw_value[1..raw_value.len() - 1].contains('"')
+            {
+                return Err(ai_tool_plan_error(
+                    locale,
+                    "P1056",
+                    &format!("`{key}` must be a quoted string on line {}", index + 1),
+                ));
+            }
+            raw_value[1..raw_value.len() - 1].to_string()
+        };
+        if agent_fields.insert(key.to_string(), value).is_some() {
+            return Err(ai_tool_plan_error(
+                locale,
+                "P1056",
+                &format!("duplicate field `{key}` on line {}", index + 1),
+            ));
+        }
+        index += 1;
+    }
+    let required = |key: &str| {
+        agent_fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ai_tool_plan_error(locale, "P1056", &format!("missing `[agent]` field `{key}`"))
+            })
+    };
+    if required("version")? != "1" {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "agent version must be `1`",
+        ));
+    }
+    if required("mode")? != "plan-only" {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "agent mode must be `plan-only`",
+        ));
+    }
+    if required("retry_policy")? != "never" {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "retry_policy must be `never`",
+        ));
+    }
+    let max_steps = required("max_steps")?.parse::<u32>().map_err(|_| {
+        ai_tool_plan_error(locale, "P1056", "max_steps must be an unsigned integer")
+    })?;
+    if !(1..=8).contains(&max_steps) {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "max_steps must be between 1 and 8",
+        ));
+    }
+    let max_wall_seconds = required("max_wall_seconds")?.parse::<u32>().map_err(|_| {
+        ai_tool_plan_error(
+            locale,
+            "P1056",
+            "max_wall_seconds must be an unsigned integer",
+        )
+    })?;
+    if !(1..=600).contains(&max_wall_seconds) {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "max_wall_seconds must be between 1 and 600",
+        ));
+    }
+    let tools =
+        tools.ok_or_else(|| ai_tool_plan_error(locale, "P1056", "missing `[toolset] tools`"))?;
+    Ok(AiToolPlanManifest {
+        max_steps,
+        max_wall_seconds,
+        tools,
+    })
+}
+
+fn ai_tool_required_capability(tool: &str) -> &'static str {
+    match tool {
+        "ai-workflow" => "network:ai",
+        "file-read" => "filesystem:read",
+        "http-request" => "network:http",
+        _ => unreachable!("AI tool manifest parser validates tool names"),
+    }
+}
+
+fn ai_training_plan_error(locale: Locale, code: &'static str, detail: &str) -> String {
+    let diagnostic = error_for(locale, code, Position::new(1, 1), detail);
+    let label = if locale == Locale::Bangla {
+        "পরামর্শ"
+    } else {
+        "help"
+    };
+    match diagnostic.hint {
+        Some(hint) => format!(
+            "{}: {}\n  = {label}: {hint}",
+            diagnostic.code, diagnostic.message
+        ),
+        None => format!("{}: {}", diagnostic.code, diagnostic.message),
+    }
+}
+
+fn parse_ai_training_plan_manifest(
+    source: &str,
+    locale: Locale,
+) -> Result<AiTrainingPlanManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "training" {
+                return Err(ai_training_plan_error(
+                    locale,
+                    "P1058",
+                    &format!("unsupported section on line {}", line_number + 1),
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line.split_once('=').ok_or_else(|| {
+            ai_training_plan_error(
+                locale,
+                "P1058",
+                &format!("expected `key = value` on line {}", line_number + 1),
+            )
+        })?;
+        let key = key.trim();
+        if section != "training"
+            || !matches!(
+                key,
+                "version"
+                    | "mode"
+                    | "backend"
+                    | "dataset_path"
+                    | "artifact_path"
+                    | "max_epochs"
+                    | "max_wall_seconds"
+                    | "max_dataset_bytes"
+                    | "max_memory_mb"
+                    | "max_cpu_threads"
+            )
+        {
+            return Err(ai_training_plan_error(
+                locale,
+                "P1058",
+                &format!("unsupported field on line {}", line_number + 1),
+            ));
+        }
+        let raw_value = raw_value.trim();
+        let value = if matches!(
+            key,
+            "max_epochs"
+                | "max_wall_seconds"
+                | "max_dataset_bytes"
+                | "max_memory_mb"
+                | "max_cpu_threads"
+        ) {
+            if raw_value.is_empty() || !raw_value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ai_training_plan_error(
+                    locale,
+                    "P1058",
+                    &format!(
+                        "`{key}` must be an unsigned integer on line {}",
+                        line_number + 1
+                    ),
+                ));
+            }
+            raw_value.to_string()
+        } else {
+            if raw_value.len() < 2
+                || !raw_value.starts_with('"')
+                || !raw_value.ends_with('"')
+                || raw_value[1..raw_value.len() - 1].contains('"')
+            {
+                return Err(ai_training_plan_error(
+                    locale,
+                    "P1058",
+                    &format!(
+                        "`{key}` must be a quoted string on line {}",
+                        line_number + 1
+                    ),
+                ));
+            }
+            raw_value[1..raw_value.len() - 1].to_string()
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(ai_training_plan_error(
+                locale,
+                "P1058",
+                &format!("duplicate field `{key}` on line {}", line_number + 1),
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                ai_training_plan_error(
+                    locale,
+                    "P1058",
+                    &format!("missing `[training]` field `{key}`"),
+                )
+            })
+    };
+    if required("version")? != "1" {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "training version must be `1`",
+        ));
+    }
+    if required("mode")? != "plan-only" {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "training mode must be `plan-only`",
+        ));
+    }
+    if required("backend")? != "local-adapter-v1" {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "training backend must be `local-adapter-v1`",
+        ));
+    }
+    let dataset_path = safe_relative_path(&required("dataset_path")?)
+        .map_err(|_| {
+            ai_training_plan_error(locale, "P1058", "dataset_path must be project-relative")
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+    if !(dataset_path.ends_with(".jsonl") || dataset_path.ends_with(".csv")) {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "dataset_path must end in `.jsonl` or `.csv`",
+        ));
+    }
+    let artifact_path = safe_relative_path(&required("artifact_path")?)
+        .map_err(|_| {
+            ai_training_plan_error(locale, "P1058", "artifact_path must be project-relative")
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+    if !artifact_path.starts_with("artifacts/") || !artifact_path.ends_with(".padma-model") {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "artifact_path must be under `artifacts/` and end in `.padma-model`",
+        ));
+    }
+    let parse_u32 = |key: &str| {
+        required(key)?.parse::<u32>().map_err(|_| {
+            ai_training_plan_error(
+                locale,
+                "P1058",
+                &format!("{key} must be an unsigned integer"),
+            )
+        })
+    };
+    let max_epochs = parse_u32("max_epochs")?;
+    if !(1..=64).contains(&max_epochs) {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "max_epochs must be between 1 and 64",
+        ));
+    }
+    let max_wall_seconds = parse_u32("max_wall_seconds")?;
+    if !(1..=3_600).contains(&max_wall_seconds) {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "max_wall_seconds must be between 1 and 3600",
+        ));
+    }
+    let max_dataset_bytes = required("max_dataset_bytes")?.parse::<u64>().map_err(|_| {
+        ai_training_plan_error(
+            locale,
+            "P1058",
+            "max_dataset_bytes must be an unsigned integer",
+        )
+    })?;
+    if !(1_024..=1_073_741_824).contains(&max_dataset_bytes) {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "max_dataset_bytes must be between 1024 and 1073741824",
+        ));
+    }
+    let max_memory_mb = parse_u32("max_memory_mb")?;
+    if !(64..=4_096).contains(&max_memory_mb) {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "max_memory_mb must be between 64 and 4096",
+        ));
+    }
+    let max_cpu_threads = parse_u32("max_cpu_threads")?;
+    if !(1..=8).contains(&max_cpu_threads) {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "max_cpu_threads must be between 1 and 8",
+        ));
+    }
+    Ok(AiTrainingPlanManifest {
+        dataset_path,
+        artifact_path,
+        max_epochs,
+        max_wall_seconds,
+        max_dataset_bytes,
+        max_memory_mb,
+        max_cpu_threads,
     })
 }
 
@@ -7221,6 +7743,246 @@ fn run_ai_workflow_plan(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn ai_tool_plan_locale(project: &ProjectManifest) -> Locale {
+    ai_workflow_locale(project)
+}
+
+fn ai_tool_plan_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("ai:tools") {
+        return Ok(());
+    }
+    let locale = ai_tool_plan_locale(project);
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "ai:tools");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_ai_tool_plan_manifest(
+    directory: &Path,
+) -> Result<(ProjectManifest, AiToolPlanManifest), String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1056: cannot resolve project root: {error}"))?;
+    let (project, _) = load_project_manifest(&root)?;
+    ai_tool_plan_capability_error(&project)?;
+    let locale = ai_tool_plan_locale(&project);
+    let manifest_path = root.join("padma-ai-tools.toml");
+    let metadata = fs::symlink_metadata(&manifest_path).map_err(|error| {
+        ai_tool_plan_error(
+            locale,
+            "P1056",
+            &format!("cannot inspect `padma-ai-tools.toml`: {error}"),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ai_tool_plan_error(
+            locale,
+            "P1056",
+            "padma-ai-tools.toml must be a regular project file",
+        ));
+    }
+    let source = fs::read_to_string(&manifest_path).map_err(|error| {
+        ai_tool_plan_error(
+            locale,
+            "P1056",
+            &format!("cannot read `padma-ai-tools.toml`: {error}"),
+        )
+    })?;
+    let manifest = parse_ai_tool_plan_manifest(&source, locale)?;
+    for tool in &manifest.tools {
+        let required = ai_tool_required_capability(tool);
+        if !project.capabilities.contains(required) {
+            let diagnostic = error_for(locale, "P1034", Position::new(1, 1), required);
+            return Err(format!(
+                "{}: {}\n  = {}: {}",
+                diagnostic.code,
+                diagnostic.message,
+                if locale == Locale::Bangla {
+                    "পরামর্শ"
+                } else {
+                    "help"
+                },
+                diagnostic.hint.unwrap_or_default()
+            ));
+        }
+    }
+    Ok((project, manifest))
+}
+
+fn ai_tool_plan_json(directory: &Path) -> Result<String, String> {
+    let (project, manifest) = load_ai_tool_plan_manifest(directory)?;
+    let tools = manifest
+        .tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool,
+                "requiredCapability": ai_tool_required_capability(tool),
+                "execution": "disabled"
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "aiToolPlanVersion": 1,
+        "mode": "inspection-only",
+        "project": {"name": project.name, "version": project.version},
+        "agent": {
+            "mode": "plan-only",
+            "maxSteps": manifest.max_steps,
+            "maxWallSeconds": manifest.max_wall_seconds,
+            "retryPolicy": "never"
+        },
+        "tools": tools,
+        "network": "disabled",
+        "environmentRead": "disabled",
+        "dnsResolution": "disabled",
+        "childProcess": "disabled",
+        "toolExecution": "disabled",
+        "agentLoop": "disabled",
+        "backgroundExecution": "disabled",
+        "generatedOutputExecution": "disabled",
+        "auditLog": "not-written"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1056: cannot encode AI tool plan: {error}"))
+}
+
+fn ai_tool_inspect_contents(directory: &Path) -> Result<String, String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1056: cannot resolve project root: {error}"))?;
+    let (project, _) = load_project_manifest(&root)?;
+    let heading = match ai_tool_plan_locale(&project) {
+        Locale::Bangla => "Padma AI tool manifest (শুধু inspection)\n",
+        Locale::English => "Padma AI tool manifest (inspection-only)\n",
+    };
+    Ok(format!("{heading}{}", ai_tool_plan_json(&root)?))
+}
+
+fn run_ai_tool_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", ai_tool_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_ai_tool_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", ai_tool_plan_json(directory)?);
+    Ok(())
+}
+
+fn ai_training_plan_locale(project: &ProjectManifest) -> Locale {
+    ai_workflow_locale(project)
+}
+
+fn ai_training_plan_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("ai:training-plan") {
+        return Ok(());
+    }
+    let locale = ai_training_plan_locale(project);
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "ai:training-plan");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
+fn load_ai_training_plan_manifest(
+    directory: &Path,
+) -> Result<(ProjectManifest, AiTrainingPlanManifest), String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1058: cannot resolve project root: {error}"))?;
+    let (project, _) = load_project_manifest(&root)?;
+    ai_training_plan_capability_error(&project)?;
+    let locale = ai_training_plan_locale(&project);
+    let manifest_path = root.join("padma-ai-training.toml");
+    let metadata = fs::symlink_metadata(&manifest_path).map_err(|error| {
+        ai_training_plan_error(
+            locale,
+            "P1058",
+            &format!("cannot inspect `padma-ai-training.toml`: {error}"),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ai_training_plan_error(
+            locale,
+            "P1058",
+            "padma-ai-training.toml must be a regular project file",
+        ));
+    }
+    let source = fs::read_to_string(&manifest_path).map_err(|error| {
+        ai_training_plan_error(
+            locale,
+            "P1058",
+            &format!("cannot read `padma-ai-training.toml`: {error}"),
+        )
+    })?;
+    Ok((project, parse_ai_training_plan_manifest(&source, locale)?))
+}
+
+fn ai_training_plan_json(directory: &Path) -> Result<String, String> {
+    let (project, manifest) = load_ai_training_plan_manifest(directory)?;
+    serde_json::to_string_pretty(&serde_json::json!({
+        "aiTrainingPlanVersion": 1,
+        "mode": "inspection-only",
+        "project": {"name": project.name, "version": project.version},
+        "backend": "local-adapter-v1",
+        "dataset": {"path": manifest.dataset_path, "read": "disabled"},
+        "artifact": {"path": manifest.artifact_path, "write": "disabled"},
+        "limits": {
+            "maxEpochs": manifest.max_epochs,
+            "maxWallSeconds": manifest.max_wall_seconds,
+            "maxDatasetBytes": manifest.max_dataset_bytes,
+            "maxMemoryMb": manifest.max_memory_mb,
+            "maxCpuThreads": manifest.max_cpu_threads
+        },
+        "training": "not-started",
+        "localBackend": "not-started",
+        "remoteCompute": "disabled",
+        "datasetRead": "disabled",
+        "artifactWrite": "disabled",
+        "environmentRead": "disabled",
+        "childProcess": "disabled",
+        "network": "disabled",
+        "generatedOutputExecution": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1058: cannot encode AI training plan: {error}"))
+}
+
+fn ai_training_inspect_contents(directory: &Path) -> Result<String, String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1058: cannot resolve project root: {error}"))?;
+    let (project, _) = load_project_manifest(&root)?;
+    let heading = match ai_training_plan_locale(&project) {
+        Locale::Bangla => "Padma AI training manifest (শুধু inspection)\n",
+        Locale::English => "Padma AI training manifest (inspection-only)\n",
+    };
+    Ok(format!("{heading}{}", ai_training_plan_json(&root)?))
+}
+
+fn run_ai_training_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", ai_training_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_ai_training_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", ai_training_plan_json(directory)?);
+    Ok(())
+}
+
 fn browser_plan_locale(project: &ProjectManifest) -> Locale {
     if project.locale == "bn" {
         Locale::Bangla
@@ -7991,10 +8753,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma ai inspect [project]  AI workflow manifest নিরাপদভাবে inspect করুন\n  padma ai plan [project]  network ছাড়া AI workflow plan দেখুন\n  padma browser inspect [project]  browser plan manifest inspect করুন\n  padma browser plan [project]  browser ছাড়া, network ছাড়া navigation plan দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma ai plan .\n  padma browser plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma ai inspect [project]  AI workflow manifest নিরাপদভাবে inspect করুন\n  padma ai plan [project]  network ছাড়া AI workflow plan দেখুন\n  padma ai tools inspect [project]  AI tool manifest local inspect করুন\n  padma ai tools plan [project]  tool/agent ছাড়া AI tool plan দেখুন\n  padma ai training inspect [project]  AI training manifest local inspect করুন\n  padma ai training plan [project]  training ছাড়া resource-bounded plan দেখুন\n  padma browser inspect [project]  browser plan manifest inspect করুন\n  padma browser plan [project]  browser ছাড়া, network ছাড়া navigation plan দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma ai inspect [project]  inspect an AI workflow manifest safely\n  padma ai plan [project]  print an AI workflow plan without network access\n  padma browser inspect [project]  inspect a browser plan manifest locally\n  padma browser plan [project]  print a navigation plan without browser or network access\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma ai plan .\n  padma browser plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma ai inspect [project]  inspect an AI workflow manifest safely\n  padma ai plan [project]  print an AI workflow plan without network access\n  padma ai tools inspect [project]  inspect an AI tool manifest locally\n  padma ai tools plan [project]  print an AI tool plan without tools or an agent\n  padma ai training inspect [project]  inspect an AI training manifest locally\n  padma ai training plan [project]  print a training plan without dataset reads or training\n  padma browser inspect [project]  inspect a browser plan manifest locally\n  padma browser plan [project]  print a navigation plan without browser or network access\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -8134,6 +8896,46 @@ fn main() {
     if arguments.get(1).map(String::as_str) == Some("ai") {
         let command = arguments.get(2).map(String::as_str);
         let result = match command {
+            Some("tools") => match arguments.get(3).map(String::as_str) {
+                Some("inspect") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_ai_tool_inspect(&directory)
+                }
+                Some("plan") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_ai_tool_plan(&directory)
+                }
+                _ => {
+                    eprintln!("{}", usage(Locale::English));
+                    process::exit(64);
+                }
+            },
+            Some("training") => match arguments.get(3).map(String::as_str) {
+                Some("inspect") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_ai_training_inspect(&directory)
+                }
+                Some("plan") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_ai_training_plan(&directory)
+                }
+                _ => {
+                    eprintln!("{}", usage(Locale::English));
+                    process::exit(64);
+                }
+            },
             Some("inspect") if arguments.len() <= 4 => {
                 let directory = arguments
                     .get(3)
@@ -10495,5 +11297,201 @@ mod tests {
         assert!(error.starts_with("P1055: Browser execution is prohibited"));
         assert!(error.contains("no browser will be launched"));
         assert!(!usage(Locale::English).contains("browser navigate"));
+    }
+
+    fn valid_ai_tool_plan_manifest() -> &'static str {
+        "[agent]\nversion = \"1\"\nmode = \"plan-only\"\nmax_steps = 3\nmax_wall_seconds = 45\nretry_policy = \"never\"\n\n[toolset]\ntools = [\n  \"ai-workflow\",\n  \"file-read\",\n  \"http-request\"\n]\n"
+    }
+
+    fn write_ai_tool_plan_project(root: &Path, grants: &str, manifest: &str) {
+        fs::write(
+            root.join("padma.toml"),
+            format!(
+                "[padma]\nname = \"tool-plan-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nai = [\"tools\"]\n{grants}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(root.join("padma-ai-tools.toml"), manifest).unwrap();
+    }
+
+    #[test]
+    fn ai_tool_plan_emits_a_deterministic_zero_execution_descriptor() {
+        let root = module_fixture_dir("ai-tool-plan-valid");
+        write_ai_tool_plan_project(
+            &root,
+            "network = [\"ai\", \"http\"]\nfilesystem = [\"read\"]",
+            valid_ai_tool_plan_manifest(),
+        );
+
+        let plan: JsonValue = serde_json::from_str(&ai_tool_plan_json(&root).unwrap()).unwrap();
+        let inspect = ai_tool_inspect_contents(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(plan["aiToolPlanVersion"], 1);
+        assert_eq!(plan["mode"], "inspection-only");
+        assert_eq!(plan["agent"]["mode"], "plan-only");
+        assert_eq!(plan["agent"]["maxSteps"], 3);
+        assert_eq!(plan["tools"][0]["name"], "ai-workflow");
+        assert_eq!(plan["tools"][0]["execution"], "disabled");
+        assert_eq!(plan["network"], "disabled");
+        assert_eq!(plan["environmentRead"], "disabled");
+        assert_eq!(plan["childProcess"], "disabled");
+        assert_eq!(plan["toolExecution"], "disabled");
+        assert_eq!(plan["agentLoop"], "disabled");
+        assert_eq!(plan["backgroundExecution"], "disabled");
+        assert_eq!(plan["generatedOutputExecution"], "disabled");
+        assert!(inspect.starts_with("Padma AI tool manifest (inspection-only)"));
+    }
+
+    #[test]
+    fn ai_tool_plan_requires_the_tool_and_each_declared_tool_capability() {
+        let missing_tools = module_fixture_dir("ai-tool-plan-missing-tools-capability");
+        fs::write(
+            missing_tools.join("padma.toml"),
+            "[padma]\nname = \"tool-plan-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nnetwork = [\"ai\", \"http\"]\nfilesystem = [\"read\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            missing_tools.join("padma-ai-tools.toml"),
+            valid_ai_tool_plan_manifest(),
+        )
+        .unwrap();
+        let missing_tools_error = ai_tool_plan_json(&missing_tools).unwrap_err();
+        fs::remove_dir_all(&missing_tools).unwrap();
+        assert!(missing_tools_error.starts_with("P1034"));
+        assert!(missing_tools_error.contains("ai:tools"));
+
+        let missing_http = module_fixture_dir("ai-tool-plan-missing-http-capability");
+        write_ai_tool_plan_project(
+            &missing_http,
+            "network = [\"ai\"]\nfilesystem = [\"read\"]",
+            valid_ai_tool_plan_manifest(),
+        );
+        let missing_http_error = ai_tool_plan_json(&missing_http).unwrap_err();
+        fs::remove_dir_all(&missing_http).unwrap();
+        assert!(missing_http_error.starts_with("P1034"));
+        assert!(missing_http_error.contains("network:http"));
+    }
+
+    #[test]
+    fn ai_tool_plan_rejects_execution_modes_unsafe_tools_and_duplicate_fields() {
+        let execute_mode =
+            valid_ai_tool_plan_manifest().replace("mode = \"plan-only\"", "mode = \"run\"");
+        assert!(parse_ai_tool_plan_manifest(&execute_mode, Locale::English)
+            .unwrap_err()
+            .starts_with("P1056"));
+
+        let unsafe_tool =
+            valid_ai_tool_plan_manifest().replace("\"file-read\"", "\"browser-login\"");
+        let unsafe_error = parse_ai_tool_plan_manifest(&unsafe_tool, Locale::English).unwrap_err();
+        assert!(unsafe_error.starts_with("P1056"));
+        assert!(!unsafe_error.contains("browser-login"));
+
+        let duplicate = valid_ai_tool_plan_manifest().replacen(
+            "max_steps = 3",
+            "max_steps = 3\nmax_steps = 4",
+            1,
+        );
+        assert!(parse_ai_tool_plan_manifest(&duplicate, Locale::English)
+            .unwrap_err()
+            .starts_with("P1056"));
+    }
+
+    #[test]
+    fn ai_tool_and_agent_execution_remain_an_explicitly_prohibited_boundary() {
+        let error = ai_tool_plan_error(Locale::English, "P1057", "");
+        assert!(error.starts_with("P1057: AI tool or agent execution is prohibited"));
+        assert!(error.contains("no tool or agent will be started"));
+        assert!(!usage(Locale::English).contains("ai tools run"));
+    }
+
+    fn valid_ai_training_plan_manifest() -> &'static str {
+        "[training]\nversion = \"1\"\nmode = \"plan-only\"\nbackend = \"local-adapter-v1\"\ndataset_path = \"datasets/study.jsonl\"\nartifact_path = \"artifacts/study.padma-model\"\nmax_epochs = 3\nmax_wall_seconds = 300\nmax_dataset_bytes = 1048576\nmax_memory_mb = 512\nmax_cpu_threads = 2\n"
+    }
+
+    fn write_ai_training_plan_project(root: &Path, granted: bool, manifest: &str) {
+        let capabilities = if granted {
+            "ai = [\"training-plan\"]"
+        } else {
+            "ai = [\"tools\"]"
+        };
+        fs::write(
+            root.join("padma.toml"),
+            format!(
+                "[padma]\nname = \"training-plan-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\n{capabilities}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(root.join("padma-ai-training.toml"), manifest).unwrap();
+    }
+
+    #[test]
+    fn ai_training_plan_emits_a_deterministic_zero_execution_descriptor() {
+        let root = module_fixture_dir("ai-training-plan-valid");
+        write_ai_training_plan_project(&root, true, valid_ai_training_plan_manifest());
+
+        let plan: JsonValue = serde_json::from_str(&ai_training_plan_json(&root).unwrap()).unwrap();
+        let inspect = ai_training_inspect_contents(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(plan["aiTrainingPlanVersion"], 1);
+        assert_eq!(plan["mode"], "inspection-only");
+        assert_eq!(plan["backend"], "local-adapter-v1");
+        assert_eq!(plan["dataset"]["path"], "datasets/study.jsonl");
+        assert_eq!(plan["dataset"]["read"], "disabled");
+        assert_eq!(plan["artifact"]["write"], "disabled");
+        assert_eq!(plan["limits"]["maxMemoryMb"], 512);
+        assert_eq!(plan["training"], "not-started");
+        assert_eq!(plan["localBackend"], "not-started");
+        assert_eq!(plan["remoteCompute"], "disabled");
+        assert_eq!(plan["datasetRead"], "disabled");
+        assert_eq!(plan["artifactWrite"], "disabled");
+        assert_eq!(plan["childProcess"], "disabled");
+        assert_eq!(plan["network"], "disabled");
+        assert!(inspect.starts_with("Padma AI training manifest (inspection-only)"));
+    }
+
+    #[test]
+    fn ai_training_plan_requires_its_narrow_capability() {
+        let root = module_fixture_dir("ai-training-plan-capability-denied");
+        write_ai_training_plan_project(&root, false, valid_ai_training_plan_manifest());
+        let error = ai_training_plan_json(&root).unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("ai:training-plan"));
+    }
+
+    #[test]
+    fn ai_training_plan_rejects_execution_mode_and_unsafe_paths() {
+        let execute_mode =
+            valid_ai_training_plan_manifest().replace("mode = \"plan-only\"", "mode = \"run\"");
+        assert!(
+            parse_ai_training_plan_manifest(&execute_mode, Locale::English)
+                .unwrap_err()
+                .starts_with("P1058")
+        );
+
+        let unsafe_dataset =
+            valid_ai_training_plan_manifest().replace("datasets/study.jsonl", "../secret.jsonl");
+        let dataset_error =
+            parse_ai_training_plan_manifest(&unsafe_dataset, Locale::English).unwrap_err();
+        assert!(dataset_error.starts_with("P1058"));
+        assert!(!dataset_error.contains("../secret.jsonl"));
+
+        let unsafe_artifact = valid_ai_training_plan_manifest()
+            .replace("artifacts/study.padma-model", "outputs/study.padma-model");
+        assert!(
+            parse_ai_training_plan_manifest(&unsafe_artifact, Locale::English)
+                .unwrap_err()
+                .starts_with("P1058")
+        );
+    }
+
+    #[test]
+    fn ai_training_execution_remains_an_explicitly_prohibited_boundary() {
+        let error = ai_training_plan_error(Locale::English, "P1059", "");
+        assert!(error.starts_with("P1059: AI training execution is prohibited"));
+        assert!(error.contains("no dataset will be read"));
+        assert!(!usage(Locale::English).contains("ai training run"));
     }
 }

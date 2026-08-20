@@ -50,6 +50,10 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1053 | Browser planning safety | `padma-browser.toml` is missing, unsafe, malformed, or outside the strict v1 exact-HTTPS-origin policy. Rejected raw origins and URLs are not echoed. |
 | P1054 | Browser navigation policy | A fixed navigation URL does not match a reviewed exact HTTPS origin or violates the simple-path policy. The command remains local and performs no navigation. |
 | P1055 | Browser execution boundary | A browser execution path is unavailable or prohibited in this Padma version. Only local `padma browser inspect` and `padma browser plan` commands are supported. |
+| P1056 | AI tool planning safety | `padma-ai-tools.toml` is missing, malformed, unsafe, or outside the strict local v1 planning contract. Unsupported raw tool names are not echoed. |
+| P1057 | AI tool and agent execution boundary | A tool or agent execution path is unavailable or prohibited in this Padma version. Only local `padma ai tools inspect` and `padma ai tools plan` commands are supported. |
+| P1058 | AI training planning safety | `padma-ai-training.toml` is missing, malformed, unsafe, outside resource limits, or requests an execution mode. Unsafe raw paths are not echoed. |
+| P1059 | AI training execution boundary | A training execution path is unavailable or prohibited in this Padma version. Only local `padma ai training inspect` and `padma ai training plan` commands are supported. |
 
 ## Example
 

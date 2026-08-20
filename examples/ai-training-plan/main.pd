@@ -1,0 +1,1 @@
+print "AI training planning is local and inspection-only. No dataset will be read and no training will be started."

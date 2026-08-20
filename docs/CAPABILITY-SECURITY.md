@@ -45,9 +45,13 @@ No broader capability may be implemented merely by adding a new string that user
 
 Sensitive values such as API tokens must never appear in a capability listing, diagnostics, command arguments, or a future audit log. Capabilities identify **authority**, not secrets.
 
-## M9 AI workflow and browser planning
+## M9 AI workflow, M10 tool/training planning, and browser planning
 
 Padma implements a narrow provider-neutral AI workflow boundary and an independent browser planning boundary. Projects may declare `network = ["ai"]` and use `padma ai inspect|plan` to validate a strict `padma-ai.toml` manifest; `ai.workflow` uses one bounded, fixed-shape `json-http-v1` request and returns generated data as inert Padma values.
+
+Projects may separately declare `ai = ["tools"]` and use `padma ai tools inspect|plan` to validate a strict `padma-ai-tools.toml` manifest. The plan remains local and non-executing. It requires every declared tool's ordinary capability (`network:ai`, `filesystem:read`, or `network:http`) to be already present, but it does not invoke any such operation or create an implicit authority upgrade.
+
+Projects may separately declare `ai = ["training-plan"]` and use `padma ai training inspect|plan` to validate a strict `padma-ai-training.toml` manifest. It validates only project-relative dataset/artifact metadata and bounded resource ceilings; it does not open either path, launch a training backend, write an artifact, use remote compute, or create an implicit training authority.
 
 Projects may separately declare `browser = ["plan"]` and use `padma browser inspect|plan` to validate one strict `padma-browser.toml` manifest. These browser commands read only local project files and render a deterministic plan. They do not read environment values, resolve DNS, connect to a network, start a process, launch a browser, fetch a page, access a profile, cookies, or credentials, or execute page/model output.
 
@@ -55,9 +59,13 @@ Projects may separately declare `browser = ["plan"]` and use `padma browser insp
 |---|---|---|---|
 | AI inspection-only workflow | Existing `network = ["ai"]` | One validated HTTPS JSON workflow descriptor, environment variable name only, bounded metadata, and no network/model/output action. | [AI workflow foundation](AI-WORKFLOW.md) |
 | Provider-neutral AI runtime | Existing `network = ["ai"]` | One fixed `json-http-v1` transport with bounded structured input/output; model output remains inert data. | [AI workflow foundation](AI-WORKFLOW.md) |
+| AI tool planning | Existing `ai = ["tools"]` plus each declared tool's existing grant | Local manifest validation and deterministic tool/runbook descriptor only; no tool invocation, agent loop, retry, persistence, audit write, environment read, process, network, or output execution. | [AI tool planning foundation](AI-TOOLS-PLANNING.md) |
+| AI training planning | Existing `ai = ["training-plan"]` | Local manifest validation and deterministic dataset/artifact/resource descriptor only; no dataset read, artifact write, backend process, remote compute, training, environment read, or output execution. | [AI training planning foundation](AI-TRAINING-PLANNING.md) |
 | Browser navigation planning | Existing `browser = ["plan"]` | Local exact-origin/navigation validation only; no DNS, browser launch, page fetch, login, form submit, upload/download, post, or payment. | [Browser planning foundation](BROWSER-PLANNING.md) |
 
 The browser design intentionally does not widen `network = ["http"]` or create a broad browser privilege. A future `browser:navigate` adapter, if separately approved, requires a fresh grant, strict destination verification, a bounded operation, and visible user confirmation immediately before navigation. The planning contract reserves no implicit upgrade path from `browser:plan` to any action authority.
+
+The proposed [browser navigation action-adapter design](BROWSER-ACTION-ADAPTER-DESIGN.md) defines further prerequisites: isolated ephemeral state, revalidation of resolved addresses before each connection, automatic redirect denial, one-time confirmation bound to a canonical plan digest, cancellation, and a redacted local audit event. It is a review document only; no `browser:navigate` capability or action runner exists in this release.
 
 ## Android and Termux shared-storage boundary
 

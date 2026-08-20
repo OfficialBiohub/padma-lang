@@ -27,6 +27,9 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Deployment trust](DEPLOYMENT-TRUST.md) | Provider-independent dry-run deployment boundary |
 | [AI workflow foundation](AI-WORKFLOW.md) | Strict provider-neutral AI workflow inspection and no-side-effect planning |
 | [Browser planning foundation](BROWSER-PLANNING.md) | Strict domain-allowlisted local navigation planning with no browser execution |
+| [Browser navigation action-adapter design](BROWSER-ACTION-ADAPTER-DESIGN.md) | Security-gated future execution contract; no action authority is implemented |
+| [AI tool planning foundation](AI-TOOLS-PLANNING.md) | Capability-gated local AI toolset and bounded agent-runbook planning with no tool execution |
+| [AI training planning foundation](AI-TRAINING-PLANNING.md) | Resource-bounded project-local training planning with no dataset read, training, or artifact write |
 
 ## Platform and application planning
 

@@ -205,3 +205,20 @@
     - [x] Implement deterministic read-only plan JSON with `browser: "not-started"`, `network: "disabled"`, `dns: "disabled"`, `cookies: "not-read"`, and no URL fetch, environment read, child process, or browser-profile access.
   - [x] Add browser-plan policy tests for domain/subdomain matching, redirect boundaries, credentials, private-network targets, unsafe actions, malformed manifests, missing capability, secret redaction, and zero side effects.
   - [x] Publish the browser planning security guide, safe example, explicit confirmation boundary, and future execution-adapter requirements.
+
+## M10 — Confirmed AI and Browser Action Adapters
+
+> Selected sequencing: complete and verify the local AI tool/training planning foundation before beginning any browser navigation action-adapter implementation.
+
+- [ ] Define a versioned, provider-neutral AI tool-contract layer that keeps generated output inert until a project-declared tool schema and one explicit action request are validated.
+  - [ ] Design bounded tool descriptors, JSON input/output schemas, least-privilege capabilities, per-tool timeout/output limits, immutable audit records, and bilingual diagnostics without secret leakage.
+  - [ ] Implement a local-only `padma ai tools inspect|plan` foundation and regression coverage for missing grants, unsafe schemas, unknown tools, redaction, and zero execution during planning.
+  - [ ] Define a bounded agent-runbook state machine with maximum steps, maximum wall-clock duration, no background persistence, no hidden retries, no generated-code execution, and a mandatory user-visible stop control.
+- [x] Define a safe local model training adapter contract that plans and validates user-owned datasets, resource limits, model artifacts, and subprocess handoff without claiming a built-in universal training engine.
+  - [x] Require an explicit project capability, local-only dataset/artifact paths, declarative hardware/runtime limits, no secret values in manifests, and a no-training `inspect|plan` mode before any training execution adapter.
+  - [x] Document that training execution needs a separately installed, reviewed local backend and cannot silently use remote compute, device controls, or unbounded data collection.
+- [x] Define a separately reviewed browser navigation action-adapter contract that begins only after an exact-origin local plan and a fresh, user-visible confirmation for each bounded navigation session.
+  - [ ] Begin browser action-adapter implementation only after the preceding AI tool and training planning layers pass their security regression tests and repository verification.
+  - [ ] Preserve exact HTTPS origin matching, revalidate each redirect and destination immediately before use, prohibit login credential capture, CAPTCHA bypass, JavaScript injection, cookie/profile exfiltration, unsafe downloads, and automatic form submission.
+  - [ ] Require explicit confirmation before any external side effect such as form submission, upload, message/post, purchase, payment, account change, or data deletion; do not provide a silent or autonomous execution path.
+  - [ ] Add browser action tests for missing confirmation, allowlist escapes, redirects, credential-bearing URLs, expired confirmation, cancellation, action audit redaction, and denied sensitive operations.

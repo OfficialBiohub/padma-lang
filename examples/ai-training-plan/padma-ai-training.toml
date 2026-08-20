@@ -1,0 +1,11 @@
+[training]
+version = "1"
+mode = "plan-only"
+backend = "local-adapter-v1"
+dataset_path = "datasets/study.jsonl"
+artifact_path = "artifacts/study.padma-model"
+max_epochs = 3
+max_wall_seconds = 300
+max_dataset_bytes = 1048576
+max_memory_mb = 512
+max_cpu_threads = 2

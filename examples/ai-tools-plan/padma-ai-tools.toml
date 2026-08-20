@@ -1,0 +1,13 @@
+[agent]
+version = "1"
+mode = "plan-only"
+max_steps = 3
+max_wall_seconds = 45
+retry_policy = "never"
+
+[toolset]
+tools = [
+  "ai-workflow",
+  "file-read",
+  "http-request"
+]

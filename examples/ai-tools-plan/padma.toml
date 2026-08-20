@@ -1,0 +1,10 @@
+[padma]
+name = "ai-tools-plan"
+version = "0.1.0"
+entry = "main.pd"
+locale = "en"
+
+[capabilities]
+ai = ["tools"]
+network = ["ai", "http"]
+filesystem = ["read"]
