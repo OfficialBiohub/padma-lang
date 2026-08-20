@@ -13,16 +13,24 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value as JsonValue;
 
 static RANDOM_COUNTER: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static AI_WORKFLOW_CURL_TEST_PROGRAM: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+#[cfg(test)]
+static AI_WORKFLOW_CURL_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 const BRIDGE_MAX_BYTES: usize = 256 * 1024;
 const BRIDGE_TIMEOUT: Duration = Duration::from_secs(10);
 const SQLITE_MAX_BYTES: usize = 256 * 1024;
 const SQLITE_TIMEOUT: Duration = Duration::from_secs(5);
+const AI_WORKFLOW_MAX_JSON_DEPTH: usize = 16;
+const AI_WORKFLOW_MAX_STDERR_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Locale {
@@ -1562,6 +1570,23 @@ fn read_bridge_stream(mut stream: impl Read) -> Result<Vec<u8>, ()> {
     }
 }
 
+fn read_bounded_stream(mut stream: impl Read, limit: usize) -> Result<Vec<u8>, ()> {
+    let mut result = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    let mut exceeded = false;
+    loop {
+        let read = stream.read(&mut buffer).map_err(|_| ())?;
+        if read == 0 {
+            return if exceeded { Err(()) } else { Ok(result) };
+        }
+        if result.len().saturating_add(read) > limit {
+            exceeded = true;
+            continue;
+        }
+        result.extend_from_slice(&buffer[..read]);
+    }
+}
+
 #[derive(Debug)]
 struct ParsedUrl {
     normalized: String,
@@ -1896,6 +1921,149 @@ impl Interpreter {
             return Err(error_for(self.locale, "P1041", position, "sqlite3"));
         }
         Ok(output)
+    }
+
+    fn ai_workflow(&self, input: &Value, position: Position) -> Result<Value, PadmaError> {
+        self.require_project_capability("network:ai", "ai.workflow", position)?;
+        let root = self.project_root.as_ref().ok_or_else(|| {
+            error_for(self.locale, "P1034", position, "network:ai for ai.workflow")
+        })?;
+        let (_, manifest) = load_ai_workflow_manifest(root)
+            .map_err(|_| error_for(self.locale, "P1050", position, "padma-ai.toml"))?;
+        let request = ai_workflow_request_payload(input, &manifest, self.locale, position)?;
+        let secret = env::var(&manifest.secret_env)
+            .map_err(|_| error_for(self.locale, "P1051", position, "credential is unavailable"))?;
+        if secret.is_empty() || secret.chars().any(char::is_control) {
+            return Err(error_for(
+                self.locale,
+                "P1051",
+                position,
+                "credential is unavailable",
+            ));
+        }
+        let response = self.ai_workflow_transport(&manifest, &secret, &request, position)?;
+        ai_workflow_response_value(&response, &manifest, self.locale, position)
+    }
+
+    fn ai_workflow_transport(
+        &self,
+        manifest: &AiWorkflowManifest,
+        secret: &str,
+        request: &[u8],
+        position: Position,
+    ) -> Result<Vec<u8>, PadmaError> {
+        let path = env::var_os("PATH")
+            .ok_or_else(|| error_for(self.locale, "P1051", position, "curl is unavailable"))?;
+        let working_directory = self.project_root.clone().ok_or_else(|| {
+            error_for(self.locale, "P1034", position, "network:ai for ai.workflow")
+        })?;
+        let config = ai_workflow_curl_config(manifest, secret, request).ok_or_else(|| {
+            error_for(
+                self.locale,
+                "P1050",
+                position,
+                "unsafe workflow request descriptor",
+            )
+        })?;
+        let mut child = process::Command::new(Self::ai_workflow_curl_program())
+            .args(["--config", "-"])
+            .current_dir(working_directory)
+            .env_clear()
+            .env("PATH", path)
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()
+            .map_err(|_| error_for(self.locale, "P1051", position, "curl is unavailable"))?;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            error_for(self.locale, "P1051", position, "curl input is unavailable")
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            error_for(self.locale, "P1051", position, "curl output is unavailable")
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            error_for(
+                self.locale,
+                "P1051",
+                position,
+                "curl error stream is unavailable",
+            )
+        })?;
+        let writer = thread::spawn(move || stdin.write_all(&config).and_then(|_| stdin.flush()));
+        let max_response_bytes = manifest.max_response_bytes;
+        let stdout_reader = thread::spawn(move || read_bounded_stream(stdout, max_response_bytes));
+        let stderr_reader =
+            thread::spawn(move || read_bounded_stream(stderr, AI_WORKFLOW_MAX_STDERR_BYTES));
+        let started = Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None)
+                    if started.elapsed()
+                        > Duration::from_secs(u64::from(manifest.timeout_seconds)) =>
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(error_for(
+                        self.locale,
+                        "P1051",
+                        position,
+                        "request timed out",
+                    ));
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(10)),
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err(error_for(self.locale, "P1051", position, "curl failed"));
+                }
+            }
+        };
+        let write_result = writer
+            .join()
+            .map_err(|_| error_for(self.locale, "P1051", position, "curl input failed"))?;
+        let output = stdout_reader
+            .join()
+            .map_err(|_| error_for(self.locale, "P1052", position, "response is unavailable"))?
+            .map_err(|_| {
+                error_for(
+                    self.locale,
+                    "P1052",
+                    position,
+                    "response exceeds declared limit",
+                )
+            })?;
+        let _ = stderr_reader.join();
+        if write_result.is_err() || !status.success() {
+            return Err(error_for(
+                self.locale,
+                "P1051",
+                position,
+                "curl rejected the request",
+            ));
+        }
+        Ok(output)
+    }
+
+    fn ai_workflow_curl_program() -> PathBuf {
+        #[cfg(test)]
+        if let Some(program) = AI_WORKFLOW_CURL_TEST_PROGRAM
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()
+            .and_then(|program| program.clone())
+        {
+            return program;
+        }
+        PathBuf::from("curl")
     }
 
     fn bridge_call(
@@ -3364,6 +3532,13 @@ impl Interpreter {
                         .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
                     return Ok(Value::Boolean(true));
                 }
+                if name == "ai.workflow" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let input = self.evaluate(&arguments[0])?;
+                    return self.ai_workflow(&input, *position);
+                }
                 if name == "ai.request" {
                     if arguments.len() != 3 {
                         return Err(error_for(self.locale, "P1009", *position, name));
@@ -4218,6 +4393,197 @@ fn is_safe_ai_model_identifier(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/')
         })
+}
+
+fn is_safe_ai_task_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn is_safe_ai_instruction(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 8_192
+        && value
+            .chars()
+            .all(|character| !character.is_control() || matches!(character, '\n' | '\t'))
+}
+
+fn json_depth(value: &JsonValue) -> usize {
+    match value {
+        JsonValue::Array(values) => 1 + values.iter().map(json_depth).max().unwrap_or(0),
+        JsonValue::Object(values) => 1 + values.values().map(json_depth).max().unwrap_or(0),
+        _ => 1,
+    }
+}
+
+fn ai_workflow_request_payload(
+    input: &Value,
+    manifest: &AiWorkflowManifest,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<u8>, PadmaError> {
+    let Value::Map(input) = input else {
+        return Err(error_for(locale, "P1050", position, "input must be a map"));
+    };
+    if input.len() != 3
+        || !input.contains_key("task")
+        || !input.contains_key("instruction")
+        || !input.contains_key("data")
+    {
+        return Err(error_for(
+            locale,
+            "P1050",
+            position,
+            "input must contain exactly task, instruction, and data",
+        ));
+    }
+    let task = input
+        .get("task")
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .filter(|value| is_safe_ai_task_identifier(value))
+        .ok_or_else(|| error_for(locale, "P1050", position, "task must be a safe identifier"))?;
+    let instruction = input
+        .get("instruction")
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.as_str()),
+            _ => None,
+        })
+        .filter(|value| is_safe_ai_instruction(value))
+        .ok_or_else(|| {
+            error_for(
+                locale,
+                "P1050",
+                position,
+                "instruction must be bounded text",
+            )
+        })?;
+    let data = value_to_json(input.get("data").expect("validated input key"))
+        .map_err(|_| error_for(locale, "P1050", position, "data must be JSON-compatible"))?;
+    let payload = serde_json::json!({
+        "protocol": "padma-ai-workflow-v1",
+        "model": manifest.model,
+        "task": task,
+        "instruction": instruction,
+        "data": data,
+    });
+    if json_depth(&payload) > AI_WORKFLOW_MAX_JSON_DEPTH {
+        return Err(error_for(
+            locale,
+            "P1050",
+            position,
+            "input exceeds maximum JSON depth",
+        ));
+    }
+    let payload = serde_json::to_vec(&payload)
+        .map_err(|_| error_for(locale, "P1050", position, "input cannot be encoded"))?;
+    if payload.len() > manifest.max_input_bytes {
+        return Err(error_for(
+            locale,
+            "P1050",
+            position,
+            "input exceeds declared byte limit",
+        ));
+    }
+    Ok(payload)
+}
+
+fn curl_config_quote(value: &str) -> Option<String> {
+    if value.chars().any(char::is_control) {
+        return None;
+    }
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            _ => quoted.push(character),
+        }
+    }
+    quoted.push('"');
+    Some(quoted)
+}
+
+fn ai_workflow_curl_config(
+    manifest: &AiWorkflowManifest,
+    secret: &str,
+    request: &[u8],
+) -> Option<Vec<u8>> {
+    let request = std::str::from_utf8(request).ok()?;
+    let endpoint = curl_config_quote(&manifest.endpoint)?;
+    let authorization = curl_config_quote(&format!("Authorization: Bearer {secret}"))?;
+    let payload = curl_config_quote(request)?;
+    Some(
+        format!(
+            "silent\nshow-error\nfail\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\nheader = {authorization}\ndata-binary = {payload}\nmax-time = \"{}\"\nmax-filesize = \"{}\"\nurl = {endpoint}\n",
+            manifest.timeout_seconds, manifest.max_response_bytes
+        )
+        .into_bytes(),
+    )
+}
+
+fn ai_workflow_response_value(
+    response: &[u8],
+    manifest: &AiWorkflowManifest,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    if response.is_empty() || response.len() > manifest.max_response_bytes {
+        return Err(error_for(
+            locale,
+            "P1052",
+            position,
+            "response exceeds declared byte limit",
+        ));
+    }
+    let response: JsonValue = serde_json::from_slice(response)
+        .map_err(|_| error_for(locale, "P1052", position, "response is not valid JSON"))?;
+    if json_depth(&response) > AI_WORKFLOW_MAX_JSON_DEPTH {
+        return Err(error_for(
+            locale,
+            "P1052",
+            position,
+            "response exceeds maximum JSON depth",
+        ));
+    }
+    let response = response
+        .as_object()
+        .ok_or_else(|| error_for(locale, "P1052", position, "response must be a JSON object"))?;
+    if response.len() != 2
+        || !response.contains_key("protocol")
+        || !response.contains_key("output")
+        || response.get("protocol").and_then(JsonValue::as_str) != Some("padma-ai-workflow-v1")
+    {
+        return Err(error_for(
+            locale,
+            "P1052",
+            position,
+            "response must contain only the workflow protocol and output",
+        ));
+    }
+    let output = response
+        .get("output")
+        .filter(|value| value.is_object())
+        .ok_or_else(|| error_for(locale, "P1052", position, "output must be a JSON object"))?;
+    let output = value_from_json(output.clone())
+        .map_err(|_| error_for(locale, "P1052", position, "output is not Padma-compatible"))?;
+    let mut meta = BTreeMap::new();
+    meta.insert(
+        "adapter".to_string(),
+        Value::String("json-http-v1".to_string()),
+    );
+    meta.insert("model".to_string(), Value::String(manifest.model.clone()));
+    meta.insert("attempts".to_string(), Value::Number(1.0));
+    let mut result = BTreeMap::new();
+    result.insert("output".to_string(), output);
+    result.insert("meta".to_string(), Value::Map(meta));
+    Ok(Value::Map(result))
 }
 
 fn ai_workflow_error(locale: Locale, code: &'static str, detail: &str) -> String {
@@ -6719,9 +7085,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
         | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
         | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
-        | "math.abs" | "math.round" | "math.floor" | "math.ceil" | "auth.password_hash" => {
-            Some((1, 1))
-        }
+        | "math.abs" | "math.round" | "math.floor" | "math.ceil" | "auth.password_hash"
+        | "ai.workflow" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" => Some((2, 2)),
         "text.replace" => Some((3, 3)),
@@ -9412,5 +9777,171 @@ mod tests {
         fs::remove_dir_all(&denied).unwrap();
         assert!(error.starts_with("P1034"));
         assert!(error.contains("network:ai"));
+    }
+
+    #[test]
+    fn ai_workflow_runtime_uses_strict_inert_data_envelopes() {
+        let manifest = parse_ai_workflow_manifest(
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PADMA_AI_RUNTIME_TEST_SECRET\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 32768\nmax_response_bytes = 65536\nretry_policy = \"never\"\n",
+            Locale::English,
+        )
+        .unwrap();
+        let input = Value::Map(BTreeMap::from([
+            ("task".to_string(), Value::String("summarize".to_string())),
+            (
+                "instruction".to_string(),
+                Value::String("Summarize the supplied text only.".to_string()),
+            ),
+            (
+                "data".to_string(),
+                Value::Map(BTreeMap::from([(
+                    "text".to_string(),
+                    Value::String("Padma keeps model output inert.".to_string()),
+                )])),
+            ),
+        ]));
+        let request =
+            ai_workflow_request_payload(&input, &manifest, Locale::English, Position::new(1, 1))
+                .unwrap();
+        let request_json: JsonValue = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request_json["protocol"], "padma-ai-workflow-v1");
+        assert_eq!(request_json["task"], "summarize");
+        assert_eq!(request_json["model"], "reviewed-model-id");
+
+        let value = ai_workflow_response_value(
+            br#"{"protocol":"padma-ai-workflow-v1","output":{"suggested_code":"file.write(\"outside.txt\", \"never execute this\")"}}"#,
+            &manifest,
+            Locale::English,
+            Position::new(1, 1),
+        )
+        .unwrap();
+        let Value::Map(result) = value else {
+            panic!("workflow result must remain a map")
+        };
+        let Some(Value::Map(output)) = result.get("output") else {
+            panic!("workflow output must remain an inert map")
+        };
+        assert_eq!(
+            output.get("suggested_code"),
+            Some(&Value::String(
+                "file.write(\"outside.txt\", \"never execute this\")".to_string()
+            ))
+        );
+        assert!(!Path::new("outside.txt").exists());
+
+        let invalid = ai_workflow_response_value(
+            br#"{"protocol":"wrong","output":{"text":"ignored"}}"#,
+            &manifest,
+            Locale::English,
+            Position::new(1, 1),
+        )
+        .unwrap_err();
+        assert_eq!(invalid.code, "P1052");
+
+        let config = ai_workflow_curl_config(&manifest, "runtime-secret", &request).unwrap();
+        let config = String::from_utf8(config).unwrap();
+        assert!(config.contains("request = \"POST\""));
+        assert!(config.contains("max-time = \"30\""));
+        assert!(config.contains("Authorization: Bearer runtime-secret"));
+        assert!(!config.contains("location"));
+        assert!(!config.contains("retry"));
+    }
+
+    #[test]
+    fn ai_workflow_runtime_fails_before_transport_when_secret_is_missing() {
+        let root = module_fixture_dir("ai-workflow-runtime-missing-secret");
+        let secret_name = "PADMA_AI_WORKFLOW_MISSING_SECRET_91C2";
+        assert!(env::var(secret_name).is_err());
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"ai-runtime\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nnetwork = [\"ai\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-ai.toml"),
+            format!(
+                "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"{secret_name}\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 32768\nmax_response_bytes = 65536\nretry_policy = \"never\"\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.pd"),
+            "let response = ai.workflow({\"task\": \"summarize\", \"instruction\": \"Summarize only.\", \"data\": {\"text\": \"Padma\"}})\nprint response\n",
+        )
+        .unwrap();
+        let (manifest, entry) = load_project_manifest(&root).unwrap();
+        let source = fs::read_to_string(&entry).unwrap();
+        let (program, locale) = compile(&source).unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            entry,
+            root.clone(),
+            manifest.capabilities,
+        );
+        let error = interpreter.run(&program).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(error.code, "P1051");
+        assert!(error.message.contains("credential is unavailable"));
+    }
+
+    #[test]
+    fn ai_workflow_runtime_makes_one_fixed_transport_call_without_network() {
+        let _serial = AI_WORKFLOW_CURL_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap();
+        let root = module_fixture_dir("ai-workflow-runtime-one-shot");
+        let curl = root.join("mock-curl.sh");
+        let count = root.join("transport-count.txt");
+        fs::write(
+            &curl,
+            format!(
+                "#!/bin/sh\ncat >/dev/null\nprintf '1' >> '{}'\nprintf '%s' '{{\"protocol\":\"padma-ai-workflow-v1\",\"output\":{{\"summary\":\"mock response\"}}}}'\n",
+                count.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&curl).unwrap().permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(&curl, permissions).unwrap();
+        }
+        *AI_WORKFLOW_CURL_TEST_PROGRAM
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap() = Some(curl);
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"ai-runtime\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nnetwork = [\"ai\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-ai.toml"),
+            "[workflow]\nversion = \"1\"\nadapter = \"json-http-v1\"\nendpoint = \"https://ai-gateway.example.com/v1/padma\"\nsecret_env = \"PATH\"\nmodel = \"reviewed-model-id\"\ntimeout_seconds = 30\nmax_input_bytes = 32768\nmax_response_bytes = 65536\nretry_policy = \"never\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.pd"),
+            "let response = ai.workflow({\"task\": \"summarize\", \"instruction\": \"Summarize only.\", \"data\": {\"text\": \"Padma\"}})\nprint response\n",
+        )
+        .unwrap();
+        let (manifest, entry) = load_project_manifest(&root).unwrap();
+        let source = fs::read_to_string(&entry).unwrap();
+        let (program, locale) = compile(&source).unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            entry,
+            root.clone(),
+            manifest.capabilities,
+        );
+        interpreter.run(&program).unwrap();
+        *AI_WORKFLOW_CURL_TEST_PROGRAM
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap() = None;
+        assert_eq!(fs::read_to_string(&count).unwrap(), "1");
+        fs::remove_dir_all(root).unwrap();
     }
 }

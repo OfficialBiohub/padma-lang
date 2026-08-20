@@ -12,6 +12,7 @@ All notable user-visible changes are recorded in this file. Padma follows a pre-
 | Agent engineering | Versioned `padma-language` Agent Skill with modular architecture, security, Termux, examples, and verification guidance. |
 | M9 design | Provider-neutral AI workflow and domain-allowlisted browser-planning contract, including capability boundaries, manifest schemas, redaction, no-side-effect plans, regression matrix, and staged implementation order. No new AI or browser runtime authority is enabled by this documentation change. |
 | M9 AI planning | Strict `padma-ai.toml` validation, `network:ai`-gated `padma ai inspect|plan`, bilingual `P1050`, redacted deterministic plans, and a credential-free example. These local commands do not read secrets, resolve DNS, start a process, connect to a provider, invoke a model, or execute generated output. |
+| M9 AI runtime | Provider-neutral `ai.workflow` with an inert JSON input/output envelope, one `json-http-v1` curl configuration path, fixed POST request, no redirect/retry, bounded timeout/output, and bilingual `P1051`/`P1052` transport diagnostics. A test-only local mock proves one transport invocation without a network request. Model output remains data and is never executed. |
 | Quality | Repository hygiene, documentation-link, and Termux installer-contract checks integrated with CI. |
 
 ## 0.1.0

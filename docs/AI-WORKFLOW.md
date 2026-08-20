@@ -2,9 +2,9 @@
 
 ## Status and purpose
 
-Padma M9 now provides an **inspection-only AI workflow foundation**. A project can declare one reviewed, provider-neutral workflow in `padma-ai.toml`, then validate it locally with `padma ai inspect` or render its deterministic machine-readable plan with `padma ai plan`.
+Padma M9 now provides a **provider-neutral AI workflow foundation**. A project can declare one reviewed workflow in `padma-ai.toml`, validate it locally with `padma ai inspect`, render its deterministic machine-readable plan with `padma ai plan`, and make one explicit structured request with `ai.workflow(...)`.
 
-This increment **does not send an AI request**. It neither reads the secret value nor resolves a hostname, opens a network connection, starts a child process, invokes a model, or executes generated output. The future `ai.workflow(...)` runtime call remains a separate, security-reviewed implementation step.
+The inspection commands remain local-only: they neither read a secret value nor resolve a hostname, open a network connection, start a child process, invoke a model, or execute generated output. In contrast, `ai.workflow(...)` is an explicit one-shot runtime call. It may read the named secret and contact the reviewed HTTPS endpoint, but it never retries, follows redirects, exposes the secret in command arguments or user-facing output, or executes generated output.
 
 > A plan describes reviewed intent; it is never permission to contact an AI provider.
 
@@ -81,10 +81,10 @@ padma ai plan .
 
 ## Security boundary
 
-The manifest is deliberately strict because a future AI request can transmit user data and incur provider-side cost. The plan therefore locks the endpoint, adapter, model metadata, timeout, byte limits, and retry policy before any transport exists. It does not support provider SDK selection, arbitrary headers, proxy configuration, TLS bypass, custom shell arguments, redirects, tool use, prompts that trigger commands, model training, browser access, database access, file writes, or automatic retries.
+The manifest is deliberately strict because an AI request can transmit user data and incur provider-side cost. The plan and runtime lock the endpoint, adapter, model metadata, timeout, byte limits, and retry policy. The runtime uses one fixed `curl --config -` invocation: the configuration is delivered through standard input, the child environment is cleared except for the OS command path and locale, and the only accepted operation is one JSON `POST` to the reviewed endpoint. It does not support provider SDK selection, arbitrary headers, proxy configuration, TLS bypass, custom shell arguments, redirects, tool use, prompts that trigger commands, model training, browser access, database access, file writes, or automatic retries.
 
-Future runtime work must keep the request envelope versioned, use a fixed argument vector, prevent secret values from appearing in command arguments or user-facing output, bound request/response size and JSON depth, and treat all model output as untrusted data. The wider design and its browser-planning counterpart are documented in [M9 AI and Browser Design](M9-AI-BROWSER-DESIGN.md) and the current capability contract is in [Capability Security](CAPABILITY-SECURITY.md).
+`ai.workflow(...)` accepts exactly one map containing `task`, `instruction`, and `data`. It sends a versioned JSON envelope with the declared model metadata. A valid provider response must be a bounded JSON object containing exactly `protocol: "padma-ai-workflow-v1"` and `output`. Padma returns that output as inert Padma data; it does not parse it as source code, execute it, write it to a file, send it to a browser, or invoke another capability. Missing or unusable credentials report localized **P1051**; a timeout, missing `curl`, non-zero transport result, or bounded-stream failure also reports P1051 without disclosing the secret. Invalid or oversized provider response data reports localized **P1052**.
 
-## Next implementation boundary
+## Current and next implementation boundary
 
-The next AI increment may introduce `ai.workflow(input)` only after its structured input/output validation, one-shot transport, no-redirect policy, secret handoff, response schema enforcement, localized `P1051`/`P1052` paths, and security-negative regression coverage are implemented and reviewed. Until then, `padma ai inspect` and `padma ai plan` remain intentionally local and side-effect free.
+The current runtime deliberately stops at one reviewed `json-http-v1` request. It has no agent loop, tool calling, streaming, provider failover, dynamic endpoint selection, response-driven capability grant, generated-code execution, or model-training function. Future work must keep this zero-trust boundary while adding only separately reviewed features. `padma ai inspect` and `padma ai plan` remain intentionally local and side-effect free.

@@ -190,12 +190,15 @@
 
 ## M9 — AI Workflow and Browser Planning
 
-- [ ] Define and implement a provider-neutral AI workflow helper with project-local provider metadata, explicit `network:ai` capability gating, environment-variable-only secrets, bounded request/response JSON, and no automatic execution of generated output.
-  - [ ] Add a versioned `padma-ai.toml` contract plus `padma ai inspect` and `padma ai plan` commands that validate configuration without making network requests or reading secret values.
+- [x] Define and implement a provider-neutral AI workflow helper with project-local provider metadata, explicit `network:ai` capability gating, environment-variable-only secrets, bounded request/response JSON, and no automatic execution of generated output.
+  - [x] Add a versioned `padma-ai.toml` contract plus `padma ai inspect` and `padma ai plan` commands that validate configuration without making network requests or reading secret values.
     - [x] Implement reserved bilingual diagnostics `P1050`–`P1052`, strict AI manifest data structures/parser, and capability-gated local manifest loading.
     - [x] Implement deterministic inspection-only plan JSON with `network: "disabled"`, `secret.value: "not-read"`, and no environment, DNS, child-process, or network access.
-  - [ ] Add a structured `ai.workflow` runtime contract with explicit provider selection, input/output schemas, bounded retry policy, localized diagnostics, redaction, positive tests, and security-negative tests.
-  - [ ] Publish an AI workflow security guide and a runnable local planning example with provider setup and data-handling limits.
+  - [x] Add a structured `ai.workflow` runtime contract with explicit provider selection, input/output schemas, bounded retry policy, localized diagnostics, redaction, positive tests, and security-negative tests.
+    - [x] Implement a strict JSON request envelope and bounded structured response validator that expose model output as inert Padma data only.
+    - [x] Implement one `json-http-v1` transport path with a fixed request shape, timeout/size limits, no retry, sanitized diagnostics, and secret exclusion from command arguments, output, logs, and child environment.
+    - [x] Add transport mock tests for exactly-one request, missing/empty secret, timeout, non-zero exit, invalid response, redaction, and prohibition on generated-output execution.
+  - [x] Publish an AI workflow security guide and a runnable local planning example with provider setup and data-handling limits.
 - [ ] Define and implement domain-allowlisted browser automation planning with explicit `browser:plan` capability gating, project-local manifest, no login or CAPTCHA bypass, no payment/posting, and no browser execution in the initial milestone.
   - [ ] Add a versioned `padma-browser.toml` contract plus `padma browser inspect` and `padma browser plan` commands that validate allowlisted HTTPS origins, navigation-only intent, and redacted request descriptors.
   - [ ] Add browser-plan policy tests for domain/subdomain matching, redirect boundaries, credentials, private-network targets, unsafe actions, malformed manifests, missing capability, secret redaction, and zero side effects.
