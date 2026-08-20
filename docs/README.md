@@ -42,6 +42,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | Document | Use it for |
 |---|---|
 | [Repository architecture](REPOSITORY-ARCHITECTURE.md) | Directory ownership, stable contracts, and source-layout policy |
+| [Padma Agent Skill](AGENT-SKILL.md) | Reusable agent guidance for safe, language-first Padma engineering |
 | [Production roadmap](PRODUCTION-ROADMAP.md) | Major future implementation milestones |
 | [Domain libraries](DOMAIN-LIBRARIES.md) | HTTP, AI, backend, and automation helper boundaries |
 

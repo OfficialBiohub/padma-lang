@@ -13,6 +13,7 @@ Please search existing issues and proposals before proposing a change. Open an i
 | New syntax | RFC discussion, parser test, interpreter/type-check test, documentation update. |
 | Standard library feature | API rationale, safety review, examples, test coverage. |
 | External package bridge | Version pinning policy, error mapping, permission model, security review. |
+| Agent Skill package | Valid metadata, accurate routing/reference links, security-contract review, and repository gate. |
 | Breaking change | Approved RFC, migration note, semantic-versioning review. |
 
 ## Local setup
@@ -45,4 +46,4 @@ Do not publicly disclose a potential vulnerability before maintainers have revie
 
 ## Repository structure
 
-The source and tooling layout is documented in [docs/REPOSITORY-ARCHITECTURE.md](docs/REPOSITORY-ARCHITECTURE.md). Keep the root crate, `padma` binary name, Termux installation contract, public library APIs, and documented diagnostic codes compatible unless an approved RFC and migration note explicitly change them.
+The source and tooling layout is documented in [docs/REPOSITORY-ARCHITECTURE.md](docs/REPOSITORY-ARCHITECTURE.md). Keep the root crate, `padma` binary name, Termux installation contract, public library APIs, and documented diagnostic codes compatible unless an approved RFC and migration note explicitly change them. Agent-assisted maintainers should use the versioned guidance in [docs/AGENT-SKILL.md](docs/AGENT-SKILL.md); it must track current public contracts but is never a runtime dependency.

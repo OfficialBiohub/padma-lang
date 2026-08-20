@@ -180,3 +180,10 @@
   - [x] Add a capability-gated authorized media-download example using `media.download`, with a clear ownership and platform-terms boundary.
   - [x] Add static website, local backend response, SQLite persistence, local-server plan, and defensive security-inspection examples with line-by-line walkthroughs.
   - [x] Add corresponding Bengali-English output samples and verify every documented command against the release binary before publishing.
+
+## Padma Agent Skill
+
+- [x] Package Padma project knowledge as a reusable Agent Skill so future feature work follows the language-first, Termux-first, capability-safe, GitHub-reviewed engineering contract.
+  - [x] Define the skill trigger, supported request categories, stable public contracts, non-goals, and mandatory safety boundary for Padma language work.
+  - [x] Add modular reference guides for architecture, syntax/API verification, Termux distribution, capability security, examples, testing, and release procedure.
+  - [x] Add a skill validation checklist and repository documentation that explain how contributors use and maintain the skill without treating it as a runtime language package.

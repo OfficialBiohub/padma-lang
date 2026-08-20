@@ -19,6 +19,7 @@ padma-lang/
 ├── playground/               # Optional demonstration client; never required for the core language
 ├── packaging/                # Downstream packaging recipes, including future Termux publication files
 ├── scripts/                  # Reproducible repository verification and maintenance commands
+├── skills/                   # Reusable agent-engineering guidance; never a runtime dependency
 ├── .github/                  # CI, issue forms, pull-request template, and project automation
 ├── install-termux.sh         # Supported Termux source installer entry point
 ├── Cargo.toml                # Canonical root Rust package manifest for the `padma` CLI
@@ -42,6 +43,7 @@ padma-lang/
 | `wasm/`, `playground/` | Optional browser experiences | Must not redefine language semantics or block Termux/core releases |
 | `packaging/` | Maintained downstream distribution recipes | Root crate layout and `$PREFIX/bin/padma` installation contract are preserved |
 | `scripts/` | Repeatable maintainer checks | Scripts may validate but must not silently publish, deploy, or mutate user credentials |
+| `skills/` | Versioned agent workflows and references | Must mirror current public contracts and never become a Padma runtime dependency |
 | `.github/` | CI and contributor collaboration | CI runs without secrets and validates a clean, reproducible checkout |
 
 ## Source-layout policy
@@ -59,6 +61,8 @@ Padma currently has a deliberately compact Rust implementation. A future compile
 The root README is the public entry point. It must answer: what Padma is, what works today, how to install it in Termux, how to run the first program, where to find examples, and which features are deliberately not yet available.
 
 Detailed material belongs in `docs/`. New platform features must include one guide, one safe example when applicable, capability requirements, explicit security exclusions, and test evidence before they are advertised in the root README.
+
+Reusable agent guidance belongs in `skills/`; its versioned entry point and maintenance process are documented in `docs/AGENT-SKILL.md`. It supports contributors but does not change installation, language semantics, runtime dependencies, or the Termux user contract.
 
 ## Release and artifact policy
 

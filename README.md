@@ -114,6 +114,7 @@ Padma local projects use explicit capability grants in `padma.toml`. Sensitive o
 | [Projects](docs/PROJECTS.md) | `padma.toml`, lockfile, modules, and local project boundaries |
 | [Editor tooling](docs/EDITOR-TOOLING.md) | Tree-sitter, VS Code extension, and LSP |
 | [Platform guides](docs/README.md#platform-and-application-planning) | GUI, Android, identity, SQLite, Render, and deployment boundaries |
+| [Padma Agent Skill](docs/AGENT-SKILL.md) | Reusable language-first engineering guidance for agents and maintainers |
 
 ## Repository map
 
@@ -126,13 +127,14 @@ wasm/       Optional browser bridge
 playground/ Optional demonstration client
 packaging/  Downstream distribution recipes
 scripts/    Reproducible quality and maintenance commands
+skills/     Reusable agent-engineering guidance; not a runtime dependency
 ```
 
 The complete responsibility and compatibility map is in [Repository Architecture](docs/REPOSITORY-ARCHITECTURE.md).
 
 ## Contribute safely
 
-Padma welcomes contributors. Begin with [CONTRIBUTING.md](CONTRIBUTING.md), then use the issue forms for bugs or language proposals. Security reports must follow [SECURITY.md](SECURITY.md), not public issues. Community expectations are documented in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), while issue-routing guidance is in [SUPPORT.md](SUPPORT.md).
+Padma welcomes contributors. Begin with [CONTRIBUTING.md](CONTRIBUTING.md), then use the issue forms for bugs or language proposals. The versioned [Padma Agent Skill](docs/AGENT-SKILL.md) provides project-specific workflow guidance for agent-assisted contributions. Security reports must follow [SECURITY.md](SECURITY.md), not public issues. Community expectations are documented in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), while issue-routing guidance is in [SUPPORT.md](SUPPORT.md).
 
 Before submitting a pull request, run:
 

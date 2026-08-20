@@ -9,6 +9,7 @@ All notable user-visible changes are recorded in this file. Padma follows a pre-
 | Area | Change |
 |---|---|
 | Repository | Language-first repository architecture, documentation index, examples/tooling/test indexes, collaboration policies, issue forms, pull-request template, and repeatable quality scripts. |
+| Agent engineering | Versioned `padma-language` Agent Skill with modular architecture, security, Termux, examples, and verification guidance. |
 | Quality | Repository hygiene, documentation-link, and Termux installer-contract checks integrated with CI. |
 
 ## 0.1.0
