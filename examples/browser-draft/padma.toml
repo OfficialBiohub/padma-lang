@@ -1,0 +1,8 @@
+[padma]
+name = "browser-draft"
+version = "0.1.0"
+entry = "main.pd"
+locale = "bn"
+
+[capabilities]
+browser = ["plan", "draft"]

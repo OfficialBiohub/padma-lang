@@ -236,3 +236,11 @@
   - [ ] Preserve exact HTTPS origin matching, revalidate each redirect and destination immediately before use, prohibit login credential capture, CAPTCHA bypass, JavaScript injection, cookie/profile exfiltration, unsafe downloads, and automatic form submission.
   - [ ] Require explicit confirmation before any external side effect such as form submission, upload, message/post, purchase, payment, account change, or data deletion; do not provide a silent or autonomous execution path.
   - [ ] Add browser action tests for missing confirmation, allowlist escapes, redirects, credential-bearing URLs, expired confirmation, cancellation, action audit redaction, and denied sensitive operations.
+
+## M11 — User-Mediated Browser Interaction Drafts
+
+- [x] Define a strict local `padma-browser-draft.toml` contract for reviewable browser interaction drafts that can describe text, attachment metadata, and a reviewed destination without collecting credentials, cookies, page data, selectors, scripts, or a raw live-session state.
+  - [x] Add `browser:draft` capability-gated `padma browser draft inspect|plan` commands that emit inert, deterministic draft descriptors and never start a browser, resolve DNS, read a file, upload data, submit a form, post a message, or execute generated content.
+  - [x] Require draft attachment paths to be project-relative metadata only; no file read/upload action is permitted in the draft foundation.
+  - [x] Add explicit `user-takeover-required` state for login, CAPTCHA, form completion, post/message, upload/download, account change, purchase/payment, or any sensitive external action.
+- [x] Document and test that a draft may be copied or reviewed by the user after a visible Android Browser Handoff, but Padma cannot inject it into a webpage, fill a form, or infer/record the user’s decision.

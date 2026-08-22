@@ -1,0 +1,10 @@
+[draft]
+version = "1"
+mode = "user-review-only"
+browser_plan_digest = "sha256:7cdd575b89c895eccd66479b26681d54abd7658d06946be3436b038e9b116f07"
+navigation_index = 1
+action = "message-draft"
+title = "Python documentation question"
+body = "Please review this short documentation question before I manually submit it in my visible browser."
+attachment_path = "attachments/context.txt"
+max_review_seconds = 60

@@ -59,6 +59,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1062 | Android Browser Handoff safety | A handoff request is unsafe, unsupported, not freshly confirmed, or no longer bound to one reviewed browser-plan destination. Raw URLs and approval input are not echoed. |
 | P1063 | Android Browser Handoff runtime | The fixed local `termux-open-url` opener was unavailable or failed. Padma does not retry, use another executable, or fall back to a remote browser service. |
 | P1064 | Android Browser Handoff audit safety | The opt-in local audit manifest, path, existing JSONL record, or bounded atomic write is unsafe or failed. Raw URLs, query strings, approval input, cookies, credentials, profiles, page data, and opener output are not written or echoed. |
+| P1065 | Browser interaction draft safety | `padma-browser-draft.toml` is missing, malformed, unsafe, uses an unsupported mode/action, has an invalid/mismatched reviewed plan binding, or uses unsafe attachment metadata. Raw sensitive values are not echoed. |
+| P1066 | Browser interaction draft execution boundary | A browser draft execution path is unavailable or prohibited in this Padma version. Only local `padma browser draft inspect` and `padma browser draft plan` commands are supported. |
 
 ## Example
 
