@@ -292,6 +292,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1062") => ("Android Browser Handoff was not authorized or was cancelled".into(), Some("Review the URL and type `OPEN` in the foreground terminal; no other input will open a browser.".into())),
         (Locale::Bangla, "P1063") => ("Android browser handoff চালু করা যায়নি".into(), Some("Termux-এর `termux-open-url` command আছে কি না পরীক্ষা করুন; Padma retry বা fallback browser service ব্যবহার করবে না।".into())),
         (Locale::English, "P1063") => ("Could not start Android Browser Handoff".into(), Some("Check that Termux provides `termux-open-url`; Padma will not retry or use a fallback browser service.".into())),
+        (Locale::Bangla, "P1064") => ("Android browser handoff audit নিরাপদে লেখা যায়নি".into(), Some("project-এর ভেতরে `audit/`-এর অধীনে একটি regular `.jsonl` path ও bounded audit policy ব্যবহার করুন; Padma raw URL বা browser data লিখবে না।".into())),
+        (Locale::English, "P1064") => ("Could not safely write the Android Browser Handoff audit".into(), Some("Use a regular bounded `.jsonl` path below `audit/` inside the project; Padma will not write raw URLs or browser data.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -4169,6 +4171,28 @@ struct BrowserConfirmationPlanManifest {
     max_session_seconds: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserHandoffAuditManifest {
+    path: PathBuf,
+    max_records: usize,
+}
+
+#[derive(Debug, Clone)]
+struct BrowserHandoffContext {
+    locale: Locale,
+    root: PathBuf,
+    destination: String,
+    browser_plan_digest: String,
+    navigation_index: usize,
+    audit: Option<BrowserHandoffAuditManifest>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserHandoffDecision {
+    Open,
+    Cancelled,
+}
+
 const PROCESS_CAPABILITIES: [&str; 7] = [
     "git", "yt-dlp", "curl", "ffmpeg", "python", "python3", "node",
 ];
@@ -4218,7 +4242,7 @@ fn capability_grants_for_field(
         "identity" => &["local"],
         "gui" => &["local"],
         "android" => &["plan"],
-        "browser" => &["plan", "confirm-plan", "handoff"],
+        "browser" => &["plan", "confirm-plan", "handoff", "audit"],
         "ai" => &["tools", "training-plan"],
         "deployment" => &["render"],
         "filesystem" => &["read", "write"],
@@ -5822,6 +5846,123 @@ fn parse_browser_confirmation_plan_manifest(
         navigation_index,
         max_session_seconds,
     })
+}
+
+fn parse_browser_handoff_audit_manifest(
+    source: &str,
+    locale: Locale,
+) -> Result<BrowserHandoffAuditManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "audit" {
+                return Err(browser_handoff_error(
+                    locale,
+                    "P1064",
+                    &format!("unsupported audit section on line {}", line_number + 1),
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line.split_once('=').ok_or_else(|| {
+            browser_handoff_error(
+                locale,
+                "P1064",
+                &format!("expected `key = value` on line {}", line_number + 1),
+            )
+        })?;
+        let key = key.trim();
+        if section != "audit" || !matches!(key, "version" | "mode" | "path" | "max_records") {
+            return Err(browser_handoff_error(
+                locale,
+                "P1064",
+                &format!("unsupported audit field on line {}", line_number + 1),
+            ));
+        }
+        let value = if key == "max_records" {
+            let value = raw_value.trim();
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(browser_handoff_error(
+                    locale,
+                    "P1064",
+                    "max_records must be an unsigned integer",
+                ));
+            }
+            value.to_string()
+        } else {
+            parse_browser_confirmation_quoted_value(raw_value, locale, line_number + 1).map_err(
+                |_| {
+                    browser_handoff_error(
+                        locale,
+                        "P1064",
+                        &format!("expected a quoted audit value on line {}", line_number + 1),
+                    )
+                },
+            )?
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(browser_handoff_error(
+                locale,
+                "P1064",
+                "duplicate audit field",
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                browser_handoff_error(locale, "P1064", &format!("missing [audit] field `{key}`"))
+            })
+    };
+    if required("version")? != "1" || required("mode")? != "redacted-local-v1" {
+        return Err(browser_handoff_error(
+            locale,
+            "P1064",
+            "audit policy fields do not match version 1",
+        ));
+    }
+    let path_value = required("path")?;
+    let path = safe_relative_path(&path_value).map_err(|_| {
+        browser_handoff_error(
+            locale,
+            "P1064",
+            "audit path must be project-relative and may not traverse directories",
+        )
+    })?;
+    if path.components().count() < 2
+        || path
+            .components()
+            .next()
+            .and_then(|part| part.as_os_str().to_str())
+            != Some("audit")
+        || path.extension().and_then(|value| value.to_str()) != Some("jsonl")
+    {
+        return Err(browser_handoff_error(
+            locale,
+            "P1064",
+            "audit path must be a `.jsonl` file below audit/",
+        ));
+    }
+    let max_records = required("max_records")?.parse::<usize>().map_err(|_| {
+        browser_handoff_error(locale, "P1064", "max_records must be an unsigned integer")
+    })?;
+    if !(1..=128).contains(&max_records) {
+        return Err(browser_handoff_error(
+            locale,
+            "P1064",
+            "max_records must be between 1 and 128",
+        ));
+    }
+    Ok(BrowserHandoffAuditManifest { path, max_records })
 }
 
 fn safe_public_https_url(value: &str) -> bool {
@@ -8337,6 +8478,39 @@ fn browser_handoff_capability_error(project: &ProjectManifest) -> Result<(), Str
     ))
 }
 
+fn load_browser_handoff_audit_manifest(
+    root: &Path,
+    project: &ProjectManifest,
+) -> Result<Option<BrowserHandoffAuditManifest>, String> {
+    if !project.capabilities.contains("browser:audit") {
+        return Ok(None);
+    }
+    let locale = browser_plan_locale(project);
+    let manifest_path = root.join("padma-browser-audit.toml");
+    let metadata = fs::symlink_metadata(&manifest_path).map_err(|error| {
+        browser_handoff_error(
+            locale,
+            "P1064",
+            &format!("cannot inspect browser audit manifest: {error}"),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(browser_handoff_error(
+            locale,
+            "P1064",
+            "browser audit manifest must be a regular project file",
+        ));
+    }
+    let source = fs::read_to_string(&manifest_path).map_err(|error| {
+        browser_handoff_error(
+            locale,
+            "P1064",
+            &format!("cannot read browser audit manifest: {error}"),
+        )
+    })?;
+    parse_browser_handoff_audit_manifest(&source, locale).map(Some)
+}
+
 fn load_browser_confirmation_plan_manifest(
     directory: &Path,
 ) -> Result<
@@ -8459,14 +8633,35 @@ fn run_browser_confirmation_plan(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn load_browser_handoff_destination(directory: &Path) -> Result<(Locale, String), String> {
-    let (project, browser_plan, confirmation) = load_browser_confirmation_plan_manifest(directory)?;
+fn load_browser_handoff_context(directory: &Path) -> Result<BrowserHandoffContext, String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1062: cannot resolve project root: {error}"))?;
+    let (project, browser_plan, confirmation) = load_browser_confirmation_plan_manifest(&root)?;
     browser_handoff_capability_error(&project)?;
     let destination = browser_plan.navigation_urls[confirmation.navigation_index - 1].clone();
-    Ok((browser_plan_locale(&project), destination))
+    let audit = load_browser_handoff_audit_manifest(&root, &project)?;
+    Ok(BrowserHandoffContext {
+        locale: browser_plan_locale(&project),
+        root,
+        destination,
+        browser_plan_digest: browser_plan_digest(&browser_plan),
+        navigation_index: confirmation.navigation_index,
+        audit,
+    })
 }
 
-fn browser_handoff_confirmation_prompt(locale: Locale, destination: &str) -> Result<(), String> {
+fn browser_handoff_confirmation_decision(answer: &str) -> BrowserHandoffDecision {
+    if answer.trim() == "OPEN" {
+        BrowserHandoffDecision::Open
+    } else {
+        BrowserHandoffDecision::Cancelled
+    }
+}
+
+fn browser_handoff_confirmation_prompt(
+    locale: Locale,
+    destination: &str,
+) -> Result<BrowserHandoffDecision, String> {
     let message = match locale {
         Locale::Bangla => format!(
             "\nAndroid Browser Handoff\nReview করা HTTPS URL: {destination}\nPadma শুধু Android browser-এ এই URL handoff করবে। এটি cookie, credential, profile, page content, JavaScript, form, post, upload, download, বা payment access করবে না।\nBrowser খুলতে OPEN লিখে Enter চাপুন; বাতিল করতে অন্য কিছু লিখুন: "
@@ -8483,14 +8678,176 @@ fn browser_handoff_confirmation_prompt(locale: Locale, destination: &str) -> Res
     io::stdin().read_line(&mut answer).map_err(|_| {
         browser_handoff_error(locale, "P1062", "cannot read foreground confirmation")
     })?;
-    if answer.trim() != "OPEN" {
+    Ok(browser_handoff_confirmation_decision(&answer))
+}
+
+fn browser_handoff_audit_record(
+    context: &BrowserHandoffContext,
+    state: &str,
+    outcome: &str,
+) -> Result<(), String> {
+    let Some(audit) = &context.audit else {
+        return Ok(());
+    };
+    if !matches!(state, "cancelled" | "opener-requested" | "opener-failed")
+        || !matches!(outcome, "P1062" | "P1063" | "requested")
+    {
         return Err(browser_handoff_error(
-            locale,
-            "P1062",
-            "confirmation was not granted",
+            context.locale,
+            "P1064",
+            "audit event is outside the fixed handoff event vocabulary",
         ));
     }
-    Ok(())
+    let audit_directory = context.root.join("audit");
+    match fs::symlink_metadata(&audit_directory) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(browser_handoff_error(
+                context.locale,
+                "P1064",
+                "audit directory must be a real project directory",
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir(&audit_directory).map_err(|_| {
+                browser_handoff_error(context.locale, "P1064", "cannot create audit directory")
+            })?;
+        }
+        Err(_) => {
+            return Err(browser_handoff_error(
+                context.locale,
+                "P1064",
+                "cannot inspect audit directory",
+            ));
+        }
+    }
+    let canonical_directory = fs::canonicalize(&audit_directory).map_err(|_| {
+        browser_handoff_error(context.locale, "P1064", "cannot resolve audit directory")
+    })?;
+    if canonical_directory != audit_directory || !canonical_directory.starts_with(&context.root) {
+        return Err(browser_handoff_error(
+            context.locale,
+            "P1064",
+            "audit directory must remain inside the project root",
+        ));
+    }
+    let file_name = audit.path.file_name().ok_or_else(|| {
+        browser_handoff_error(context.locale, "P1064", "audit path has no file name")
+    })?;
+    let audit_path = canonical_directory.join(file_name);
+    let mut records = Vec::new();
+    match fs::symlink_metadata(&audit_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(browser_handoff_error(
+                    context.locale,
+                    "P1064",
+                    "audit path must be a regular file",
+                ));
+            }
+            if metadata.len() > (audit.max_records as u64).saturating_mul(512) {
+                return Err(browser_handoff_error(
+                    context.locale,
+                    "P1064",
+                    "audit file exceeds the bounded local policy",
+                ));
+            }
+            let existing = fs::read_to_string(&audit_path).map_err(|_| {
+                browser_handoff_error(context.locale, "P1064", "cannot read audit file")
+            })?;
+            for line in existing.lines() {
+                let value: JsonValue = serde_json::from_str(line).map_err(|_| {
+                    browser_handoff_error(
+                        context.locale,
+                        "P1064",
+                        "audit file has an invalid record",
+                    )
+                })?;
+                let object = value.as_object().ok_or_else(|| {
+                    browser_handoff_error(context.locale, "P1064", "audit record must be an object")
+                })?;
+                let permitted = [
+                    "version",
+                    "event",
+                    "timestampEpochSeconds",
+                    "browserPlanDigest",
+                    "navigationIndex",
+                    "state",
+                    "outcome",
+                ];
+                if object.len() != permitted.len()
+                    || object.keys().any(|key| !permitted.contains(&key.as_str()))
+                    || value.get("version") != Some(&JsonValue::from(1))
+                    || value.get("event") != Some(&JsonValue::from("android-browser-handoff"))
+                    || !value
+                        .get("browserPlanDigest")
+                        .and_then(JsonValue::as_str)
+                        .is_some_and(is_sha256_digest)
+                    || value
+                        .get("navigationIndex")
+                        .and_then(JsonValue::as_u64)
+                        .filter(|index| *index > 0 && *index <= 16)
+                        .is_none()
+                    || !value
+                        .get("state")
+                        .and_then(JsonValue::as_str)
+                        .is_some_and(|entry| {
+                            matches!(entry, "cancelled" | "opener-requested" | "opener-failed")
+                        })
+                    || !value
+                        .get("outcome")
+                        .and_then(JsonValue::as_str)
+                        .is_some_and(|entry| matches!(entry, "P1062" | "P1063" | "requested"))
+                {
+                    return Err(browser_handoff_error(
+                        context.locale,
+                        "P1064",
+                        "audit file contains a non-redacted or unsupported record",
+                    ));
+                }
+                records.push(serde_json::to_string(&value).map_err(|_| {
+                    browser_handoff_error(context.locale, "P1064", "cannot normalize audit record")
+                })?);
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => {
+            return Err(browser_handoff_error(
+                context.locale,
+                "P1064",
+                "cannot inspect audit file",
+            ));
+        }
+    }
+    let timestamp_epoch_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| browser_handoff_error(context.locale, "P1064", "system clock is invalid"))?
+        .as_secs();
+    let record = serde_json::to_string(&serde_json::json!({
+        "version": 1,
+        "event": "android-browser-handoff",
+        "timestampEpochSeconds": timestamp_epoch_seconds,
+        "browserPlanDigest": context.browser_plan_digest,
+        "navigationIndex": context.navigation_index,
+        "state": state,
+        "outcome": outcome
+    }))
+    .map_err(|_| browser_handoff_error(context.locale, "P1064", "cannot encode audit record"))?;
+    records.push(record);
+    let keep_from = records.len().saturating_sub(audit.max_records);
+    let contents = format!("{}\n", records[keep_from..].join("\n"));
+    let temporary = canonical_directory.join(format!(
+        ".padma-browser-audit-{}-{}.tmp",
+        process::id(),
+        RANDOM_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&temporary, contents).map_err(|_| {
+        browser_handoff_error(context.locale, "P1064", "cannot write temporary audit file")
+    })?;
+    fs::rename(&temporary, &audit_path).map_err(|_| {
+        let _ = fs::remove_file(&temporary);
+        browser_handoff_error(context.locale, "P1064", "cannot finalize audit file")
+    })
 }
 
 fn termux_browser_handoff_command(path: &std::ffi::OsStr, destination: &str) -> process::Command {
@@ -8523,10 +8880,24 @@ fn termux_browser_handoff(destination: &str, locale: Locale) -> Result<(), Strin
 }
 
 fn run_browser_handoff(directory: &Path) -> Result<(), String> {
-    let (locale, destination) = load_browser_handoff_destination(directory)?;
-    browser_handoff_confirmation_prompt(locale, &destination)?;
-    termux_browser_handoff(&destination, locale)?;
-    match locale {
+    let context = load_browser_handoff_context(directory)?;
+    match browser_handoff_confirmation_prompt(context.locale, &context.destination)? {
+        BrowserHandoffDecision::Cancelled => {
+            browser_handoff_audit_record(&context, "cancelled", "P1062")?;
+            return Err(browser_handoff_error(
+                context.locale,
+                "P1062",
+                "confirmation was cancelled",
+            ));
+        }
+        BrowserHandoffDecision::Open => {}
+    }
+    if let Err(error) = termux_browser_handoff(&context.destination, context.locale) {
+        let _ = browser_handoff_audit_record(&context, "opener-failed", "P1063");
+        return Err(error);
+    }
+    browser_handoff_audit_record(&context, "opener-requested", "requested")?;
+    match context.locale {
         Locale::Bangla => println!(
             "Android browser handoff অনুরোধ করা হয়েছে। Padma browser content, cookie, credential, বা profile দেখতে বা নিয়ন্ত্রণ করতে পারে না।"
         ),
@@ -11954,6 +12325,27 @@ mod tests {
         fs::write(root.join("padma-browser-confirm.toml"), manifest).unwrap();
     }
 
+    fn valid_browser_handoff_audit_manifest(max_records: usize) -> String {
+        format!(
+            "[audit]\nversion = \"1\"\nmode = \"redacted-local-v1\"\npath = \"audit/handoff.jsonl\"\nmax_records = {max_records}\n"
+        )
+    }
+
+    fn write_browser_handoff_audit_project(root: &Path, manifest: &str, audit: &str) {
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"browser-handoff-audit-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nbrowser = [\"plan\", \"confirm-plan\", \"handoff\", \"audit\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-browser.toml"),
+            valid_browser_plan_manifest(),
+        )
+        .unwrap();
+        fs::write(root.join("padma-browser-confirm.toml"), manifest).unwrap();
+        fs::write(root.join("padma-browser-audit.toml"), audit).unwrap();
+    }
+
     #[test]
     fn browser_handoff_requires_a_separate_capability_and_uses_one_reviewed_destination() {
         let browser_plan =
@@ -11962,17 +12354,17 @@ mod tests {
 
         let denied_root = module_fixture_dir("browser-handoff-capability-denied");
         write_browser_handoff_project(&denied_root, false, &manifest);
-        let error = load_browser_handoff_destination(&denied_root).unwrap_err();
+        let error = load_browser_handoff_context(&denied_root).unwrap_err();
         fs::remove_dir_all(&denied_root).unwrap();
         assert!(error.starts_with("P1034"));
         assert!(error.contains("browser:handoff"));
 
         let granted_root = module_fixture_dir("browser-handoff-destination");
         write_browser_handoff_project(&granted_root, true, &manifest);
-        let (locale, destination) = load_browser_handoff_destination(&granted_root).unwrap();
+        let context = load_browser_handoff_context(&granted_root).unwrap();
         fs::remove_dir_all(&granted_root).unwrap();
-        assert_eq!(locale, Locale::English);
-        assert_eq!(destination, "https://docs.python.org/3/tutorial/");
+        assert_eq!(context.locale, Locale::English);
+        assert_eq!(context.destination, "https://docs.python.org/3/tutorial/");
     }
 
     #[test]
@@ -11992,6 +12384,89 @@ mod tests {
         assert!(command
             .get_envs()
             .all(|(key, value)| key == std::ffi::OsStr::new("PATH") && value.is_some()));
+    }
+
+    #[test]
+    fn browser_handoff_cancellation_is_explicit_and_never_becomes_open() {
+        assert_eq!(
+            browser_handoff_confirmation_decision("OPEN\n"),
+            BrowserHandoffDecision::Open
+        );
+        for answer in ["", "CANCEL", "open", "OPEN now", "\\n"] {
+            assert_eq!(
+                browser_handoff_confirmation_decision(answer),
+                BrowserHandoffDecision::Cancelled,
+                "unexpected handoff decision for {answer:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn browser_handoff_audit_is_opt_in_bounded_and_redacted() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let confirmation = valid_browser_confirmation_manifest(&browser_plan_digest(&browser_plan));
+        let root = module_fixture_dir("browser-handoff-audit-redacted");
+        write_browser_handoff_audit_project(
+            &root,
+            &confirmation,
+            &valid_browser_handoff_audit_manifest(2),
+        );
+        let context = load_browser_handoff_context(&root).unwrap();
+        browser_handoff_audit_record(&context, "cancelled", "P1062").unwrap();
+        browser_handoff_audit_record(&context, "opener-failed", "P1063").unwrap();
+        browser_handoff_audit_record(&context, "opener-requested", "requested").unwrap();
+        let contents = fs::read_to_string(root.join("audit/handoff.jsonl")).unwrap();
+        let records = contents.lines().collect::<Vec<_>>();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(records.len(), 2);
+        assert!(!contents.contains("https://"));
+        assert!(!contents.contains("OPEN"));
+        for line in records {
+            let record: JsonValue = serde_json::from_str(line).unwrap();
+            assert_eq!(record["event"], "android-browser-handoff");
+            assert!(record.get("browserPlanDigest").is_some());
+            assert!(record.get("navigationIndex").is_some());
+            assert!(record.get("state").is_some());
+            assert!(record.get("outcome").is_some());
+            assert_eq!(record.as_object().unwrap().len(), 7);
+        }
+    }
+
+    #[test]
+    fn browser_handoff_audit_requires_a_narrow_grant_and_rejects_unsafe_data() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let confirmation = valid_browser_confirmation_manifest(&browser_plan_digest(&browser_plan));
+        let root = module_fixture_dir("browser-handoff-audit-unsafe");
+        write_browser_handoff_project(&root, true, &confirmation);
+        fs::write(
+            root.join("padma-browser-audit.toml"),
+            "[audit]\nversion = \"1\"\nmode = \"redacted-local-v1\"\npath = \"../secrets.jsonl\"\nmax_records = 1\n",
+        )
+        .unwrap();
+        let no_audit_context = load_browser_handoff_context(&root).unwrap();
+        assert!(no_audit_context.audit.is_none());
+        fs::remove_dir_all(&root).unwrap();
+
+        let unsafe_root = module_fixture_dir("browser-handoff-audit-injected");
+        write_browser_handoff_audit_project(
+            &unsafe_root,
+            &confirmation,
+            &valid_browser_handoff_audit_manifest(2),
+        );
+        fs::create_dir(unsafe_root.join("audit")).unwrap();
+        fs::write(
+            unsafe_root.join("audit/handoff.jsonl"),
+            "{\"version\":1,\"event\":\"android-browser-handoff\",\"timestampEpochSeconds\":1,\"browserPlanDigest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"navigationIndex\":1,\"state\":\"cancelled\",\"outcome\":\"P1062\",\"rawUrl\":\"https://secret.invalid\"}\n",
+        )
+        .unwrap();
+        let context = load_browser_handoff_context(&unsafe_root).unwrap();
+        let error = browser_handoff_audit_record(&context, "cancelled", "P1062").unwrap_err();
+        fs::remove_dir_all(&unsafe_root).unwrap();
+        assert!(error.starts_with("P1064"));
+        assert!(!error.contains("secret.invalid"));
     }
 
     fn valid_ai_tool_plan_manifest() -> &'static str {

@@ -5,4 +5,4 @@ entry = "main.pd"
 locale = "en"
 
 [capabilities]
-browser = ["plan", "confirm-plan", "handoff"]
+browser = ["plan", "confirm-plan", "handoff", "audit"]

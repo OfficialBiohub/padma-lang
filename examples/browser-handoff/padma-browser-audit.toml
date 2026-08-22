@@ -1,0 +1,5 @@
+[audit]
+version = "1"
+mode = "redacted-local-v1"
+path = "audit/handoff.jsonl"
+max_records = 16
