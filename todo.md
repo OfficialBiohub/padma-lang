@@ -257,7 +257,11 @@
 - [ ] Publish a capability matrix that separates currently executable tools, local planning-only tools, external prerequisites, and intentionally unsupported high-risk actions for Termux-first Padma users.
 - [x] Structured-data toolkit: capability-gated project-local CSV/TSV/JSON read, validation, filtering, mapping, aggregation, and safe bounded file output with Bangla-English diagnostics and examples.
 - [ ] HTTP API toolkit: typed JSON request templates, validated response extraction, timeout/retry limits, secret-environment-name handling, and explicit network capability grants without hidden request loops.
-- [ ] Filesystem productivity toolkit: bounded recursive listing, safe copy/move/archive plans, checksums, text search, and dry-run-before-write interfaces scoped to the project root.
+- [x] Filesystem productivity toolkit: bounded recursive listing, safe copy/move/archive plans, checksums, text search, and dry-run-before-write interfaces scoped to the project root.
+  - [x] Add `fs.list`, `fs.checksum`, and `fs.search_text` read-only bounded project-root APIs with explicit `filesystem:read` capability checks.
+  - [x] Add `fs.copy_plan`, `fs.move_plan`, and `fs.archive_plan` deterministic dry-run descriptors that cannot mutate files, invoke a shell, or start a child process.
+  - [x] Reject traversal, absolute/shared-storage paths, symlinks, oversized files, binary/text ambiguity, unsafe extensions, and unbounded recursion with bilingual diagnostics and negative tests.
+  - [x] Publish a standalone Termux example and a safe filesystem productivity guide before marking the increment complete.
 - [ ] Developer workspace toolkit: project task aliases, deterministic test/build/lint plans, safe process allowlists, exit-code summaries, and no-shell argument handling for common Termux workflows.
 - [ ] Web/backend practical toolkit: reusable local-server routes, request validation, JSON response helpers, static-site generation, and deployment-plan contracts while keeping remote deployment separately confirmed.
 - [ ] SQLite application toolkit: schema migration plans, query parameter validation, export/import contracts, backup descriptors, and bounded project-local data maintenance.

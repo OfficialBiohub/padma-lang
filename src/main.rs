@@ -304,6 +304,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1068") => ("Browser user-takeover execution is prohibited".into(), Some("Use only `padma browser takeover inspect` or `padma browser takeover plan`; login, CAPTCHA, forms, posts, uploads, accounts, purchases, and payments remain under your control in the visible browser.".into())),
         (Locale::Bangla, "P1069") => (format!("structured table data নিরাপদ বা সঠিক নয়: `{detail}`"), Some("CSV/TSV/JSON table-এ bounded header, row, column, ও cell policy ব্যবহার করুন; path project root-এর ভেতরে রাখুন।".into())),
         (Locale::English, "P1069") => (format!("Structured table data is unsafe or invalid: `{detail}`"), Some("Use bounded CSV/TSV/JSON table headers, rows, columns, and cells; keep the path inside the project root.".into())),
+        (Locale::Bangla, "P1070") => (format!("filesystem productivity operation নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded project-relative regular file/directory ব্যবহার করুন; symlink, shared storage, traversal, oversized input, এবং mutation action অনুমোদিত নয়।".into())),
+        (Locale::English, "P1070") => (format!("Filesystem productivity operation is unsafe or invalid: `{detail}`"), Some("Use only bounded project-relative regular files/directories; symlinks, shared storage, traversal, oversized input, and mutation actions are not allowed.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1557,6 +1559,12 @@ const TABLE_MAX_ROWS: usize = 4_096;
 const TABLE_MAX_COLUMNS: usize = 64;
 const TABLE_MAX_HEADER_BYTES: usize = 128;
 const TABLE_MAX_CELL_BYTES: usize = 4_096;
+const FS_PRODUCTIVITY_MAX_BYTES: u64 = 1_048_576;
+const FS_PRODUCTIVITY_MAX_ENTRIES: usize = 256;
+const FS_PRODUCTIVITY_MAX_DEPTH: usize = 4;
+const FS_PRODUCTIVITY_MAX_MATCHES: usize = 100;
+const FS_PRODUCTIVITY_MAX_QUERY_BYTES: usize = 128;
+const FS_PRODUCTIVITY_MAX_LINE_BYTES: usize = 4_096;
 
 fn value_from_json(value: JsonValue) -> Result<Value, String> {
     match value {
@@ -1604,6 +1612,132 @@ fn value_to_json(value: &Value) -> Result<JsonValue, String> {
 
 fn table_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1069", position, detail)
+}
+
+fn filesystem_productivity_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1070", position, detail)
+}
+
+fn filesystem_productivity_regular_file(
+    path: &Path,
+    locale: Locale,
+    position: Position,
+) -> Result<std::fs::Metadata, PadmaError> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|_| error_for(locale, "P1028", position, "filesystem source"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(filesystem_productivity_error(
+            locale,
+            position,
+            "source must be a regular non-symlink file",
+        ));
+    }
+    if metadata.len() > FS_PRODUCTIVITY_MAX_BYTES {
+        return Err(filesystem_productivity_error(
+            locale,
+            position,
+            "source exceeds the filesystem productivity byte limit",
+        ));
+    }
+    Ok(metadata)
+}
+
+fn filesystem_productivity_read_file(
+    path: &Path,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<u8>, PadmaError> {
+    filesystem_productivity_regular_file(path, locale, position)?;
+    fs::read(path).map_err(|_| error_for(locale, "P1028", position, "filesystem source"))
+}
+
+fn filesystem_productivity_list_entries(
+    root: &Path,
+    directory: &Path,
+    depth: usize,
+    locale: Locale,
+    position: Position,
+    entries: &mut Vec<(String, String, u64)>,
+) -> Result<(), PadmaError> {
+    let mut children = fs::read_dir(directory)
+        .map_err(|_| error_for(locale, "P1028", position, "filesystem directory"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| error_for(locale, "P1028", position, "filesystem directory"))?;
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        if entries.len() >= FS_PRODUCTIVITY_MAX_ENTRIES {
+            return Err(filesystem_productivity_error(
+                locale,
+                position,
+                "directory entry count exceeds the filesystem productivity limit",
+            ));
+        }
+        let path = child.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|_| error_for(locale, "P1028", position, "filesystem entry"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(filesystem_productivity_error(
+                locale,
+                position,
+                "symlink entries are not allowed in filesystem productivity operations",
+            ));
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| {
+                filesystem_productivity_error(locale, position, "entry escaped project root")
+            })?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let kind = if metadata.is_file() {
+            "file"
+        } else if metadata.is_dir() {
+            "directory"
+        } else {
+            return Err(filesystem_productivity_error(
+                locale,
+                position,
+                "directory entries must be regular files or directories",
+            ));
+        };
+        entries.push((relative, kind.to_string(), metadata.len()));
+        if metadata.is_dir() && depth > 0 {
+            filesystem_productivity_list_entries(
+                root,
+                &path,
+                depth - 1,
+                locale,
+                position,
+                entries,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn filesystem_productivity_plan_value(
+    operation: &str,
+    source: &str,
+    destination: &str,
+    bytes: &[u8],
+) -> Value {
+    Value::Map(BTreeMap::from([
+        ("operation".into(), Value::String(operation.to_string())),
+        ("source".into(), Value::String(source.to_string())),
+        ("destination".into(), Value::String(destination.to_string())),
+        ("sourceSize".into(), Value::Number(bytes.len() as f64)),
+        (
+            "sourceChecksum".into(),
+            Value::String(format!("sha256:{}", sha256_hex(bytes))),
+        ),
+        ("execution".into(), Value::String("disabled".into())),
+        (
+            "filesystemMutation".into(),
+            Value::String("disabled".into()),
+        ),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
 }
 
 fn table_validate_headers(
@@ -3371,6 +3505,202 @@ impl Interpreter {
                     fs::write(&resolved_path, content)
                         .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
                     return Ok(Value::Boolean(true));
+                }
+                if name == "fs.list" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("filesystem:read", name, *position)?;
+                    let path = self.evaluate(&arguments[0])?;
+                    let path =
+                        expect_string(&path, self.locale, *position, "filesystem directory")?;
+                    let depth = self.evaluate(&arguments[1])?;
+                    let depth = expect_number(&depth, self.locale, *position, "filesystem depth")?;
+                    if depth.fract() != 0.0
+                        || !(0.0..=FS_PRODUCTIVITY_MAX_DEPTH as f64).contains(&depth)
+                    {
+                        return Err(filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "directory depth is outside the filesystem productivity limit",
+                        ));
+                    }
+                    let directory = self.resolve_file_path(path).map_err(|_| {
+                        error_for(self.locale, "P1014", *position, "filesystem directory")
+                    })?;
+                    let metadata = fs::symlink_metadata(&directory).map_err(|_| {
+                        error_for(self.locale, "P1028", *position, "filesystem directory")
+                    })?;
+                    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                        return Err(filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "list path must be a real project directory",
+                        ));
+                    }
+                    let root = self.project_root.as_ref().ok_or_else(|| {
+                        filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "filesystem productivity requires a project root",
+                        )
+                    })?;
+                    let mut entries = Vec::new();
+                    filesystem_productivity_list_entries(
+                        root,
+                        &directory,
+                        depth as usize,
+                        self.locale,
+                        *position,
+                        &mut entries,
+                    )?;
+                    return Ok(Value::List(
+                        entries
+                            .into_iter()
+                            .map(|(path, kind, size)| {
+                                Value::Map(BTreeMap::from([
+                                    ("path".into(), Value::String(path)),
+                                    ("type".into(), Value::String(kind)),
+                                    ("size".into(), Value::Number(size as f64)),
+                                ]))
+                            })
+                            .collect(),
+                    ));
+                }
+                if name == "fs.checksum" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("filesystem:read", name, *position)?;
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&path, self.locale, *position, "filesystem source")?;
+                    let source = self.resolve_file_path(path).map_err(|_| {
+                        error_for(self.locale, "P1014", *position, "filesystem source")
+                    })?;
+                    let bytes = filesystem_productivity_read_file(&source, self.locale, *position)?;
+                    return Ok(Value::String(format!("sha256:{}", sha256_hex(&bytes))));
+                }
+                if name == "fs.search_text" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("filesystem:read", name, *position)?;
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&path, self.locale, *position, "filesystem source")?;
+                    let query = self.evaluate(&arguments[1])?;
+                    let query = expect_string(&query, self.locale, *position, "search query")?;
+                    let limit = self.evaluate(&arguments[2])?;
+                    let limit = expect_number(&limit, self.locale, *position, "search limit")?;
+                    if query.is_empty()
+                        || query.len() > FS_PRODUCTIVITY_MAX_QUERY_BYTES
+                        || query.chars().any(char::is_control)
+                        || limit.fract() != 0.0
+                        || !(1.0..=FS_PRODUCTIVITY_MAX_MATCHES as f64).contains(&limit)
+                    {
+                        return Err(filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "search query or match limit is outside the filesystem productivity policy",
+                        ));
+                    }
+                    let source = self.resolve_file_path(path).map_err(|_| {
+                        error_for(self.locale, "P1014", *position, "filesystem source")
+                    })?;
+                    let bytes = filesystem_productivity_read_file(&source, self.locale, *position)?;
+                    let text = String::from_utf8(bytes).map_err(|_| {
+                        filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "search source must be UTF-8 text",
+                        )
+                    })?;
+                    let mut matches = Vec::new();
+                    for (index, line) in text.lines().enumerate() {
+                        if line.len() > FS_PRODUCTIVITY_MAX_LINE_BYTES {
+                            return Err(filesystem_productivity_error(
+                                self.locale,
+                                *position,
+                                "search source line exceeds the filesystem productivity limit",
+                            ));
+                        }
+                        if line.contains(query) {
+                            matches.push(Value::Map(BTreeMap::from([
+                                ("line".into(), Value::Number((index + 1) as f64)),
+                                ("text".into(), Value::String(line.to_string())),
+                            ])));
+                            if matches.len() >= limit as usize {
+                                break;
+                            }
+                        }
+                    }
+                    return Ok(Value::List(matches));
+                }
+                if matches!(
+                    name.as_str(),
+                    "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan"
+                ) {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("filesystem:read", name, *position)?;
+                    let source_path = self.evaluate(&arguments[0])?;
+                    let source_path =
+                        expect_string(&source_path, self.locale, *position, "filesystem source")?;
+                    let destination_path = self.evaluate(&arguments[1])?;
+                    let destination_path = expect_string(
+                        &destination_path,
+                        self.locale,
+                        *position,
+                        "filesystem destination",
+                    )?;
+                    if name == "fs.archive_plan" && !destination_path.ends_with(".zip") {
+                        return Err(filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "archive destination must end with .zip",
+                        ));
+                    }
+                    let source = self.resolve_file_path(source_path).map_err(|_| {
+                        error_for(self.locale, "P1014", *position, "filesystem source")
+                    })?;
+                    let destination = self.resolve_file_path(destination_path).map_err(|_| {
+                        error_for(self.locale, "P1014", *position, "filesystem destination")
+                    })?;
+                    if source == destination {
+                        return Err(filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "source and destination must differ",
+                        ));
+                    }
+                    if destination.exists()
+                        && fs::symlink_metadata(&destination)
+                            .map_err(|_| {
+                                error_for(self.locale, "P1028", *position, "filesystem destination")
+                            })?
+                            .file_type()
+                            .is_symlink()
+                    {
+                        return Err(filesystem_productivity_error(
+                            self.locale,
+                            *position,
+                            "destination must not be a symlink",
+                        ));
+                    }
+                    let source_bytes =
+                        filesystem_productivity_read_file(&source, self.locale, *position)?;
+                    let operation = match name.as_str() {
+                        "fs.copy_plan" => "copy",
+                        "fs.move_plan" => "move",
+                        "fs.archive_plan" => "archive",
+                        _ => unreachable!(),
+                    };
+                    return Ok(filesystem_productivity_plan_value(
+                        operation,
+                        source_path,
+                        destination_path,
+                        &source_bytes,
+                    ));
                 }
                 if name == "table.read" {
                     if arguments.len() != 2 {
@@ -10356,12 +10686,11 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
         | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
         | "math.abs" | "math.round" | "math.floor" | "math.ceil" | "auth.password_hash"
-        | "ai.workflow" | "table.headers" | "table.rows" => Some((1, 1)),
+        | "ai.workflow" | "table.headers" | "table.rows" | "fs.checksum" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
-        | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv" => {
-            Some((2, 2))
-        }
-        "text.replace" => Some((3, 3)),
+        | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
+        | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" => Some((2, 2)),
+        "text.replace" | "fs.search_text" => Some((3, 3)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -12898,6 +13227,105 @@ mod tests {
         .unwrap_err();
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(unsafe_export.code, "P1014");
+    }
+
+    #[test]
+    fn filesystem_productivity_lists_checksums_searches_and_plans_without_mutation() {
+        let root = module_fixture_dir("filesystem-productivity");
+        fs::create_dir_all(root.join("workspace/nested")).unwrap();
+        fs::write(
+            root.join("workspace/notes.txt"),
+            "keep padma local\nneed review\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("workspace/nested/todo.txt"),
+            "review local reports\n",
+        )
+        .unwrap();
+        let output = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:read".into()]),
+            "let entries = fs.list(\"workspace\", 1)\nlet digest = fs.checksum(\"workspace/notes.txt\")\nlet matches = fs.search_text(\"workspace/notes.txt\", \"review\", 3)\nlet plan = fs.copy_plan(\"workspace/notes.txt\", \"workspace/copy.txt\")\nprint entries[0][\"path\"]\nprint entries[1][\"path\"]\nprint matches[0][\"line\"]\nprint matches[0][\"text\"]\nprint plan[\"operation\"]\nprint plan[\"execution\"]\nprint plan[\"filesystemMutation\"]\nprint digest == plan[\"sourceChecksum\"]\n",
+        )
+        .unwrap();
+        let planned_destination_exists = root.join("workspace/copy.txt").exists();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(
+            output,
+            vec![
+                "workspace/nested",
+                "workspace/nested/todo.txt",
+                "2",
+                "need review",
+                "copy",
+                "disabled",
+                "disabled",
+                "true",
+            ]
+        );
+        assert!(!planned_destination_exists);
+    }
+
+    #[test]
+    fn filesystem_productivity_rejects_missing_capability_unsafe_paths_symlinks_binary_text_and_invalid_plans(
+    ) {
+        let root = module_fixture_dir("filesystem-productivity-safety");
+        fs::create_dir_all(root.join("workspace")).unwrap();
+        fs::write(root.join("workspace/notes.txt"), "safe text\n").unwrap();
+        fs::write(root.join("workspace/binary.bin"), [0xff_u8, 0x00, 0x01]).unwrap();
+        std::os::unix::fs::symlink("notes.txt", root.join("workspace/link.txt")).unwrap();
+
+        let denied = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            "print fs.checksum(\"workspace/notes.txt\")\n",
+        )
+        .unwrap_err();
+        assert_eq!(denied.code, "P1034");
+
+        let capabilities = BTreeSet::from(["filesystem:read".into()]);
+        let traversal = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print fs.checksum(\"../secret.txt\")\n",
+        )
+        .unwrap_err();
+        assert_eq!(traversal.code, "P1014");
+
+        let symlink = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print fs.checksum(\"workspace/link.txt\")\n",
+        )
+        .unwrap_err();
+        assert_eq!(symlink.code, "P1070");
+
+        let binary = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print fs.search_text(\"workspace/binary.bin\", \"x\", 1)\n",
+        )
+        .unwrap_err();
+        assert_eq!(binary.code, "P1070");
+
+        let list_symlink = run_bridge_project(
+            &root,
+            capabilities.clone(),
+            "print fs.list(\"workspace\", 1)\n",
+        )
+        .unwrap_err();
+        assert_eq!(list_symlink.code, "P1070");
+
+        let archive = run_bridge_project(
+            &root,
+            capabilities,
+            "print fs.archive_plan(\"workspace/notes.txt\", \"workspace/notes.tar\")\n",
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(archive.code, "P1070");
     }
 
     #[test]

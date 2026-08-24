@@ -1,0 +1,10 @@
+# Local-only filesystem inspection and dry-run planning.
+ধরি entries = fs.list("workspace", 1)
+ধরি checksum = fs.checksum("workspace/notes.txt")
+ধরি found = fs.search_text("workspace/notes.txt", "review", 3)
+ধরি plan = fs.copy_plan("workspace/notes.txt", "workspace/notes-copy.txt")
+
+দেখাও entries[0]["path"]
+দেখাও text.format("Search line: {line}", {"line": found[0]["line"]})
+দেখাও text.format("Checksum: {checksum}", {"checksum": checksum})
+দেখাও text.format("Copy execution: {state}", {"state": plan["execution"]})

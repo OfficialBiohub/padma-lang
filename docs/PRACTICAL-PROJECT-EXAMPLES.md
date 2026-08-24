@@ -19,6 +19,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Defensive URL inspector | `examples/defensive-url-inspector` | Input validation and manual-review report | It checks syntax only; it does not scan, attack, or prove a site is safe. |
 | Local password check | `examples/local-password-check` | Local password hash and verification boundary | It is not a hosted login, user database, password reset, or authentication server. |
 | Structured data inventory | `examples/structured-data-inventory` | Local CSV filtering, selection, count, and report export | It is not Excel/XLSX, cloud sync, shared-storage access, or a spreadsheet macro runner. |
+| Filesystem productivity | `examples/filesystem-productivity` | Project-local listing, checksum, text search, and disabled copy planning | It is not file mutation, Android shared-storage access, shell execution, or a file-management daemon. |
 
 ## 1. Authorized media download
 
@@ -215,6 +216,22 @@ table.write_csv("out/food-inventory.csv", report)
 ```
 
 This example reads the project-local CSV, matches the `food` category exactly, keeps two chosen columns, and writes a project-local CSV. It needs `filesystem = ["read", "write"]`. It cannot traverse to another directory, write Android Downloads, contact a cloud spreadsheet, read an Excel workbook, or execute a macro. See [`STRUCTURED-DATA.md`](STRUCTURED-DATA.md) for supported formats and limits.
+
+## 8. Filesystem productivity
+
+```bash
+cd ~/padma-lang/examples/filesystem-productivity
+padma .
+```
+
+```padma
+ধরি checksum = fs.checksum("workspace/notes.txt")
+ধরি found = fs.search_text("workspace/notes.txt", "review", 3)
+ধরি plan = fs.copy_plan("workspace/notes.txt", "workspace/notes-copy.txt")
+দেখাও plan["execution"]
+```
+
+The program reads only project-local regular files, reports a checksum and search match, then returns a copy descriptor whose execution state is `disabled`. It needs `filesystem = ["read"]`; it creates no destination file. It cannot copy, move, archive, delete, rename, scan other storage, invoke a shell, run in the background, or access Android Downloads. See [`FILESYSTEM-PRODUCTIVITY.md`](FILESYSTEM-PRODUCTIVITY.md) for full limits.
 
 ## Before you expand an example
 

@@ -46,6 +46,18 @@ Paths cannot be absolute and cannot contain `..`. The `@downloads/` alias remain
 
 `url.parse` deliberately accepts only absolute `http://` and `https://` URLs, rejects whitespace and embedded credentials, and does not perform any network request. It is an inspection utility; `http.get` remains the network API and applies its own network safeguards.
 
+## Filesystem productivity
+
+| API | Result and boundary |
+|---|---|
+| `fs.list(path, depth)` | Lists bounded project-local regular file/directory entries from depth `0` to `4`. Requires `filesystem:read` in project mode. |
+| `fs.checksum(path)` | Returns `sha256:<hex>` for one bounded project-local regular file. Requires `filesystem:read` in project mode. |
+| `fs.search_text(path, query, limit)` | Returns bounded UTF-8 matching `{line, text}` rows. Requires `filesystem:read` in project mode. |
+| `fs.copy_plan(source, destination)` / `fs.move_plan(source, destination)` | Returns a deterministic disabled action descriptor after safe project-local source/destination validation. Requires `filesystem:read` in project mode. |
+| `fs.archive_plan(source, destination)` | Returns the equivalent disabled archive descriptor; destination must end in `.zip`. Requires `filesystem:read` in project mode. |
+
+Filesystem productivity APIs are project-only, never start a shell or child process, and never mutate a file. Sources are limited to 1 MiB regular non-symlink files; list output is limited to 256 entries and depth `4`; search query/match/text-line bounds apply. Absolute paths, traversal, `@downloads`, symlinks, non-regular sources, binary text search, and oversized content are rejected. See [`FILESYSTEM-PRODUCTIVITY.md`](FILESYSTEM-PRODUCTIVITY.md) for the complete contract.
+
 ## Structured data tables
 
 | API | Result and boundary |
@@ -87,4 +99,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
