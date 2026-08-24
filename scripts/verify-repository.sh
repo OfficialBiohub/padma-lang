@@ -16,6 +16,11 @@ cargo build --release --locked
 binary="$root/target/release/padma"
 "$binary" examples/hello-bn.pd
 "$binary" examples/hello-en.pd
+repl_output="$(printf '1+1\n২ + ৩\nexit()\n' | "$binary")"
+if ! grep -Fq 'padma> 2' <<<"$repl_output" || ! grep -Fq 'padma> 5' <<<"$repl_output"; then
+  echo "release REPL bare-expression smoke test failed" >&2
+  exit 1
+fi
 "$binary" gui plan examples/gui-static
 "$binary" android plan examples/gui-static
 "$binary" render plan examples/render-git-linked

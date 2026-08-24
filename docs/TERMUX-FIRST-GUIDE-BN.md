@@ -61,6 +61,19 @@ padma> বের হও
 
 Python-এর `>>> 1 + 1`-এর মতো Padma-তেও এক লাইনের bare expression লিখলে তার non-null result দেখা যাবে। `দেখাও`/`print` এখনও explicit output statement; আর `ধরি x = ...`-এর মতো declaration অথবা `null` কোনো output দেখায় না। Multi-line `যদি`, `যতক্ষণ`, বা `ফাংশন` লিখলে closing `}` পর্যন্ত `...` prompt দেখা যাবে।
 
+### `padma> 1+1` result না দেখালে update করুন
+
+এই behavior না পেলে সাধারণত Termux-এর `$PREFIX/bin/padma`-এ আগের binary রয়ে গেছে। একই version text দেখালেও পুরোনো compiled executable থাকতে পারে, তাই GitHub `main` থেকে installer আবার চালান:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh | bash
+hash -r
+command -v padma
+printf '1+1\n২ + ৩\nexit()\n' | padma
+```
+
+শেষ command-এ `2` এবং `5` দেখাতে হবে। তারপর normal interactive shell-এর জন্য আবার `padma` লিখুন। যদি output না আসে, `command -v padma` এবং `padma --version`-এর সম্পূর্ণ output issue report-এ দিন; একই নামে অন্য file PATH-এ আগে থাকতে পারে।
+
 ## ৪. Run করার আগে ভুল ধরুন
 
 Padma code execute না করেই error দেখাতে পারে:

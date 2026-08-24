@@ -269,3 +269,8 @@
 - [ ] Media and document toolkit: authorized local media metadata/transcode plans, text/PDF/CSV reporting helpers, and prerequisite validation without unauthorized downloading or background processing.
 - [ ] Package ecosystem foundation: registry protocol design, package provenance/digest verification, dependency resolution limits, offline cache rules, and package publication review before any remote registry mutation.
 - [ ] Add each increment only after narrow capability design, negative security tests, standalone Termux example, bilingual documentation, and full repository verification.
+
+## M14 — REPL Bare Expression Regression
+
+- [x] Verify and repair the Python-style REPL contract so bare Bangla and English expressions such as `১ + ১` and `1 + 1` display their resulting value, while ordinary statement output and `exit()` remain unchanged.
+  - [x] Add a release-binary stdin smoke test and clear Termux update guidance to distinguish a fixed repository binary from an outdated installed executable.

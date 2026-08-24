@@ -13344,7 +13344,15 @@ mod tests {
             vec!["2"]
         );
         assert_eq!(
+            run_repl_submission(&mut interpreter, "1+1\n").unwrap(),
+            vec!["2"]
+        );
+        assert_eq!(
             run_repl_submission(&mut interpreter, "২ + 3\n").unwrap(),
+            vec!["5"]
+        );
+        assert_eq!(
+            run_repl_submission(&mut interpreter, "২+৩\n").unwrap(),
             vec!["5"]
         );
         assert_eq!(
