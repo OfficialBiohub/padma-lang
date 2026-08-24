@@ -15,6 +15,8 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Editor tooling](EDITOR-TOOLING.md) | Tree-sitter, VS Code, and LSP use |
 | [Interoperability](INTEROPERABILITY.md) | Python/JavaScript bridge boundaries |
 | [Practical project examples](PRACTICAL-PROJECT-EXAMPLES.md) | Runnable media, website, backend, SQLite, and defensive-security walkthroughs |
+| [Daily-use tool roadmap](DAILY-USE-TOOL-ROADMAP.md) | Bangla-first capability matrix and priority order for practical Termux tooling |
+| [Structured data toolkit](STRUCTURED-DATA.md) | Local CSV/TSV/JSON table processing with bounded project-root file access |
 
 ## Security and local runtime
 

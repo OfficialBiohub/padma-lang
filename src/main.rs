@@ -302,6 +302,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1067") => (format!("Browser user-takeover manifest is unsafe or invalid: `{detail}`"), Some("Use only a reviewed plan digest, navigation index, fixed sensitive-action label, and short local review policy; Padma will not read browser state or a user decision.".into())),
         (Locale::Bangla, "P1068") => ("browser user-takeover execute করা নিষিদ্ধ".into(), Some("শুধু `padma browser takeover inspect` অথবা `padma browser takeover plan` ব্যবহার করুন; visible browser-এ login, CAPTCHA, form, post, upload, account, purchase, এবং payment আপনার হাতে থাকবে।".into())),
         (Locale::English, "P1068") => ("Browser user-takeover execution is prohibited".into(), Some("Use only `padma browser takeover inspect` or `padma browser takeover plan`; login, CAPTCHA, forms, posts, uploads, accounts, purchases, and payments remain under your control in the visible browser.".into())),
+        (Locale::Bangla, "P1069") => (format!("structured table data নিরাপদ বা সঠিক নয়: `{detail}`"), Some("CSV/TSV/JSON table-এ bounded header, row, column, ও cell policy ব্যবহার করুন; path project root-এর ভেতরে রাখুন।".into())),
+        (Locale::English, "P1069") => (format!("Structured table data is unsafe or invalid: `{detail}`"), Some("Use bounded CSV/TSV/JSON table headers, rows, columns, and cells; keep the path inside the project root.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1543,6 +1545,19 @@ enum Value {
     Map(BTreeMap<String, Value>),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TableData {
+    format: String,
+    headers: Vec<String>,
+    rows: Vec<BTreeMap<String, String>>,
+}
+
+const TABLE_MAX_BYTES: usize = 1_048_576;
+const TABLE_MAX_ROWS: usize = 4_096;
+const TABLE_MAX_COLUMNS: usize = 64;
+const TABLE_MAX_HEADER_BYTES: usize = 128;
+const TABLE_MAX_CELL_BYTES: usize = 4_096;
+
 fn value_from_json(value: JsonValue) -> Result<Value, String> {
     match value {
         JsonValue::Null => Ok(Value::Null),
@@ -1585,6 +1600,366 @@ fn value_to_json(value: &Value) -> Result<JsonValue, String> {
             .collect::<Result<serde_json::Map<_, _>, _>>()
             .map(JsonValue::Object),
     }
+}
+
+fn table_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1069", position, detail)
+}
+
+fn table_validate_headers(
+    headers: Vec<String>,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    if headers.is_empty() || headers.len() > TABLE_MAX_COLUMNS {
+        return Err(table_error(
+            locale,
+            position,
+            "header count is outside the table limit",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    let mut normalized = Vec::with_capacity(headers.len());
+    for header in headers {
+        let header = header.trim().to_string();
+        if header.is_empty()
+            || header.len() > TABLE_MAX_HEADER_BYTES
+            || header.chars().any(char::is_control)
+            || !seen.insert(header.clone())
+        {
+            return Err(table_error(
+                locale,
+                position,
+                "headers must be unique bounded text values",
+            ));
+        }
+        normalized.push(header);
+    }
+    Ok(normalized)
+}
+
+fn table_validate_cell(
+    value: String,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    if value.len() > TABLE_MAX_CELL_BYTES
+        || value
+            .chars()
+            .any(|character| character == '\n' || character == '\r')
+    {
+        return Err(table_error(
+            locale,
+            position,
+            "cell exceeds the bounded single-line table policy",
+        ));
+    }
+    Ok(value)
+}
+
+fn parse_delimited_table_row(
+    line: &str,
+    delimiter: char,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut characters = line.chars().peekable();
+    let mut quoted = false;
+    let mut after_quote = false;
+    while let Some(character) = characters.next() {
+        if quoted {
+            if character == '"' {
+                if characters.peek() == Some(&'"') {
+                    characters.next();
+                    field.push('"');
+                } else {
+                    quoted = false;
+                    after_quote = true;
+                }
+            } else {
+                field.push(character);
+            }
+            continue;
+        }
+        if after_quote {
+            if character == delimiter {
+                fields.push(table_validate_cell(field, locale, position)?);
+                field = String::new();
+                after_quote = false;
+                continue;
+            }
+            return Err(table_error(
+                locale,
+                position,
+                "quoted field must end at a delimiter or line boundary",
+            ));
+        }
+        if character == delimiter {
+            fields.push(table_validate_cell(field, locale, position)?);
+            field = String::new();
+        } else if character == '"' && field.is_empty() {
+            quoted = true;
+        } else {
+            field.push(character);
+        }
+    }
+    if quoted {
+        return Err(table_error(locale, position, "quoted field is not closed"));
+    }
+    fields.push(table_validate_cell(field, locale, position)?);
+    Ok(fields)
+}
+
+fn table_data_from_delimited_text(
+    source: &str,
+    format: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<TableData, PadmaError> {
+    let delimiter = match format {
+        "csv" => ',',
+        "tsv" => '\t',
+        _ => {
+            return Err(table_error(
+                locale,
+                position,
+                "table format must be csv, tsv, or json",
+            ))
+        }
+    };
+    let mut lines = source
+        .lines()
+        .map(|line| line.trim_end_matches('\r'))
+        .filter(|line| !line.is_empty());
+    let header_line = lines
+        .next()
+        .ok_or_else(|| table_error(locale, position, "table requires a header row"))?;
+    let headers = table_validate_headers(
+        parse_delimited_table_row(header_line, delimiter, locale, position)?,
+        locale,
+        position,
+    )?;
+    let mut rows = Vec::new();
+    for line in lines {
+        if rows.len() >= TABLE_MAX_ROWS {
+            return Err(table_error(
+                locale,
+                position,
+                "row count exceeds the table limit",
+            ));
+        }
+        let cells = parse_delimited_table_row(line, delimiter, locale, position)?;
+        if cells.len() != headers.len() {
+            return Err(table_error(
+                locale,
+                position,
+                "each row must contain exactly the declared header count",
+            ));
+        }
+        rows.push(headers.iter().cloned().zip(cells).collect());
+    }
+    Ok(TableData {
+        format: format.to_string(),
+        headers,
+        rows,
+    })
+}
+
+fn table_data_from_json(
+    source: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<TableData, PadmaError> {
+    let value: JsonValue = serde_json::from_str(source)
+        .map_err(|_| table_error(locale, position, "json table must be valid JSON"))?;
+    let rows = value
+        .as_array()
+        .ok_or_else(|| table_error(locale, position, "json table must be an array of objects"))?;
+    if rows.is_empty() || rows.len() > TABLE_MAX_ROWS {
+        return Err(table_error(
+            locale,
+            position,
+            "row count is outside the table limit",
+        ));
+    }
+    let mut header_set = BTreeSet::new();
+    for row in rows {
+        let object = row
+            .as_object()
+            .ok_or_else(|| table_error(locale, position, "json table rows must be objects"))?;
+        header_set.extend(object.keys().cloned());
+    }
+    let headers = table_validate_headers(header_set.into_iter().collect(), locale, position)?;
+    let mut parsed_rows = Vec::with_capacity(rows.len());
+    for row in rows {
+        let object = row.as_object().expect("validated JSON table object");
+        let mut parsed = BTreeMap::new();
+        for header in &headers {
+            let value = object.get(header).cloned().unwrap_or(JsonValue::Null);
+            let text = match value {
+                JsonValue::Null => String::new(),
+                JsonValue::Bool(value) => value.to_string(),
+                JsonValue::Number(value) => value.to_string(),
+                JsonValue::String(value) => value,
+                JsonValue::Array(_) | JsonValue::Object(_) => {
+                    return Err(table_error(
+                        locale,
+                        position,
+                        "json table cells must be scalar values",
+                    ))
+                }
+            };
+            parsed.insert(header.clone(), table_validate_cell(text, locale, position)?);
+        }
+        parsed_rows.push(parsed);
+    }
+    Ok(TableData {
+        format: "json".to_string(),
+        headers,
+        rows: parsed_rows,
+    })
+}
+
+fn table_data_to_value(table: &TableData) -> Value {
+    let mut result = BTreeMap::new();
+    result.insert("format".into(), Value::String(table.format.clone()));
+    result.insert(
+        "headers".into(),
+        Value::List(table.headers.iter().cloned().map(Value::String).collect()),
+    );
+    result.insert(
+        "rows".into(),
+        Value::List(
+            table
+                .rows
+                .iter()
+                .map(|row| {
+                    Value::Map(
+                        row.iter()
+                            .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        ),
+    );
+    Value::Map(result)
+}
+
+fn table_data_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<TableData, PadmaError> {
+    let Value::Map(table) = value else {
+        return Err(table_error(locale, position, "table must be a table value"));
+    };
+    if !table
+        .keys()
+        .all(|key| matches!(key.as_str(), "format" | "headers" | "rows"))
+    {
+        return Err(table_error(
+            locale,
+            position,
+            "table contains unsupported fields",
+        ));
+    }
+    let Some(Value::String(format)) = table.get("format") else {
+        return Err(table_error(locale, position, "table format is required"));
+    };
+    if !matches!(format.as_str(), "csv" | "tsv" | "json") {
+        return Err(table_error(
+            locale,
+            position,
+            "table format must be csv, tsv, or json",
+        ));
+    }
+    let Some(Value::List(header_values)) = table.get("headers") else {
+        return Err(table_error(locale, position, "table headers are required"));
+    };
+    let headers = table_validate_headers(
+        header_values
+            .iter()
+            .map(|value| match value {
+                Value::String(value) => Ok(value.clone()),
+                _ => Err(table_error(locale, position, "table headers must be text")),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        locale,
+        position,
+    )?;
+    let Some(Value::List(row_values)) = table.get("rows") else {
+        return Err(table_error(locale, position, "table rows are required"));
+    };
+    if row_values.len() > TABLE_MAX_ROWS {
+        return Err(table_error(
+            locale,
+            position,
+            "row count exceeds the table limit",
+        ));
+    }
+    let mut rows = Vec::with_capacity(row_values.len());
+    for row in row_values {
+        let Value::Map(row) = row else {
+            return Err(table_error(locale, position, "table rows must be maps"));
+        };
+        if row.len() != headers.len() || row.keys().any(|key| !headers.contains(key)) {
+            return Err(table_error(
+                locale,
+                position,
+                "row fields must exactly match table headers",
+            ));
+        }
+        let mut parsed = BTreeMap::new();
+        for header in &headers {
+            let Some(Value::String(cell)) = row.get(header) else {
+                return Err(table_error(locale, position, "table cells must be text"));
+            };
+            parsed.insert(
+                header.clone(),
+                table_validate_cell(cell.clone(), locale, position)?,
+            );
+        }
+        rows.push(parsed);
+    }
+    Ok(TableData {
+        format: format.clone(),
+        headers,
+        rows,
+    })
+}
+
+fn table_csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn table_data_to_csv(table: &TableData) -> String {
+    let mut lines = Vec::with_capacity(table.rows.len().saturating_add(1));
+    lines.push(
+        table
+            .headers
+            .iter()
+            .map(|header| table_csv_escape(header))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    for row in &table.rows {
+        lines.push(
+            table
+                .headers
+                .iter()
+                .map(|header| table_csv_escape(row.get(header).map(String::as_str).unwrap_or("")))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    format!("{}\n", lines.join("\n"))
 }
 
 fn read_bridge_stream(mut stream: impl Read) -> Result<Vec<u8>, ()> {
@@ -2995,6 +3370,219 @@ impl Interpreter {
                         .map_err(|_| error_for(self.locale, "P1014", *position, path))?;
                     fs::write(&resolved_path, content)
                         .map_err(|_| error_for(self.locale, "P1015", *position, path))?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "table.read" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&path, self.locale, *position, "table path")?;
+                    let format = self.evaluate(&arguments[1])?;
+                    let format = expect_string(&format, self.locale, *position, "table format")?;
+                    if !matches!(format, "csv" | "tsv" | "json") {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "table format must be csv, tsv, or json",
+                        ));
+                    }
+                    self.require_capability("filesystem:read", name, *position)?;
+                    let resolved_path = self
+                        .resolve_file_path(path)
+                        .map_err(|_| error_for(self.locale, "P1014", *position, "table path"))?;
+                    let metadata = fs::metadata(&resolved_path)
+                        .map_err(|_| error_for(self.locale, "P1028", *position, "table path"))?;
+                    if !metadata.is_file() || metadata.len() > TABLE_MAX_BYTES as u64 {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "table file is missing or exceeds the byte limit",
+                        ));
+                    }
+                    let source = fs::read_to_string(&resolved_path).map_err(|_| {
+                        table_error(self.locale, *position, "table file must be UTF-8 text")
+                    })?;
+                    if source.len() > TABLE_MAX_BYTES {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "table file exceeds the byte limit",
+                        ));
+                    }
+                    let table = match format {
+                        "csv" | "tsv" => {
+                            table_data_from_delimited_text(&source, format, self.locale, *position)?
+                        }
+                        "json" => table_data_from_json(&source, self.locale, *position)?,
+                        _ => unreachable!(),
+                    };
+                    return Ok(table_data_to_value(&table));
+                }
+                if name == "table.headers" || name == "table.rows" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    if name == "table.headers" {
+                        return Ok(Value::List(
+                            table.headers.into_iter().map(Value::String).collect(),
+                        ));
+                    }
+                    return Ok(Value::List(
+                        table
+                            .rows
+                            .into_iter()
+                            .map(|row| {
+                                Value::Map(
+                                    row.into_iter()
+                                        .map(|(key, value)| (key, Value::String(value)))
+                                        .collect(),
+                                )
+                            })
+                            .collect(),
+                    ));
+                }
+                if name == "table.filter_equal" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let mut table = table_data_from_value(&value, self.locale, *position)?;
+                    let column = self.evaluate(&arguments[1])?;
+                    let column = expect_string(&column, self.locale, *position, "table column")?;
+                    let expected = self.evaluate(&arguments[2])?;
+                    let expected = expect_string(&expected, self.locale, *position, "table cell")?;
+                    if !table.headers.iter().any(|header| header == column) {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "table column is not declared",
+                        ));
+                    }
+                    table
+                        .rows
+                        .retain(|row| row.get(column) == Some(&expected.to_string()));
+                    return Ok(table_data_to_value(&table));
+                }
+                if name == "table.select" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    let requested = self.evaluate(&arguments[1])?;
+                    let Value::List(requested) = requested else {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "selected table columns must be a text list",
+                        ));
+                    };
+                    if requested.is_empty() || requested.len() > TABLE_MAX_COLUMNS {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "selected column count is outside the table limit",
+                        ));
+                    }
+                    let mut selected = Vec::with_capacity(requested.len());
+                    let mut selected_set = BTreeSet::new();
+                    for entry in requested {
+                        let Value::String(column) = entry else {
+                            return Err(table_error(
+                                self.locale,
+                                *position,
+                                "selected table columns must be text",
+                            ));
+                        };
+                        if !table.headers.contains(&column) || !selected_set.insert(column.clone())
+                        {
+                            return Err(table_error(
+                                self.locale,
+                                *position,
+                                "selected columns must be declared and unique",
+                            ));
+                        }
+                        selected.push(column);
+                    }
+                    let rows = table
+                        .rows
+                        .iter()
+                        .map(|row| {
+                            selected
+                                .iter()
+                                .map(|column| {
+                                    (column.clone(), row.get(column).cloned().unwrap_or_default())
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    return Ok(table_data_to_value(&TableData {
+                        format: table.format,
+                        headers: selected,
+                        rows,
+                    }));
+                }
+                if name == "table.count_by" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    let column = self.evaluate(&arguments[1])?;
+                    let column = expect_string(&column, self.locale, *position, "table column")?;
+                    if !table.headers.iter().any(|header| header == column) {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "table column is not declared",
+                        ));
+                    }
+                    let mut counts: BTreeMap<String, f64> = BTreeMap::new();
+                    for row in table.rows {
+                        let key = row.get(column).cloned().unwrap_or_default();
+                        let next = counts.get(&key).copied().unwrap_or(0.0) + 1.0;
+                        counts.insert(key, next);
+                    }
+                    return Ok(Value::Map(
+                        counts
+                            .into_iter()
+                            .map(|(key, value)| (key, Value::Number(value)))
+                            .collect(),
+                    ));
+                }
+                if name == "table.write_csv" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&path, self.locale, *position, "table output path")?;
+                    if !path.ends_with(".csv") {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "CSV output path must end with .csv",
+                        ));
+                    }
+                    let value = self.evaluate(&arguments[1])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    let output = table_data_to_csv(&table);
+                    if output.len() > TABLE_MAX_BYTES {
+                        return Err(table_error(
+                            self.locale,
+                            *position,
+                            "CSV output exceeds the byte limit",
+                        ));
+                    }
+                    self.require_capability("filesystem:write", name, *position)?;
+                    let resolved_path = self.resolve_file_path(path).map_err(|_| {
+                        error_for(self.locale, "P1014", *position, "table output path")
+                    })?;
+                    fs::write(&resolved_path, output).map_err(|_| {
+                        error_for(self.locale, "P1015", *position, "table output path")
+                    })?;
                     return Ok(Value::Boolean(true));
                 }
                 if name == "http.get" {
@@ -9763,14 +10351,16 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "bridge.call" => Some((3, 3)),
         "auth.session_issue" | "auth.cookie" => Some((3, 3)),
         "auth.password_verify" | "auth.session_verify" | "auth.csrf_verify" => Some((2, 2)),
-        "db.get" | "db.delete" | "db.list" => Some((3, 3)),
+        "db.get" | "db.delete" | "db.list" | "table.filter_equal" => Some((3, 3)),
         "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
         | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
         | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
         | "math.abs" | "math.round" | "math.floor" | "math.ceil" | "auth.password_hash"
-        | "ai.workflow" => Some((1, 1)),
+        | "ai.workflow" | "table.headers" | "table.rows" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
-        | "random.int" => Some((2, 2)),
+        | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv" => {
+            Some((2, 2))
+        }
         "text.replace" => Some((3, 3)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
@@ -12218,6 +12808,96 @@ mod tests {
         assert_eq!(unsafe_error.code, "P1014");
         let missing_error = run("print file.read(\"missing-padma-file.txt\")\n").unwrap_err();
         assert_eq!(missing_error.code, "P1028");
+    }
+
+    #[test]
+    fn structured_table_csv_filter_select_count_and_export_are_project_scoped() {
+        let root = module_fixture_dir("structured-table-csv");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::write(
+            root.join("data/inventory.csv"),
+            "name,category,price\nTea,food,40\nNotebook,stationery,70\nCoffee,food,80\n",
+        )
+        .unwrap();
+        let capabilities = BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()]);
+        let output = run_bridge_project(
+            &root,
+            capabilities,
+            "let inventory = table.read(\"data/inventory.csv\", \"csv\")\nlet food = table.filter_equal(inventory, \"category\", \"food\")\nlet selected = table.select(food, [\"name\", \"price\"])\nlet rows = table.rows(selected)\nlet counts = table.count_by(inventory, \"category\")\nprint table.headers(selected)[0]\nprint rows[1][\"name\"]\nprint counts[\"food\"]\nprint table.write_csv(\"out/food.csv\", selected)\n",
+        )
+        .unwrap();
+        let exported = fs::read_to_string(root.join("out/food.csv")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(output, vec!["name", "Coffee", "2", "true"]);
+        assert_eq!(exported, "name,price\nTea,40\nCoffee,80\n");
+    }
+
+    #[test]
+    fn structured_table_supports_tsv_json_and_escaped_csv_cells() {
+        let root = module_fixture_dir("structured-table-formats");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::write(
+            root.join("data/people.csv"),
+            "name,city\nRafi,\"Dhaka, BD\"\n",
+        )
+        .unwrap();
+        fs::write(root.join("data/people.tsv"), "name\tage\nRima\t12\n").unwrap();
+        fs::write(
+            root.join("data/people.json"),
+            "[{\"name\":\"Rafi\",\"active\":true},{\"name\":\"Rima\",\"active\":false}]",
+        )
+        .unwrap();
+        let output = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:read".into()]),
+            "let csv = table.read(\"data/people.csv\", \"csv\")\nlet tsv = table.read(\"data/people.tsv\", \"tsv\")\nlet json = table.read(\"data/people.json\", \"json\")\nprint table.rows(csv)[0][\"city\"]\nprint table.rows(tsv)[0][\"age\"]\nprint table.count_by(json, \"active\")[\"true\"]\n",
+        )
+        .unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(output, vec!["Dhaka, BD", "12", "1"]);
+    }
+
+    #[test]
+    fn structured_table_rejects_missing_grants_paths_malformed_data_and_unsafe_export() {
+        let root = module_fixture_dir("structured-table-safety");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::write(root.join("data/broken.csv"), "name,score\nRafi\n").unwrap();
+
+        let denied = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            "print table.read(\"data/broken.csv\", \"csv\")\n",
+        )
+        .unwrap_err();
+        assert_eq!(denied.code, "P1034");
+
+        let traversal = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:read".into()]),
+            "print table.read(\"../secret.csv\", \"csv\")\n",
+        )
+        .unwrap_err();
+        assert_eq!(traversal.code, "P1014");
+
+        let malformed = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:read".into()]),
+            "print table.read(\"data/broken.csv\", \"csv\")\n",
+        )
+        .unwrap_err();
+        assert_eq!(malformed.code, "P1069");
+
+        let unsafe_export = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:write".into()]),
+            "let table = {\"format\": \"csv\", \"headers\": [\"name\"], \"rows\": [{\"name\": \"Rafi\"}]}\nprint table.write_csv(\"../outside.csv\", table)\n",
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(unsafe_export.code, "P1014");
     }
 
     #[test]

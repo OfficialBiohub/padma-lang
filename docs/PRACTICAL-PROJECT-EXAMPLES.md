@@ -18,6 +18,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Student SQLite records | `examples/student-records-sqlite` | Local structured persistence without raw SQL | It is not an ORM, remote database, or arbitrary SQL console. |
 | Defensive URL inspector | `examples/defensive-url-inspector` | Input validation and manual-review report | It checks syntax only; it does not scan, attack, or prove a site is safe. |
 | Local password check | `examples/local-password-check` | Local password hash and verification boundary | It is not a hosted login, user database, password reset, or authentication server. |
+| Structured data inventory | `examples/structured-data-inventory` | Local CSV filtering, selection, count, and report export | It is not Excel/XLSX, cloud sync, shared-storage access, or a spreadsheet macro runner. |
 
 ## 1. Authorized media download
 
@@ -197,6 +198,23 @@ true
 ```
 
 The terminal may display typed characters depending on its input settings; the asterisks above are illustrative. Padma requires the password to come from a runtime variable rather than a hard-coded string literal. The resulting salted record can be verified locally, but this example does not create an online account system or a public login service. [2]
+
+## 7. Structured data inventory
+
+```bash
+cd ~/padma-lang/examples/structured-data-inventory
+padma .
+cat out/food-inventory.csv
+```
+
+```padma
+ধরি inventory = table.read("data/inventory.csv", "csv")
+ধরি food = table.filter_equal(inventory, "category", "food")
+ধরি report = table.select(food, ["name", "price"])
+table.write_csv("out/food-inventory.csv", report)
+```
+
+This example reads the project-local CSV, matches the `food` category exactly, keeps two chosen columns, and writes a project-local CSV. It needs `filesystem = ["read", "write"]`. It cannot traverse to another directory, write Android Downloads, contact a cloud spreadsheet, read an Excel workbook, or execute a macro. See [`STRUCTURED-DATA.md`](STRUCTURED-DATA.md) for supported formats and limits.
 
 ## Before you expand an example
 

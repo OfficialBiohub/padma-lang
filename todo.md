@@ -251,3 +251,17 @@
   - [x] Add a separate capability-gated local `inspect|plan` descriptor that tells the user when to take over for login, CAPTCHA, form completion, posting, upload/download, account change, purchase, payment, or other sensitive destination-controlled actions.
   - [x] Keep the descriptor non-executing: no browser launch, DNS/network activity, form filling, page inspection, credential/cookie/profile access, JavaScript injection, attachment read/upload, post, payment, or generated-output execution.
   - [x] Add cancellation guidance, redaction rules, Bangla-English diagnostics, negative security tests, a Termux example, and documentation before marking the workflow stable.
+
+## M13 — Daily-Use Practical Tool Roadmap
+
+- [ ] Publish a capability matrix that separates currently executable tools, local planning-only tools, external prerequisites, and intentionally unsupported high-risk actions for Termux-first Padma users.
+- [x] Structured-data toolkit: capability-gated project-local CSV/TSV/JSON read, validation, filtering, mapping, aggregation, and safe bounded file output with Bangla-English diagnostics and examples.
+- [ ] HTTP API toolkit: typed JSON request templates, validated response extraction, timeout/retry limits, secret-environment-name handling, and explicit network capability grants without hidden request loops.
+- [ ] Filesystem productivity toolkit: bounded recursive listing, safe copy/move/archive plans, checksums, text search, and dry-run-before-write interfaces scoped to the project root.
+- [ ] Developer workspace toolkit: project task aliases, deterministic test/build/lint plans, safe process allowlists, exit-code summaries, and no-shell argument handling for common Termux workflows.
+- [ ] Web/backend practical toolkit: reusable local-server routes, request validation, JSON response helpers, static-site generation, and deployment-plan contracts while keeping remote deployment separately confirmed.
+- [ ] SQLite application toolkit: schema migration plans, query parameter validation, export/import contracts, backup descriptors, and bounded project-local data maintenance.
+- [ ] AI productivity toolkit: provider-neutral structured prompt templates, bounded JSON-schema extraction, explicit user-reviewed outputs, and no autonomous tool/browser/output execution.
+- [ ] Media and document toolkit: authorized local media metadata/transcode plans, text/PDF/CSV reporting helpers, and prerequisite validation without unauthorized downloading or background processing.
+- [ ] Package ecosystem foundation: registry protocol design, package provenance/digest verification, dependency resolution limits, offline cache rules, and package publication review before any remote registry mutation.
+- [ ] Add each increment only after narrow capability design, negative security tests, standalone Termux example, bilingual documentation, and full repository verification.

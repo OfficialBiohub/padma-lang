@@ -1,0 +1,9 @@
+# Local CSV inventory report: only project-local file read/write is granted.
+ধরি inventory = table.read("data/inventory.csv", "csv")
+ধরি food = table.filter_equal(inventory, "category", "food")
+ধরি report = table.select(food, ["name", "price"])
+ধরি counts = table.count_by(inventory, "category")
+
+table.write_csv("out/food-inventory.csv", report)
+দেখাও text.format("Food item count: {count}", {"count": counts["food"]})
+দেখাও "Created out/food-inventory.csv"

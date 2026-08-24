@@ -46,6 +46,19 @@ Paths cannot be absolute and cannot contain `..`. The `@downloads/` alias remain
 
 `url.parse` deliberately accepts only absolute `http://` and `https://` URLs, rejects whitespace and embedded credentials, and does not perform any network request. It is an inspection utility; `http.get` remains the network API and applies its own network safeguards.
 
+## Structured data tables
+
+| API | Result and boundary |
+|---|---|
+| `table.read(path, format)` | Reads bounded project-local UTF-8 `csv`, `tsv`, or object-row `json` into a validated table value. Requires `filesystem:read` in project mode. |
+| `table.headers(table)` / `table.rows(table)` | Returns validated headers or text-cell row maps. |
+| `table.filter_equal(table, column, text)` | Returns rows whose named text cell exactly matches `text`. |
+| `table.select(table, columns)` | Returns a table containing declared, unique selected columns in the requested order. |
+| `table.count_by(table, column)` | Returns deterministic text-cell counts as a map. |
+| `table.write_csv(path, table)` | Writes a bounded deterministic project-local `.csv` file and returns `true`. Requires `filesystem:write` in project mode. |
+
+Tables are limited to 1 MiB, 4,096 data rows, 64 columns, 128-byte unique headers, and 4,096-byte single-line text cells. CSV supports doubled quotes in quoted single-line cells; JSON must be an array of object rows with scalar cells. Absolute paths, traversal, `@downloads`, nested JSON cells, malformed rows, duplicate headers, and oversized data are rejected. See [`STRUCTURED-DATA.md`](STRUCTURED-DATA.md) for the complete contract.
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -74,4 +87,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
