@@ -1,0 +1,7 @@
+[takeover]
+version = "1"
+mode = "visible-user-takeover-only"
+browser_plan_digest = "sha256:7cdd575b89c895eccd66479b26681d54abd7658d06946be3436b038e9b116f07"
+navigation_index = 1
+sensitive_action = "payment"
+max_review_seconds = 60

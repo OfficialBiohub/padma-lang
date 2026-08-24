@@ -61,6 +61,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1064 | Android Browser Handoff audit safety | The opt-in local audit manifest, path, existing JSONL record, or bounded atomic write is unsafe or failed. Raw URLs, query strings, approval input, cookies, credentials, profiles, page data, and opener output are not written or echoed. |
 | P1065 | Browser interaction draft safety | `padma-browser-draft.toml` is missing, malformed, unsafe, uses an unsupported mode/action, has an invalid/mismatched reviewed plan binding, or uses unsafe attachment metadata. Raw sensitive values are not echoed. |
 | P1066 | Browser interaction draft execution boundary | A browser draft execution path is unavailable or prohibited in this Padma version. Only local `padma browser draft inspect` and `padma browser draft plan` commands are supported. |
+| P1067 | Visible browser takeover safety | `padma-browser-takeover.toml` is missing, malformed, unsafe, uses an unsupported mode/action, has an invalid/mismatched reviewed plan binding, or includes a browser-control/user-decision field. Raw sensitive values are not echoed. |
+| P1068 | Visible browser takeover execution boundary | A browser takeover execution path is unavailable or prohibited in this Padma version. Only local `padma browser takeover inspect` and `padma browser takeover plan` commands are supported. |
 
 ## Example
 

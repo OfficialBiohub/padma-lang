@@ -94,6 +94,8 @@ The resulting descriptor records `session: "awaiting-confirmation"`, `confirmati
 
 An independently granted `browser = ["plan", "draft"]` capability can bind short local review text and optional attachment metadata to one reviewed navigation index. `padma browser draft inspect|plan` is still inspection-only: it does not open a browser, read an attachment, inject text, fill a form, collect a decision, or execute any output. Login, CAPTCHA handling, form completion, post/message, upload/download, account change, purchase, and payment are always `user-takeover-required`. See [Browser interaction drafts](BROWSER-DRAFTS.md) for the strict manifest and copy/manual-entry boundary.
 
+An independently granted `browser = ["plan", "takeover"]` capability can additionally label one sensitive action through a local `padma-browser-takeover.toml` checklist. `padma browser takeover inspect|plan` never opens or controls a browser, grants no approval, and never collects completion; it tells the user to take over in the destination-controlled visible UI. See [Visible Browser Takeover Checklist](BROWSER-TAKEOVER.md).
+
 The manifest has no secret, cookie, header, proxy, selector, JavaScript, or action field. Invalid raw origins and URLs are not repeated in diagnostics, so a malformed value containing userinfo or a token-like string is not copied into output.
 
 ## Diagnostics and future boundary
@@ -108,6 +110,8 @@ The manifest has no secret, cookie, header, proxy, selector, JavaScript, or acti
 | `P1061` | Browser confirmation or navigation execution is unavailable or prohibited in this Padma version. |
 | `P1065` | A browser interaction draft manifest is malformed, unsafe, or not bound to the reviewed browser plan. |
 | `P1066` | Browser draft execution is unavailable or prohibited in this Padma version. |
+| `P1067` | A visible browser takeover checklist is malformed, unsafe, or not bound to the reviewed browser plan. |
+| `P1068` | Browser takeover execution is unavailable or prohibited in this Padma version. |
 
 Browser execution is deliberately not part of this milestone. A future action adapter would require a new capability, a versioned manifest, destination revalidation immediately before a connection, a fresh visible confirmation for one bounded action, and a separate security review. `browser:plan` has no implicit upgrade path to browsing, login, posting, purchase, upload, download, or any other remote action.
 

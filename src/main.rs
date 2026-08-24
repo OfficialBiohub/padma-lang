@@ -298,6 +298,10 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1065") => (format!("Browser interaction draft manifest is unsafe or invalid: `{detail}`"), Some("Use only a reviewed plan digest, bounded draft text, and project-relative attachment metadata; Padma will not read or upload an attachment.".into())),
         (Locale::Bangla, "P1066") => ("browser interaction draft execute করা নিষিদ্ধ".into(), Some("`padma browser draft inspect` অথবা `padma browser draft plan` ব্যবহার করুন; login, CAPTCHA, form, post, upload, account, payment, এবং browser control আপনার visible browser-এ আপনার হাতে থাকবে।".into())),
         (Locale::English, "P1066") => ("Browser interaction draft execution is prohibited".into(), Some("Use `padma browser draft inspect` or `padma browser draft plan`; login, CAPTCHA, forms, posts, uploads, accounts, payments, and browser control remain in your visible browser and under your control.".into())),
+        (Locale::Bangla, "P1067") => (format!("browser user-takeover manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু reviewed plan digest, navigation index, fixed sensitive-action label, এবং short local review policy ব্যবহার করুন; Padma browser state বা user decision পড়বে না।".into())),
+        (Locale::English, "P1067") => (format!("Browser user-takeover manifest is unsafe or invalid: `{detail}`"), Some("Use only a reviewed plan digest, navigation index, fixed sensitive-action label, and short local review policy; Padma will not read browser state or a user decision.".into())),
+        (Locale::Bangla, "P1068") => ("browser user-takeover execute করা নিষিদ্ধ".into(), Some("শুধু `padma browser takeover inspect` অথবা `padma browser takeover plan` ব্যবহার করুন; visible browser-এ login, CAPTCHA, form, post, upload, account, purchase, এবং payment আপনার হাতে থাকবে।".into())),
+        (Locale::English, "P1068") => ("Browser user-takeover execution is prohibited".into(), Some("Use only `padma browser takeover inspect` or `padma browser takeover plan`; login, CAPTCHA, forms, posts, uploads, accounts, purchases, and payments remain under your control in the visible browser.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -4192,6 +4196,14 @@ struct BrowserDraftManifest {
     max_review_seconds: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserTakeoverManifest {
+    browser_plan_digest: String,
+    navigation_index: usize,
+    sensitive_action: String,
+    max_review_seconds: u32,
+}
+
 #[derive(Debug, Clone)]
 struct BrowserHandoffContext {
     locale: Locale,
@@ -4257,7 +4269,14 @@ fn capability_grants_for_field(
         "identity" => &["local"],
         "gui" => &["local"],
         "android" => &["plan"],
-        "browser" => &["plan", "confirm-plan", "handoff", "audit", "draft"],
+        "browser" => &[
+            "plan",
+            "confirm-plan",
+            "handoff",
+            "audit",
+            "draft",
+            "takeover",
+        ],
         "ai" => &["tools", "training-plan"],
         "deployment" => &["render"],
         "filesystem" => &["read", "write"],
@@ -6179,6 +6198,169 @@ fn parse_browser_draft_manifest(
         title,
         body,
         attachment_path,
+        max_review_seconds,
+    })
+}
+
+fn parse_browser_takeover_manifest(
+    source: &str,
+    locale: Locale,
+) -> Result<BrowserTakeoverManifest, String> {
+    let mut section = String::new();
+    let mut fields = BTreeMap::new();
+    for (line_number, raw_line) in source.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            if section != "takeover" {
+                return Err(browser_confirmation_error(
+                    locale,
+                    "P1067",
+                    &format!("unsupported takeover section on line {}", line_number + 1),
+                ));
+            }
+            continue;
+        }
+        let (key, raw_value) = line.split_once('=').ok_or_else(|| {
+            browser_confirmation_error(
+                locale,
+                "P1067",
+                &format!("expected `key = value` on line {}", line_number + 1),
+            )
+        })?;
+        let key = key.trim();
+        if section != "takeover"
+            || !matches!(
+                key,
+                "version"
+                    | "mode"
+                    | "browser_plan_digest"
+                    | "navigation_index"
+                    | "sensitive_action"
+                    | "max_review_seconds"
+            )
+        {
+            return Err(browser_confirmation_error(
+                locale,
+                "P1067",
+                &format!("unsupported takeover field on line {}", line_number + 1),
+            ));
+        }
+        let value = if matches!(key, "navigation_index" | "max_review_seconds") {
+            let value = raw_value.trim();
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(browser_confirmation_error(
+                    locale,
+                    "P1067",
+                    &format!("{key} must be an unsigned integer"),
+                ));
+            }
+            value.to_string()
+        } else {
+            let value = raw_value.trim();
+            if value.len() < 2
+                || !value.starts_with('"')
+                || !value.ends_with('"')
+                || value[1..value.len() - 1].contains('"')
+            {
+                return Err(browser_confirmation_error(
+                    locale,
+                    "P1067",
+                    &format!(
+                        "expected a quoted takeover value on line {}",
+                        line_number + 1
+                    ),
+                ));
+            }
+            value[1..value.len() - 1].to_string()
+        };
+        if fields.insert(key.to_string(), value).is_some() {
+            return Err(browser_confirmation_error(
+                locale,
+                "P1067",
+                "duplicate takeover field",
+            ));
+        }
+    }
+    let required = |key: &str| {
+        fields
+            .get(key)
+            .cloned()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                browser_confirmation_error(
+                    locale,
+                    "P1067",
+                    &format!("missing [takeover] field `{key}`"),
+                )
+            })
+    };
+    if required("version")? != "1" || required("mode")? != "visible-user-takeover-only" {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "takeover policy fields do not match version 1",
+        ));
+    }
+    let browser_plan_digest = required("browser_plan_digest")?;
+    if !is_sha256_digest(&browser_plan_digest) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "browser_plan_digest must use a lowercase sha256 digest",
+        ));
+    }
+    let navigation_index = required("navigation_index")?
+        .parse::<usize>()
+        .map_err(|_| {
+            browser_confirmation_error(
+                locale,
+                "P1067",
+                "navigation_index must be an unsigned integer",
+            )
+        })?;
+    let sensitive_action = required("sensitive_action")?;
+    if !matches!(
+        sensitive_action.as_str(),
+        "login"
+            | "captcha"
+            | "form-completion"
+            | "message-post"
+            | "upload"
+            | "download"
+            | "account-change"
+            | "purchase"
+            | "payment"
+    ) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "sensitive_action is outside the fixed user-takeover vocabulary",
+        ));
+    }
+    let max_review_seconds = required("max_review_seconds")?
+        .parse::<u32>()
+        .map_err(|_| {
+            browser_confirmation_error(
+                locale,
+                "P1067",
+                "max_review_seconds must be an unsigned integer",
+            )
+        })?;
+    if navigation_index == 0 || !(15..=300).contains(&max_review_seconds) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "navigation_index or max_review_seconds is outside the local takeover policy",
+        ));
+    }
+    Ok(BrowserTakeoverManifest {
+        browser_plan_digest,
+        navigation_index,
+        sensitive_action,
         max_review_seconds,
     })
 }
@@ -8715,6 +8897,25 @@ fn browser_draft_capability_error(project: &ProjectManifest) -> Result<(), Strin
     ))
 }
 
+fn browser_takeover_capability_error(project: &ProjectManifest) -> Result<(), String> {
+    if project.capabilities.contains("browser:takeover") {
+        return Ok(());
+    }
+    let locale = browser_plan_locale(project);
+    let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "browser:takeover");
+    Err(format!(
+        "{}: {}\n  = {}: {}",
+        diagnostic.code,
+        diagnostic.message,
+        if locale == Locale::Bangla {
+            "পরামর্শ"
+        } else {
+            "help"
+        },
+        diagnostic.hint.unwrap_or_default()
+    ))
+}
+
 fn load_browser_handoff_audit_manifest(
     root: &Path,
     project: &ProjectManifest,
@@ -8849,6 +9050,61 @@ fn load_browser_draft_manifest(
         ));
     }
     Ok((project, browser_plan, draft))
+}
+
+fn load_browser_takeover_manifest(
+    directory: &Path,
+) -> Result<
+    (
+        ProjectManifest,
+        BrowserPlanManifest,
+        BrowserTakeoverManifest,
+    ),
+    String,
+> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1067: cannot resolve project root: {error}"))?;
+    let (project, browser_plan) = load_browser_plan_manifest(&root)?;
+    browser_takeover_capability_error(&project)?;
+    let locale = browser_plan_locale(&project);
+    let manifest_path = root.join("padma-browser-takeover.toml");
+    let metadata = fs::symlink_metadata(&manifest_path).map_err(|error| {
+        browser_confirmation_error(
+            locale,
+            "P1067",
+            &format!("cannot inspect `padma-browser-takeover.toml`: {error}"),
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "padma-browser-takeover.toml must be a regular project file",
+        ));
+    }
+    let source = fs::read_to_string(&manifest_path).map_err(|error| {
+        browser_confirmation_error(
+            locale,
+            "P1067",
+            &format!("cannot read `padma-browser-takeover.toml`: {error}"),
+        )
+    })?;
+    let takeover = parse_browser_takeover_manifest(&source, locale)?;
+    if takeover.browser_plan_digest != browser_plan_digest(&browser_plan) {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "browser_plan_digest does not match the reviewed local browser plan",
+        ));
+    }
+    if takeover.navigation_index > browser_plan.navigation_urls.len() {
+        return Err(browser_confirmation_error(
+            locale,
+            "P1067",
+            "navigation_index does not identify a reviewed browser-plan URL",
+        ));
+    }
+    Ok((project, browser_plan, takeover))
 }
 
 fn browser_confirmation_plan_json(directory: &Path) -> Result<String, String> {
@@ -8999,6 +9255,84 @@ fn run_browser_draft_inspect(directory: &Path) -> Result<(), String> {
 
 fn run_browser_draft_plan(directory: &Path) -> Result<(), String> {
     print!("{}", browser_draft_plan_json(directory)?);
+    Ok(())
+}
+
+fn browser_takeover_plan_json(directory: &Path) -> Result<String, String> {
+    let (project, browser_plan, takeover) = load_browser_takeover_manifest(directory)?;
+    let destination = browser_plan.navigation_urls[takeover.navigation_index - 1].clone();
+    serde_json::to_string_pretty(&serde_json::json!({
+        "browserTakeoverPlanVersion": 1,
+        "mode": "inspection-only",
+        "project": {"name": project.name, "version": project.version},
+        "browserPlan": {
+            "digest": browser_plan_digest(&browser_plan),
+            "navigationIndex": takeover.navigation_index,
+            "method": "GET",
+            "url": destination,
+            "redirectPolicy": "deny"
+        },
+        "takeover": {
+            "sensitiveAction": takeover.sensitive_action,
+            "status": "user-takeover-required",
+            "maxReviewSeconds": takeover.max_review_seconds,
+            "completion": "not-collected",
+            "execution": "disabled",
+            "checklist": [
+                "Review the digest-bound destination in a visible browser.",
+                "Use a separately confirmed Android Browser Handoff only if you choose to open the reviewed URL.",
+                "Perform the labelled sensitive action yourself in the destination-controlled browser UI.",
+                "Cancel or close the browser if the destination or requested action differs from your review."
+            ]
+        },
+        "visibleHandoff": {
+            "status": "not-started",
+            "requiresSeparateConfirmationPlan": true,
+            "requiresForegroundOpen": true,
+            "browserControl": "user-controlled"
+        },
+        "browser": "not-started",
+        "network": "disabled",
+        "dns": "disabled",
+        "credentialAccess": "disabled",
+        "cookies": "not-read",
+        "browserProfile": "not-read",
+        "pageInspection": "disabled",
+        "javascriptExecution": "disabled",
+        "formFill": "disabled",
+        "formSubmission": "disabled",
+        "posting": "disabled",
+        "upload": "disabled",
+        "download": "disabled",
+        "accountChange": "disabled",
+        "purchase": "disabled",
+        "payment": "disabled",
+        "generatedOutputExecution": "disabled",
+        "userDecision": "not-collected",
+        "childProcess": "disabled"
+    }))
+    .map(|value| format!("{value}\n"))
+    .map_err(|error| format!("P1067: cannot encode browser takeover plan: {error}"))
+}
+
+fn browser_takeover_inspect_contents(directory: &Path) -> Result<String, String> {
+    let root = fs::canonicalize(directory)
+        .map_err(|error| format!("P1067: cannot resolve project root: {error}"))?;
+    let (project, _, _) = load_browser_takeover_manifest(&root)?;
+    let heading = match browser_plan_locale(&project) {
+        Locale::Bangla => "Padma visible browser takeover checklist (শুধু inspection)\n",
+        Locale::English => "Padma visible browser takeover checklist (inspection-only)\n",
+    };
+    Ok(format!("{heading}{}", browser_takeover_plan_json(&root)?))
+}
+
+fn run_browser_takeover_inspect(directory: &Path) -> Result<(), String> {
+    print!("{}", browser_takeover_inspect_contents(directory)?);
+    Ok(())
+}
+
+fn run_browser_takeover_plan(directory: &Path) -> Result<(), String> {
+    print!("{}", browser_takeover_plan_json(directory)?);
     Ok(())
 }
 
@@ -9935,10 +10269,10 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
 fn usage(locale: Locale) -> &'static str {
     match locale {
         Locale::Bangla => {
-            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma ai inspect [project]  AI workflow manifest নিরাপদভাবে inspect করুন\n  padma ai plan [project]  network ছাড়া AI workflow plan দেখুন\n  padma ai tools inspect [project]  AI tool manifest local inspect করুন\n  padma ai tools plan [project]  tool/agent ছাড়া AI tool plan দেখুন\n  padma ai training inspect [project]  AI training manifest local inspect করুন\n  padma ai training plan [project]  training ছাড়া resource-bounded plan দেখুন\n  padma browser inspect [project]  browser plan manifest inspect করুন\n  padma browser plan [project]  browser ছাড়া, network ছাড়া navigation plan দেখুন\n  padma browser draft inspect [project]  browser interaction draft local inspect করুন\n  padma browser draft plan [project]  browser ছাড়া inert user-takeover draft plan দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma browser draft plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
+            "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma ai inspect [project]  AI workflow manifest নিরাপদভাবে inspect করুন\n  padma ai plan [project]  network ছাড়া AI workflow plan দেখুন\n  padma ai tools inspect [project]  AI tool manifest local inspect করুন\n  padma ai tools plan [project]  tool/agent ছাড়া AI tool plan দেখুন\n  padma ai training inspect [project]  AI training manifest local inspect করুন\n  padma ai training plan [project]  training ছাড়া resource-bounded plan দেখুন\n  padma browser inspect [project]  browser plan manifest inspect করুন\n  padma browser plan [project]  browser ছাড়া, network ছাড়া navigation plan দেখুন\n  padma browser draft inspect [project]  browser interaction draft local inspect করুন\n  padma browser draft plan [project]  browser ছাড়া inert user-takeover draft plan দেখুন\n  padma browser takeover inspect [project]  visible user-takeover checklist local inspect করুন\n  padma browser takeover plan [project]  browser ছাড়া sensitive-action takeover plan দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma browser draft plan .\n  padma browser takeover plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
-            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma ai inspect [project]  inspect an AI workflow manifest safely\n  padma ai plan [project]  print an AI workflow plan without network access\n  padma ai tools inspect [project]  inspect an AI tool manifest locally\n  padma ai tools plan [project]  print an AI tool plan without tools or an agent\n  padma ai training inspect [project]  inspect an AI training manifest locally\n  padma ai training plan [project]  print a training plan without dataset reads or training\n  padma browser inspect [project]  inspect a browser plan manifest locally\n  padma browser plan [project]  print a navigation plan without browser or network access\n  padma browser draft inspect [project]  inspect a browser interaction draft locally\n  padma browser draft plan [project]  print an inert, user-takeover draft plan without a browser\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma browser draft plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
+            "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma ai inspect [project]  inspect an AI workflow manifest safely\n  padma ai plan [project]  print an AI workflow plan without network access\n  padma ai tools inspect [project]  inspect an AI tool manifest locally\n  padma ai tools plan [project]  print an AI tool plan without tools or an agent\n  padma ai training inspect [project]  inspect an AI training manifest locally\n  padma ai training plan [project]  print a training plan without dataset reads or training\n  padma browser inspect [project]  inspect a browser plan manifest locally\n  padma browser plan [project]  print a navigation plan without browser or network access\n  padma browser draft inspect [project]  inspect a browser interaction draft locally\n  padma browser draft plan [project]  print an inert, user-takeover draft plan without a browser\n  padma browser takeover inspect [project]  inspect a visible user-takeover checklist locally\n  padma browser takeover plan [project]  print a sensitive-action takeover plan without a browser\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma browser draft plan .\n  padma browser takeover plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
         }
     }
 }
@@ -10194,6 +10528,26 @@ fn main() {
                         .map(PathBuf::from)
                         .unwrap_or_else(|| PathBuf::from("."));
                     run_browser_draft_plan(&directory)
+                }
+                _ => {
+                    eprintln!("{}", usage(Locale::English));
+                    process::exit(64);
+                }
+            },
+            Some("takeover") => match arguments.get(3).map(String::as_str) {
+                Some("inspect") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_browser_takeover_inspect(&directory)
+                }
+                Some("plan") if arguments.len() <= 5 => {
+                    let directory = arguments
+                        .get(4)
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("."));
+                    run_browser_takeover_plan(&directory)
                 }
                 _ => {
                     eprintln!("{}", usage(Locale::English));
@@ -13010,6 +13364,151 @@ mod tests {
         assert!(error.starts_with("P1066: Browser interaction draft execution is prohibited"));
         assert!(!usage(Locale::English).contains("browser draft execute"));
         assert!(!usage(Locale::English).contains("browser draft run"));
+    }
+
+    fn valid_browser_takeover_manifest(digest: &str) -> String {
+        format!(
+            "[takeover]\nversion = \"1\"\nmode = \"visible-user-takeover-only\"\nbrowser_plan_digest = \"{digest}\"\nnavigation_index = 1\nsensitive_action = \"payment\"\nmax_review_seconds = 60\n"
+        )
+    }
+
+    fn write_browser_takeover_project(root: &Path, granted: bool, manifest: &str) {
+        let capabilities = if granted {
+            "browser = [\"plan\", \"takeover\"]"
+        } else {
+            "browser = [\"plan\"]"
+        };
+        fs::write(
+            root.join("padma.toml"),
+            format!(
+                "[padma]\nname = \"browser-takeover-test\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\n{capabilities}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("padma-browser.toml"),
+            valid_browser_plan_manifest(),
+        )
+        .unwrap();
+        fs::write(root.join("padma-browser-takeover.toml"), manifest).unwrap();
+    }
+
+    #[test]
+    fn browser_takeover_emits_a_visible_manual_checklist_without_execution() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let root = module_fixture_dir("browser-takeover-inert-descriptor");
+        write_browser_takeover_project(
+            &root,
+            true,
+            &valid_browser_takeover_manifest(&browser_plan_digest(&browser_plan)),
+        );
+
+        let plan: JsonValue =
+            serde_json::from_str(&browser_takeover_plan_json(&root).unwrap()).unwrap();
+        let inspect = browser_takeover_inspect_contents(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(plan["browserTakeoverPlanVersion"], 1);
+        assert_eq!(plan["mode"], "inspection-only");
+        assert_eq!(
+            plan["browserPlan"]["url"],
+            "https://docs.python.org/3/tutorial/"
+        );
+        assert_eq!(plan["takeover"]["sensitiveAction"], "payment");
+        assert_eq!(plan["takeover"]["status"], "user-takeover-required");
+        assert_eq!(plan["takeover"]["completion"], "not-collected");
+        assert_eq!(plan["takeover"]["execution"], "disabled");
+        assert_eq!(plan["visibleHandoff"]["status"], "not-started");
+        assert_eq!(plan["network"], "disabled");
+        assert_eq!(plan["dns"], "disabled");
+        assert_eq!(plan["credentialAccess"], "disabled");
+        assert_eq!(plan["pageInspection"], "disabled");
+        assert_eq!(plan["formFill"], "disabled");
+        assert_eq!(plan["payment"], "disabled");
+        assert_eq!(plan["userDecision"], "not-collected");
+        assert!(inspect.starts_with("Padma visible browser takeover checklist (inspection-only)"));
+    }
+
+    #[test]
+    fn browser_takeover_requires_its_narrow_capability_and_exact_reviewed_binding() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let digest = browser_plan_digest(&browser_plan);
+
+        let denied_root = module_fixture_dir("browser-takeover-capability-denied");
+        write_browser_takeover_project(
+            &denied_root,
+            false,
+            &valid_browser_takeover_manifest(&digest),
+        );
+        let denied = browser_takeover_plan_json(&denied_root).unwrap_err();
+        fs::remove_dir_all(&denied_root).unwrap();
+        assert!(denied.starts_with("P1034"));
+        assert!(denied.contains("browser:takeover"));
+
+        for manifest in [
+            valid_browser_takeover_manifest(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            valid_browser_takeover_manifest(&digest)
+                .replace("navigation_index = 1", "navigation_index = 3"),
+        ] {
+            let root = module_fixture_dir("browser-takeover-plan-binding");
+            write_browser_takeover_project(&root, true, &manifest);
+            let error = browser_takeover_plan_json(&root).unwrap_err();
+            fs::remove_dir_all(&root).unwrap();
+            assert!(error.starts_with("P1067"));
+        }
+    }
+
+    #[test]
+    fn browser_takeover_rejects_unsafe_fields_actions_and_execution_modes() {
+        let browser_plan =
+            parse_browser_plan_manifest(valid_browser_plan_manifest(), Locale::English).unwrap();
+        let valid = valid_browser_takeover_manifest(&browser_plan_digest(&browser_plan));
+        let unsafe_manifests = [
+            valid.replace(
+                "mode = \"visible-user-takeover-only\"",
+                "mode = \"execute\"",
+            ),
+            valid.replace(
+                "sensitive_action = \"payment\"",
+                "sensitive_action = \"credential-capture\"",
+            ),
+            valid.replace(
+                "max_review_seconds = 60",
+                "max_review_seconds = 60\nselector = \"#password\"",
+            ),
+            valid.replace(
+                "max_review_seconds = 60",
+                "max_review_seconds = 60\nscript = \"alert(1)\"",
+            ),
+            valid.replace(
+                "max_review_seconds = 60",
+                "max_review_seconds = 60\ncookie = \"secret\"",
+            ),
+            valid.replace(
+                "max_review_seconds = 60",
+                "max_review_seconds = 60\nraw_url = \"https://evil.invalid\"",
+            ),
+            valid.replace(
+                "max_review_seconds = 60",
+                "max_review_seconds = 60\nmax_review_seconds = 61",
+            ),
+        ];
+        for manifest in unsafe_manifests {
+            let error = parse_browser_takeover_manifest(&manifest, Locale::English).unwrap_err();
+            assert!(error.starts_with("P1067"));
+        }
+    }
+
+    #[test]
+    fn browser_takeover_execution_remains_an_explicitly_prohibited_boundary() {
+        let error = browser_confirmation_error(Locale::English, "P1068", "");
+        assert!(error.starts_with("P1068: Browser user-takeover execution is prohibited"));
+        assert!(!usage(Locale::English).contains("browser takeover execute"));
+        assert!(!usage(Locale::English).contains("browser takeover run"));
     }
 
     fn valid_ai_tool_plan_manifest() -> &'static str {

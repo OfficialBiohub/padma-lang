@@ -244,3 +244,10 @@
   - [x] Require draft attachment paths to be project-relative metadata only; no file read/upload action is permitted in the draft foundation.
   - [x] Add explicit `user-takeover-required` state for login, CAPTCHA, form completion, post/message, upload/download, account change, purchase/payment, or any sensitive external action.
 - [x] Document and test that a draft may be copied or reviewed by the user after a visible Android Browser Handoff, but Padma cannot inject it into a webpage, fill a form, or infer/record the user’s decision.
+
+## M12 — Visible Browser Takeover Workflow
+
+- [x] Define a strict local takeover checklist manifest that binds one reviewed browser-plan digest and navigation index to user-visible, non-sensitive review steps without reading live browser state or collecting a user decision.
+  - [x] Add a separate capability-gated local `inspect|plan` descriptor that tells the user when to take over for login, CAPTCHA, form completion, posting, upload/download, account change, purchase, payment, or other sensitive destination-controlled actions.
+  - [x] Keep the descriptor non-executing: no browser launch, DNS/network activity, form filling, page inspection, credential/cookie/profile access, JavaScript injection, attachment read/upload, post, payment, or generated-output execution.
+  - [x] Add cancellation guidance, redaction rules, Bangla-English diagnostics, negative security tests, a Termux example, and documentation before marking the workflow stable.

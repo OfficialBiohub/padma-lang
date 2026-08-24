@@ -56,6 +56,8 @@ If a project grant, manifest, digest, destination, confirmation, or opener check
 
 After the visible Android browser opens, the user—not Padma—controls it. A page that requires login, CAPTCHA, a form, upload, post, payment, or account action remains an application the user operates directly. Closing the Android browser or returning to Termux ends Padma’s involvement; no browser session is retained.
 
+For a local preflight that explicitly labels one sensitive action without opening a browser, see [Visible Browser Takeover Checklist](BROWSER-TAKEOVER.md). It does not imply `browser:handoff`, does not collect approval or completion, and cannot operate the Android browser.
+
 ## Optional redacted local audit
 
 The base handoff writes no persistent event file. Projects that need a small local record may grant `browser:audit` and add this regular project file:

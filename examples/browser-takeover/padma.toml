@@ -1,0 +1,8 @@
+[padma]
+name = "browser-takeover"
+version = "0.1.0"
+entry = "main.pd"
+locale = "bn"
+
+[capabilities]
+browser = ["plan", "takeover"]
