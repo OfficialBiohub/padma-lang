@@ -1,0 +1,11 @@
+# A local JSON preference/profile with explicit safe defaults.
+ধরি profile = json.parse(file.read("data/profile.json"))
+ধরি schema = {"displayName": {"type": "text", "required": true}, "soundEnabled": {"type": "boolean", "default": false}, "theme": {"type": "text", "default": "light"}, "attempts": {"type": "number"}}
+
+ধরি checked = profile.validate(profile, schema)
+ধরি summary = profile.summary(profile, schema)
+
+দেখাও text.format("Theme: {theme}", {"theme": checked["theme"]})
+দেখাও text.format("Explicit fields: {count}", {"count": summary["explicitFields"]})
+দেখাও text.format("Defaulted fields: {count}", {"count": summary["defaultedFields"]})
+দেখাও text.format("Network: {state}", {"state": summary["network"]})

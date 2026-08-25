@@ -43,7 +43,7 @@
 |---|---|---|
 | M13.1 | `table.read`, `table.headers`, `table.rows`, `table.filter_equal`, `table.select`, `table.count_by`, `table.write_csv` | **Complete.** Typed bounded values, missing-grant/path/malformed-data tests, Bangla-English diagnostics, exact Termux example |
 | M13.2 | `fs.list`, `fs.checksum`, `fs.search_text`, and disabled copy/move/archive plans | **Complete.** Project-only non-symlink inspection, no-mutation/security negative tests, exact Termux example |
-| M15.1 | Local reporting toolkit | Validated table-to-Markdown/text rendering, bounded project-local `.md` export, injection/path/write denial tests |
+| M15.1 | Local reporting toolkit | **Complete.** Validated table-to-Markdown/text rendering, bounded project-local `.md` export, and injection/path/write denial tests |
 | M15.2 | Writing and study-note toolkit | Bangla-English text cleanup, word/line statistics, title/outline helpers, deterministic Markdown notes |
 | M15.3 | Household, student, and small-business record schemas | Attendance, expense, inventory, and task summary validation over local table data |
 | M15.4 | Freelancer/office document drafts | User-reviewed quote, invoice, portfolio, and client-report templates; no payment/account automation |
@@ -62,12 +62,19 @@
 | Developer/maker | Project data, test/build plan, local API response | Project manifests, fixed bridge, local server contracts | Task manifest and API template increments |
 | Creator/media worker | Authorized local metadata, script/text report | Local files, text/JSON, authorized media boundary | Media/document metadata report plan |
 | Privacy/security learner | Hash, config inspection, local defensive report | Checksum, safe URL/file inspection, capability system | Redacted configuration/asset report |
+| Legal game user/developer | Own-game project layout, local score/save schema, fixture balance report, accessibility settings | Simple project layout, local tables/reports, safe filesystem boundary | Local configuration/profile validation without game-process, account, or network authority |
 
 The immediate M15.1 increment is **local reporting**, because all of these categories need a readable local result after collecting or validating data. It will consume only an already-validated Padma table value, render inert Markdown/text, and write a report only when a project explicitly grants `filesystem:write`. It will not upload a report, send an email, create an invoice payment, access an account, run a macro, render raw HTML, or start a background process.
 
+## M17: cross-category configuration and legal game-user scope
+
+The next shared foundation is a **local configuration/profile validator**. **Complete:** `profile.validate` validates bounded JSON-derived scalar maps against a declared local profile shape, `profile.summary` emits redacted validation metadata, and explicit schema defaults are applied only when allowed. Student notes, family budgets, shop inventory settings, freelancer templates, developer task presets, creator metadata profiles, privacy-safe project settings, and user-owned game project fixtures can use this local foundation. It has no direct file, network, account, device, process, or action authority; project-local JSON input can be read only through the existing `filesystem:read`-gated `file.read` composition.
+
+For game users and developers, Padma will support only ownership-safe workflows: the user’s own game project structure, offline test fixtures, local score/save schema validation, balance/report calculations over supplied data, and accessibility settings templates. It will not add game cracking, anti-cheat bypass, memory/process manipulation, game account/item changes, multiplayer automation, cheating, evasion, or an unfair gameplay advantage.
+
 ## Deliberately not automatic
 
-The following are useful concepts but will not be made silent or unrestricted tools: browser login/session automation, CAPTCHA bypass, credential/cookie/profile collection, JavaScript injection, automatic form/post/upload/download/account/purchase/payment action, generated-output execution, Android permission elevation, ADB/device control, arbitrary shell commands, remote deployment without provider confirmation, or package publication without explicit review.
+The following are useful concepts but will not be made silent or unrestricted tools: browser login/session automation, CAPTCHA bypass, credential/cookie/profile collection, JavaScript injection, automatic form/post/upload/download/account/purchase/payment action, generated-output execution, Android permission elevation, ADB/device control, arbitrary shell commands, remote deployment without provider confirmation, package publication without explicit review, game cracking, game cheats, anti-cheat bypass, account/item manipulation, or multiplayer unfair advantage.
 
 ## How each increment ships
 

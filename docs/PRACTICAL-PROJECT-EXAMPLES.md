@@ -21,6 +21,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Structured data inventory | `examples/structured-data-inventory` | Local CSV filtering, selection, count, and report export | It is not Excel/XLSX, cloud sync, shared-storage access, or a spreadsheet macro runner. |
 | Filesystem productivity | `examples/filesystem-productivity` | Project-local listing, checksum, text search, and disabled copy planning | It is not file mutation, Android shared-storage access, shell execution, or a file-management daemon. |
 | Local expense reporting | `examples/local-reporting-expense` | CSV-to-Markdown local expense report | It is not tax/accounting advice, invoice payment, email/upload, shared-storage, or public publishing. |
+| Local profile validator | `examples/local-profile-validator` | Project-local JSON preferences with schema/default validation | It is not account/login state, game modification, anti-cheat bypass, network profile sync, or device settings control. |
 
 ## 1. Authorized media download
 
@@ -250,6 +251,22 @@ report.write_markdown("out/january-expense.md", "January Expense Report", expens
 ```
 
 This example validates project-local CSV rows, makes an in-memory report summary, then writes a project-local Markdown file. It requires `filesystem = ["read", "write"]`. It does not calculate tax, issue a financial recommendation, send/charge an invoice, upload/email/share the report, render scripts, start a background job, or write shared Android storage. See [`LOCAL-REPORTING.md`](LOCAL-REPORTING.md) for output limits and escaping rules.
+
+## 10. Local profile validator
+
+```bash
+cd ~/padma-lang/examples/local-profile-validator
+padma .
+```
+
+```padma
+ধরি profile = json.parse(file.read("data/profile.json"))
+ধরি checked = profile.validate(profile, schema)
+ধরি summary = profile.summary(profile, schema)
+দেখাও checked["theme"]
+```
+
+The example reads a project-local JSON preference file, validates only declared scalar fields, applies an explicit safe default, and emits a redacted summary. It needs `filesystem = ["read"]` only for `file.read`; profile validation itself has no capability. It cannot access a user account, browser, network, device setting, running game, game item/score/account, anti-cheat system, or process. See [`LOCAL-PROFILES.md`](LOCAL-PROFILES.md) for schema limits and the legal game-project boundary.
 
 ## Before you expand an example
 

@@ -20,6 +20,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Filesystem productivity toolkit](FILESYSTEM-PRODUCTIVITY.md) | Bounded project-local listing, checksum, text search, and disabled copy/move/archive plans |
 | [Local reporting toolkit](LOCAL-REPORTING.md) | Validated table-to-Markdown summaries and capability-gated project-local report export |
 | [Simple project structure](SIMPLE-PROJECTS.md) | Beginner-friendly canonical layout, four Termux commands, and flat-project compatibility rules |
+| [Local profile toolkit](LOCAL-PROFILES.md) | Bounded in-memory profile validation, explicit defaults, and redacted summaries without action authority |
 
 ## Security and local runtime
 

@@ -308,6 +308,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1070") => (format!("Filesystem productivity operation is unsafe or invalid: `{detail}`"), Some("Use only bounded project-relative regular files/directories; symlinks, shared storage, traversal, oversized input, and mutation actions are not allowed.".into())),
         (Locale::Bangla, "P1071") => (format!("local report নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded title ও validated table ব্যবহার করুন; project root-এর ভেতরে non-symlink `.md` path-এ write করুন।".into())),
         (Locale::English, "P1071") => (format!("Local report is unsafe or invalid: `{detail}`"), Some("Use a bounded title and validated table; write only to a non-symlink `.md` path inside the project root.".into())),
+        (Locale::Bangla, "P1072") => (format!("local profile নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded Bangla/English key, supported scalar type, এবং explicit default ব্যবহার করুন; Padma profile value, account, network, device, বা process ব্যবহার করবে না।".into())),
+        (Locale::English, "P1072") => (format!("Local profile is unsafe or invalid: `{detail}`"), Some("Use only bounded Bangla/English keys, supported scalar types, and explicit defaults; Padma will not use profile values for account, network, device, or process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1569,6 +1571,9 @@ const FS_PRODUCTIVITY_MAX_QUERY_BYTES: usize = 128;
 const FS_PRODUCTIVITY_MAX_LINE_BYTES: usize = 4_096;
 const REPORT_MAX_TITLE_BYTES: usize = 160;
 const REPORT_MAX_BYTES: usize = 1_048_576;
+const PROFILE_MAX_FIELDS: usize = 32;
+const PROFILE_MAX_KEY_BYTES: usize = 64;
+const PROFILE_MAX_TEXT_BYTES: usize = 1_024;
 
 fn value_from_json(value: JsonValue) -> Result<Value, String> {
     match value {
@@ -1624,6 +1629,258 @@ fn filesystem_productivity_error(locale: Locale, position: Position, detail: &st
 
 fn report_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1071", position, detail)
+}
+
+fn profile_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1072", position, detail)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProfileScalarType {
+    Text,
+    Number,
+    Boolean,
+    Null,
+}
+
+#[derive(Clone, Debug)]
+struct ProfileFieldRule {
+    value_type: ProfileScalarType,
+    required: bool,
+    default: Option<Value>,
+}
+
+fn profile_safe_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= PROFILE_MAX_KEY_BYTES
+        && !key
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+}
+
+fn profile_value_matches_type(value: &Value, value_type: ProfileScalarType) -> bool {
+    match (value, value_type) {
+        (Value::String(value), ProfileScalarType::Text) => {
+            value.len() <= PROFILE_MAX_TEXT_BYTES && !value.chars().any(char::is_control)
+        }
+        (Value::Number(value), ProfileScalarType::Number) => value.is_finite(),
+        (Value::Boolean(_), ProfileScalarType::Boolean) => true,
+        (Value::Null, ProfileScalarType::Null) => true,
+        _ => false,
+    }
+}
+
+fn profile_scalar_type_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<ProfileScalarType, PadmaError> {
+    let value = expect_string(value, locale, position, "profile field type")?;
+    match value {
+        "text" => Ok(ProfileScalarType::Text),
+        "number" => Ok(ProfileScalarType::Number),
+        "boolean" => Ok(ProfileScalarType::Boolean),
+        "null" => Ok(ProfileScalarType::Null),
+        _ => Err(profile_error(
+            locale,
+            position,
+            "profile field type must be text, number, boolean, or null",
+        )),
+    }
+}
+
+fn profile_schema_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<BTreeMap<String, ProfileFieldRule>, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(profile_error(
+            locale,
+            position,
+            "profile schema must be a map",
+        ));
+    };
+    if fields.is_empty() || fields.len() > PROFILE_MAX_FIELDS {
+        return Err(profile_error(
+            locale,
+            position,
+            "profile schema field count is outside the allowed limit",
+        ));
+    }
+    let mut rules = BTreeMap::new();
+    for (key, rule_value) in fields {
+        if !profile_safe_key(key) {
+            return Err(profile_error(
+                locale,
+                position,
+                "profile schema keys must be bounded single-token text",
+            ));
+        }
+        let Value::Map(rule_map) = rule_value else {
+            return Err(profile_error(
+                locale,
+                position,
+                "each profile schema field must be a map",
+            ));
+        };
+        if rule_map.is_empty() || rule_map.len() > 3 || !rule_map.contains_key("type") {
+            return Err(profile_error(
+                locale,
+                position,
+                "profile schema fields require type and allow only required/default extras",
+            ));
+        }
+        if rule_map
+            .keys()
+            .any(|field| !matches!(field.as_str(), "type" | "required" | "default"))
+        {
+            return Err(profile_error(
+                locale,
+                position,
+                "profile schema contains an unsupported field",
+            ));
+        }
+        let value_type = profile_scalar_type_from_value(
+            rule_map.get("type").expect("type presence checked"),
+            locale,
+            position,
+        )?;
+        let required = match rule_map.get("required") {
+            Some(Value::Boolean(value)) => *value,
+            Some(_) => {
+                return Err(profile_error(
+                    locale,
+                    position,
+                    "profile required must be boolean",
+                ))
+            }
+            None => false,
+        };
+        let default = rule_map.get("default").cloned();
+        if required && default.is_some() {
+            return Err(profile_error(
+                locale,
+                position,
+                "a required profile field must not declare a default",
+            ));
+        }
+        if let Some(default) = &default {
+            if !profile_value_matches_type(default, value_type) {
+                return Err(profile_error(
+                    locale,
+                    position,
+                    "profile default does not match its declared scalar type",
+                ));
+            }
+        }
+        rules.insert(
+            key.clone(),
+            ProfileFieldRule {
+                value_type,
+                required,
+                default,
+            },
+        );
+    }
+    Ok(rules)
+}
+
+fn profile_validated_value(
+    profile: &Value,
+    schema: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<(Value, usize, usize, usize), PadmaError> {
+    let Value::Map(values) = profile else {
+        return Err(profile_error(locale, position, "profile must be a map"));
+    };
+    if values.len() > PROFILE_MAX_FIELDS {
+        return Err(profile_error(
+            locale,
+            position,
+            "profile field count exceeds the allowed limit",
+        ));
+    }
+    let rules = profile_schema_from_value(schema, locale, position)?;
+    if values.keys().any(|key| !rules.contains_key(key)) {
+        return Err(profile_error(
+            locale,
+            position,
+            "profile contains a field outside the declared schema",
+        ));
+    }
+    let mut validated = BTreeMap::new();
+    let mut explicit_fields = 0;
+    let mut defaulted_fields = 0;
+    let mut optional_missing_fields = 0;
+    for (key, rule) in rules {
+        if let Some(value) = values.get(&key) {
+            if !profile_value_matches_type(value, rule.value_type) {
+                return Err(profile_error(
+                    locale,
+                    position,
+                    "profile value does not match its declared scalar type",
+                ));
+            }
+            explicit_fields += 1;
+            validated.insert(key, value.clone());
+        } else if let Some(default) = rule.default {
+            defaulted_fields += 1;
+            validated.insert(key, default);
+        } else if rule.required {
+            return Err(profile_error(
+                locale,
+                position,
+                "profile is missing a required field",
+            ));
+        } else {
+            optional_missing_fields += 1;
+        }
+    }
+    Ok((
+        Value::Map(validated),
+        explicit_fields,
+        defaulted_fields,
+        optional_missing_fields,
+    ))
+}
+
+fn profile_summary_value(
+    profile: &Value,
+    schema: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let (validated, explicit_fields, defaulted_fields, optional_missing_fields) =
+        profile_validated_value(profile, schema, locale, position)?;
+    let Value::Map(values) = validated else {
+        unreachable!("profile validation always returns a map")
+    };
+    Ok(Value::Map(BTreeMap::from([
+        ("valid".into(), Value::Boolean(true)),
+        ("fieldCount".into(), Value::Number(values.len() as f64)),
+        (
+            "explicitFields".into(),
+            Value::Number(explicit_fields as f64),
+        ),
+        (
+            "defaultedFields".into(),
+            Value::Number(defaulted_fields as f64),
+        ),
+        (
+            "optionalMissingFields".into(),
+            Value::Number(optional_missing_fields as f64),
+        ),
+        (
+            "fields".into(),
+            Value::List(values.keys().cloned().map(Value::String).collect()),
+        ),
+        ("network".into(), Value::String("disabled".into())),
+        ("account".into(), Value::String("disabled".into())),
+        ("device".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ])))
 }
 
 fn filesystem_productivity_regular_file(
@@ -4105,6 +4362,19 @@ impl Interpreter {
                         error_for(self.locale, "P1015", *position, "report output path")
                     })?;
                     return Ok(Value::Boolean(true));
+                }
+                if name == "profile.validate" || name == "profile.summary" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let profile = self.evaluate(&arguments[0])?;
+                    let schema = self.evaluate(&arguments[1])?;
+                    if name == "profile.validate" {
+                        let (validated, _, _, _) =
+                            profile_validated_value(&profile, &schema, self.locale, *position)?;
+                        return Ok(validated);
+                    }
+                    return profile_summary_value(&profile, &schema, self.locale, *position);
                 }
                 if name == "http.get" {
                     if arguments.len() != 1 {
@@ -10916,7 +11186,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
-        | "report.summary" => Some((2, 2)),
+        | "report.summary" | "profile.validate" | "profile.summary" => Some((2, 2)),
         "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
@@ -13665,6 +13935,37 @@ mod tests {
         .unwrap_err();
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(malformed.code, "P1069");
+    }
+
+    #[test]
+    fn local_profile_validates_defaults_and_returns_a_redacted_summary() {
+        let root = module_fixture_dir("local-profile");
+        let output = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            "let profile = {\"name\": \"Rafi\", \"sound\": true}\nlet schema = {\"name\": {\"type\": \"text\", \"required\": true}, \"sound\": {\"type\": \"boolean\", \"default\": false}, \"theme\": {\"type\": \"text\", \"default\": \"light\"}, \"attempts\": {\"type\": \"number\"}}\nlet checked = profile.validate(profile, schema)\nlet summary = profile.summary(profile, schema)\nprint checked[\"theme\"]\nprint summary[\"explicitFields\"]\nprint summary[\"defaultedFields\"]\nprint summary[\"optionalMissingFields\"]\nprint text.contains(json.stringify(summary), \"Rafi\")\nprint summary[\"network\"]\n",
+        )
+        .unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(output, vec!["light", "2", "1", "1", "false", "disabled"]);
+    }
+
+    #[test]
+    fn local_profile_rejects_unsafe_or_malformed_schemas_and_values() {
+        let root = module_fixture_dir("local-profile-safety");
+        let cases = [
+            "print profile.validate({\"unexpected\": \"x\"}, {\"name\": {\"type\": \"text\"}})\n",
+            "print profile.validate({\"count\": \"one\"}, {\"count\": {\"type\": \"number\", \"required\": true}})\n",
+            "print profile.validate({}, {\"name\": {\"type\": \"text\", \"required\": true}})\n",
+            "print profile.validate({}, {\"enabled\": {\"type\": \"boolean\", \"default\": \"yes\"}})\n",
+            "print profile.validate({\"name\": [\"Rafi\"]}, {\"name\": {\"type\": \"text\"}})\n",
+            "print profile.validate({}, {\"name\": {\"type\": \"text\", \"secret\": \"x\"}})\n",
+        ];
+        for source in cases {
+            let error = run_bridge_project(&root, BTreeSet::new(), source).unwrap_err();
+            assert_eq!(error.code, "P1072");
+        }
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

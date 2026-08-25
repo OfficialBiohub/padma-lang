@@ -297,3 +297,14 @@
 - [ ] Provide simple starter templates for basic script, local data/report, and local web response projects with minimum capabilities and exact Termux commands.
 - [x] Document one-command create/run/check/fmt/test flow, migration-safe compatibility rules, Bangla-English diagnostics, and beginner versus advanced project layouts.
 - [x] Add positive, non-empty-directory, unsafe-name/path, generated-template, and no-network/no-process regression tests before publishing the workflow.
+
+## M17 — Expanded Category-Based Daily Tools
+
+- [ ] Add safe project templates for basic script, local data/report, and local web response while preserving the simple `src/`, `data/`, `out/`, and `tests/` layout and minimum capability grants.
+- [ ] Education, family, and small-business tools: local study-note, attendance, expense, inventory, and printable report schemas built on validated tables and local reports.
+- [ ] Freelancer and office tools: local client/task, quote/invoice draft, portfolio, and reusable Markdown report templates without payment, account, email, or cloud automation.
+- [ ] Developer and web tools: deterministic local task/test/lint plans, JSON request templates, request validation, local response helpers, and separately confirmed remote deployment planning.
+- [ ] Creator and document tools: authorized local metadata, text/document conversion planning, report generation, and no unauthorized downloader, hidden process, or cloud upload.
+- [ ] Privacy and defensive-security tools: checksum, local secret-strength report, redacted configuration inspection, and authorized local safety checks without scanning, bypass, credential capture, exploit, or evasion behavior.
+- [ ] Legal game-user/developer tools: game-project starter layout, local score/save schema validation for user-owned projects, test-fixture balance reports, accessibility settings templates, and own-game debugging helpers; exclude game cracking, cheating, anti-cheat bypass, account/item manipulation, and multiplayer unfair advantage.
+- [x] Implement a local configuration and profile validator as the next cross-category foundation: strict JSON/TOML-like local profile validation, safe defaults, redacted errors, and project-local report output without account, network, device, or process authority.
