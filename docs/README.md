@@ -19,6 +19,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Structured data toolkit](STRUCTURED-DATA.md) | Local CSV/TSV/JSON table processing with bounded project-root file access |
 | [Filesystem productivity toolkit](FILESYSTEM-PRODUCTIVITY.md) | Bounded project-local listing, checksum, text search, and disabled copy/move/archive plans |
 | [Local reporting toolkit](LOCAL-REPORTING.md) | Validated table-to-Markdown summaries and capability-gated project-local report export |
+| [Simple project structure](SIMPLE-PROJECTS.md) | Beginner-friendly canonical layout, four Termux commands, and flat-project compatibility rules |
 
 ## Security and local runtime
 

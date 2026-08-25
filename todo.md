@@ -289,3 +289,11 @@
 - [x] Local reporting toolkit v1: render validated Padma table data as deterministic Markdown/text reports and write bounded project-local report files only when `filesystem:write` is explicitly granted.
   - [x] Add report title, markdown table, count summary, and project-local `.md` export APIs with bounded text/table inputs and Bangla-English diagnostics.
   - [x] Reject raw HTML/script injection, path escape, symlink/oversized output, malformed table values, and unauthorized writes; add negative tests and a standalone Termux example.
+
+## M16 — Simple Project Structure and Starter Workflow
+
+- [x] Define one beginner-friendly, advanced-language-style Padma project layout with `padma.toml`, `main.pd`, optional `src/`, `data/`, `out/`, `tests/`, and `README.md`, while preserving existing flat projects and `padma file.pd` execution.
+- [x] Add a `padma init` starter-project command that creates only safe local source/template files, refuses a non-empty target directory, never contacts a network, and uses no shell command.
+- [ ] Provide simple starter templates for basic script, local data/report, and local web response projects with minimum capabilities and exact Termux commands.
+- [x] Document one-command create/run/check/fmt/test flow, migration-safe compatibility rules, Bangla-English diagnostics, and beginner versus advanced project layouts.
+- [x] Add positive, non-empty-directory, unsafe-name/path, generated-template, and no-network/no-process regression tests before publishing the workflow.

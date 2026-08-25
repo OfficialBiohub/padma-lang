@@ -8661,7 +8661,25 @@ fn lint_disabled_rules_for_path(path: &str) -> Result<BTreeSet<String>, String> 
 }
 
 fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
+    if directory
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(
+            "P1032: project directory must be a safe relative path without `..`".to_string(),
+        );
+    }
     if directory.exists() {
+        if fs::symlink_metadata(directory)
+            .map_err(|error| format!("P1032: cannot inspect `{}`: {error}", directory.display()))?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(format!(
+                "P1032: project directory `{}` must not be a symlink",
+                directory.display()
+            ));
+        }
         let mut entries = fs::read_dir(directory)
             .map_err(|error| format!("P1032: cannot inspect `{}`: {error}", directory.display()))?;
         if entries.next().is_some() {
@@ -8689,12 +8707,15 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
         lint_disabled: BTreeSet::new(),
         dependencies: BTreeMap::new(),
     };
-    fs::create_dir_all(directory.join("src"))
-        .map_err(|error| format!("P1032: cannot create project source directory: {error}"))?;
+    for subdirectory in ["src", "data", "out", "tests"] {
+        fs::create_dir_all(directory.join(subdirectory)).map_err(|error| {
+            format!("P1032: cannot create project `{subdirectory}` directory: {error}")
+        })?;
+    }
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Project mode denies sensitive actions until they are granted below.\n[capabilities]\ndatabase = []\nidentity = []\ngui = []\nfilesystem = []\nnetwork = []\nprocess = []\nmedia = []\nserver = []\n\n# Optional reviewed source-style warnings to suppress.\n[lint]\ndisable = []\n",
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Add only the capability your project actually needs.\n[capabilities]\n\n[lint]\ndisable = []\n",
             manifest.name, manifest.version, manifest.entry, manifest.locale
         ),
     )
@@ -8702,9 +8723,23 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
     write_package_lock(directory)?;
     fs::write(
         directory.join("src/main.pd"),
-        "# padma:locale=bn\nদেখাও \"পদ্ম project শুরু হয়েছে\"\n",
+        "# padma:locale=bn\n# আপনার Padma code এখানে লিখুন।\nদেখাও \"পদ্ম project ready\"\n",
     )
     .map_err(|error| format!("P1032: cannot write starter source: {error}"))?;
+    fs::write(directory.join("data/.gitkeep"), "")
+        .map_err(|error| format!("P1032: cannot create data placeholder: {error}"))?;
+    fs::write(directory.join("out/.gitkeep"), "")
+        .map_err(|error| format!("P1032: cannot create output placeholder: {error}"))?;
+    fs::write(directory.join("tests/.gitkeep"), "")
+        .map_err(|error| format!("P1032: cannot create tests placeholder: {error}"))?;
+    fs::write(
+        directory.join("README.md"),
+        format!(
+            "# {}\n\n```bash\npadma .\npadma check src/main.pd\npadma fmt src/main.pd\npadma lint src/main.pd\n```\n\nWrite Padma code in `src/main.pd`. Keep optional local input files in `data/` and generated local files in `out/`. Add a capability in `padma.toml` only when code needs it.\n",
+            manifest.name
+        ),
+    )
+    .map_err(|error| format!("P1032: cannot write project README: {error}"))?;
     Ok(manifest)
 }
 
@@ -11826,7 +11861,7 @@ fn main() {
         }
         match initialize_project(&directory) {
             Ok(manifest) => println!(
-                "Created Padma project `{}`. Run: cd {} && padma .",
+                "Created Padma project `{}`.\nNext:\n  cd {}\n  padma .\n  padma check src/main.pd",
                 manifest.name,
                 directory.display()
             ),
@@ -12384,6 +12419,11 @@ mod tests {
         assert_eq!(manifest.name, "bangla-project");
         assert!(project_directory.join("padma.toml").is_file());
         assert!(project_directory.join("padma.lock").is_file());
+        assert!(project_directory.join("src/main.pd").is_file());
+        assert!(project_directory.join("data/.gitkeep").is_file());
+        assert!(project_directory.join("out/.gitkeep").is_file());
+        assert!(project_directory.join("tests/.gitkeep").is_file());
+        assert!(project_directory.join("README.md").is_file());
 
         let (loaded, entry) = load_project_manifest(&project_directory).unwrap();
         let source =
@@ -12392,7 +12432,28 @@ mod tests {
         let mut interpreter = Interpreter::with_source_path(locale, entry);
         interpreter.run(&program).unwrap();
         fs::remove_dir_all(directory).unwrap();
-        assert_eq!(interpreter.output, vec!["পদ্ম project শুরু হয়েছে"]);
+        assert_eq!(interpreter.output, vec!["পদ্ম project ready"]);
+    }
+
+    #[test]
+    fn project_init_rejects_non_empty_traversal_and_symlink_targets() {
+        let root = module_fixture_dir("project-init-safety");
+        let non_empty = root.join("non-empty");
+        fs::create_dir_all(&non_empty).unwrap();
+        fs::write(non_empty.join("keep.txt"), "keep").unwrap();
+        let non_empty_error = initialize_project(&non_empty).unwrap_err();
+        assert!(non_empty_error.contains("not empty"));
+
+        let traversal_error = initialize_project(Path::new("../padma-unsafe")).unwrap_err();
+        assert!(traversal_error.contains("safe relative path"));
+
+        let real = root.join("real");
+        fs::create_dir_all(&real).unwrap();
+        let link = root.join("link");
+        std::os::unix::fs::symlink("real", &link).unwrap();
+        let link_error = initialize_project(&link).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert!(link_error.contains("must not be a symlink"));
     }
 
     #[test]

@@ -10,14 +10,18 @@ cd my-project
 padma .
 ```
 
-`padma init` refuses to overwrite a non-empty directory. It creates this layout:
+`padma init` refuses to overwrite a non-empty directory, a symlink target, or a path containing `..`. It creates this simple layout:
 
 ```text
 my-project/
 ├── padma.toml
 ├── padma.lock
-└── src/
-    └── main.pd
+├── src/
+│   └── main.pd
+├── data/               # Empty local input folder
+├── out/                # Empty local generated-output folder
+├── tests/              # Empty project-test folder
+└── README.md           # Exact run/check/fmt/lint commands
 ```
 
 ## Manifest format
@@ -30,10 +34,6 @@ entry = "src/main.pd"
 locale = "bn"
 
 [capabilities]
-filesystem = ["read", "write"]
-network = ["http"]
-process = ["git", "yt-dlp"]
-media = ["download"]
 
 [lint]
 disable = []
@@ -47,6 +47,8 @@ disable = []
 | `locale` | `bn`, `en`, or `auto`. It controls diagnostic language for the entry source. |
 
 `padma .` reads the manifest from the provided directory, validates the entry path, then runs the entry file. Imports remain relative to the importing file and keep the same path-safety restrictions.
+
+The generated starter intentionally has **no capability grants**. Add only the smallest entry your code needs later; for example, a local CSV/report project can add `filesystem = ["read", "write"]`. Creating the folders does not grant file, network, process, browser, account, payment, cloud, or Android authority. Read [`SIMPLE-PROJECTS.md`](SIMPLE-PROJECTS.md) for the beginner flow and compatibility rules.
 
 The optional `[lint]` section records reviewed source-style warning suppressions. Its `disable` list accepts only stable rule IDs documented in [`LINTING.md`](LINTING.md); unknown or duplicate IDs are rejected as `P1032`.
 
