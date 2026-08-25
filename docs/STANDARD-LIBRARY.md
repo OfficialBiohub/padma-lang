@@ -90,6 +90,16 @@ Report titles are single-line bounded text and reject raw `<`/`>` HTML delimiter
 
 Profile schemas accept only bounded key names and scalar `text`, `number`, `boolean`, or `null` rules, with optional boolean `required` or matching scalar `default`. No nested value/list/map profile data is accepted. Use `json.parse(file.read("data/profile.json"))` for a project-local JSON file; only `file.read` needs `filesystem:read`. These APIs never use a profile to trigger network, account, browser, device, process, game, payment, or output execution. See [`LOCAL-PROFILES.md`](LOCAL-PROFILES.md) for the full contract.
 
+## Local client documents
+
+| API | Result and boundary |
+|---|---|
+| `client.document_markdown(draft)` | Renders a deterministic escaped local Markdown `quote` or `invoice-draft` from one strict in-memory map. No capability is required. |
+| `client.document_summary(draft)` | Returns only document type/count/presence metadata and fixed disabled-action markers; it does not return draft values. No capability is required. |
+| `client.write_document(path, draft)` | Writes a bounded project-local non-symlink `.md` document and returns `true`. Requires `filesystem:write` in project mode. |
+
+Drafts require `documentType`, `clientName`, `projectTitle`, three-letter uppercase `currency`, finite non-negative `amount`, and a bounded unique `deliverables` text list. Optional `reference`, `validUntil`, and `notes` are bounded single-line text. Unknown fields—including URLs, recipient/contact, account, payout, or authorization fields—are rejected. Raw `<`/`>` delimiters and control characters are rejected; accepted Markdown-sensitive characters are escaped. Documents cannot write to absolute/traversal/`@downloads`/symlink paths. This toolkit does not contact a client, make a payment, sign a contract, submit to a marketplace, use a network/browser/account, or start a process. See [`CLIENT-DOCUMENTS.md`](CLIENT-DOCUMENTS.md) for the complete contract and Termux example.
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -118,4 +128,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

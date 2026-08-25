@@ -1,0 +1,9 @@
+ধরি draft = {"documentType": "quote", "clientName": "রিমা ডিজাইন স্টুডিও", "projectTitle": "Mobile-friendly portfolio page", "currency": "BDT", "amount": 12500, "deliverables": ["Responsive page", "Source-file handover"], "reference": "Q-2026-07", "validUntil": "2026-12-31", "notes": "Review scope and delivery details before manual use."}
+
+ধরি summary = client.document_summary(draft)
+ধরি saved = client.write_document("out/portfolio-quote.md", draft)
+
+দেখাও text.format("Document: {documentType}", summary)
+দেখাও text.format("Deliverables: {deliverableCount}", summary)
+দেখাও text.format("Payment: {payment}", summary)
+দেখাও text.format("Saved: {saved}", {"saved": saved})

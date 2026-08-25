@@ -67,6 +67,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1070 | Filesystem productivity safety | A filesystem productivity input, source, directory entry, search, or dry-run plan is unsafe, malformed, over bounded limits, symlinked, non-regular, or otherwise unavailable under the project-root policy. Raw content and paths outside the project root are not echoed. |
 | P1071 | Local reporting safety | A report title, rendered output, or Markdown export path is unsafe, malformed, exceeds bounds, uses raw HTML delimiters, a symlinked component, an invalid suffix, or violates the project-root report policy. Raw source table content and paths outside the project root are not echoed. |
 | P1072 | Local profile safety | A profile/schema is malformed, exceeds bounded field/key/text policy, has an unknown/missing field, uses an unsupported scalar type, mismatched value/default, nested value, or unsafe rule. Raw profile values are not echoed. |
+| P1073 | Local client-document safety | A quote/invoice-draft map is malformed, has a missing/unknown/unsafe field, invalid type/currency/amount/deliverable/date/text, raw HTML delimiter, oversized output, or invalid local Markdown export path. Draft values and paths outside the project root are not echoed. |
 
 ## Example
 

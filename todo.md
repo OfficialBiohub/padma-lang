@@ -308,3 +308,15 @@
 - [ ] Privacy and defensive-security tools: checksum, local secret-strength report, redacted configuration inspection, and authorized local safety checks without scanning, bypass, credential capture, exploit, or evasion behavior.
 - [ ] Legal game-user/developer tools: game-project starter layout, local score/save schema validation for user-owned projects, test-fixture balance reports, accessibility settings templates, and own-game debugging helpers; exclude game cracking, cheating, anti-cheat bypass, account/item manipulation, and multiplayer unfair advantage.
 - [x] Implement a local configuration and profile validator as the next cross-category foundation: strict JSON/TOML-like local profile validation, safe defaults, redacted errors, and project-local report output without account, network, device, or process authority.
+
+## M18 — Production-Oriented Freelancer Workflows
+
+- [ ] Client-document toolkit: strict local quote, scope-of-work, invoice draft, delivery checklist, and portfolio case-study data schemas with deterministic Markdown/text rendering; no payment, account, email, message posting, contract-signing, or platform automation.
+- [ ] API integration toolkit: reusable validated HTTP JSON request descriptors, safe response field extraction, timeout/retry limits, secret environment-name references, and no hidden request loops or credential output.
+- [ ] Data-delivery toolkit: project-local CSV/JSON cleaning, reconciliation summaries, redacted validation reports, and bounded export artifacts suitable for client review.
+- [ ] Content and document toolkit: Bangla-English copy templates, proposal/checklist/brief generation from explicit local inputs, Markdown/HTML-safe rendering, and human-reviewed final output only.
+- [ ] Developer delivery toolkit: deterministic project task manifests for test/lint/build/check, static-site/local-server preparation, file checksum manifest, and no arbitrary shell/background/deployment action.
+- [x] Legal marketplace workflow boundary: local preparation only; no scraping private client data, login/session automation, CAPTCHA bypass, proposal posting, contract acceptance/signing, account changes, payment/withdrawal actions, rating/review manipulation, or generated-output auto-submit.
+- [x] Implement the first client-document foundation: validate a bounded quote/invoice draft map and render an escaped project-local Markdown document only with explicit `filesystem:write`, while marking delivery/payment/contact actions as user-reviewed and disabled.
+  - [x] Add tests for missing/unsafe fields, raw HTML/script content, path/symlink/output limits, missing write grant, and no payment/contact/network/process action.
+  - [x] Add a standalone Termux freelancer quote example, public guide, and exact output boundary before marking complete.

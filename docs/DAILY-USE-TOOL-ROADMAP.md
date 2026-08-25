@@ -46,7 +46,7 @@
 | M15.1 | Local reporting toolkit | **Complete.** Validated table-to-Markdown/text rendering, bounded project-local `.md` export, and injection/path/write denial tests |
 | M15.2 | Writing and study-note toolkit | Bangla-English text cleanup, word/line statistics, title/outline helpers, deterministic Markdown notes |
 | M15.3 | Household, student, and small-business record schemas | Attendance, expense, inventory, and task summary validation over local table data |
-| M15.4 | Freelancer/office document drafts | User-reviewed quote, invoice, portfolio, and client-report templates; no payment/account automation |
+| M15.4 | Freelancer/office document drafts | First client-document foundation is **complete**: local quote/invoice-draft Markdown, redacted summary, and bounded project-local export; scope/portfolio/client-report schemas remain separate work |
 | M15.5 | HTTP API request templates | Host/secret/timeout/retry/redaction regression tests |
 | M15.6 | Developer workspace task manifests | Fixed executable allowlist, argument vector and exit-code tests |
 
@@ -65,6 +65,10 @@
 | Legal game user/developer | Own-game project layout, local score/save schema, fixture balance report, accessibility settings | Simple project layout, local tables/reports, safe filesystem boundary | Local configuration/profile validation without game-process, account, or network authority |
 
 The immediate M15.1 increment is **local reporting**, because all of these categories need a readable local result after collecting or validating data. It will consume only an already-validated Padma table value, render inert Markdown/text, and write a report only when a project explicitly grants `filesystem:write`. It will not upload a report, send an email, create an invoice payment, access an account, run a macro, render raw HTML, or start a background process.
+
+## M18: production-oriented freelancer preparation
+
+Freelancer workflows need preparation and quality checks more often than hidden platform automation. **Complete first foundation:** `client.document_markdown`, `client.document_summary`, and `client.write_document` validate bounded local quote/invoice-draft data, render escaped Markdown, and permit project-local `.md` output only with `filesystem:write`. Summaries mark client contact as user-reviewed and payment, contract signing, marketplace submission, network, and child process actions as disabled. Follow-on increments cover client data/reconciliation, validated HTTP request templates, scope/checklist/portfolio schemas, local content drafts, and delivery checksum/task manifests. See [Freelancer Workflows Roadmap](FREELANCER-WORKFLOWS.md) and [Local Client Documents](CLIENT-DOCUMENTS.md).
 
 ## M17: cross-category configuration and legal game-user scope
 

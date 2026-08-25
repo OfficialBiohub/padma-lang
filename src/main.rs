@@ -310,6 +310,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1071") => (format!("Local report is unsafe or invalid: `{detail}`"), Some("Use a bounded title and validated table; write only to a non-symlink `.md` path inside the project root.".into())),
         (Locale::Bangla, "P1072") => (format!("local profile নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded Bangla/English key, supported scalar type, এবং explicit default ব্যবহার করুন; Padma profile value, account, network, device, বা process ব্যবহার করবে না।".into())),
         (Locale::English, "P1072") => (format!("Local profile is unsafe or invalid: `{detail}`"), Some("Use only bounded Bangla/English keys, supported scalar types, and explicit defaults; Padma will not use profile values for account, network, device, or process actions.".into())),
+        (Locale::Bangla, "P1073") => (format!("freelancer client document draft নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded client draft field, explicit deliverable, project-local `.md` output, এবং user review ব্যবহার করুন; Padma payment, contact, contract, marketplace, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1073") => (format!("Freelancer client document draft is unsafe or invalid: `{detail}`"), Some("Use only bounded client draft fields, explicit deliverables, project-local `.md` output, and user review; Padma will not run payment, contact, contract, marketplace, network, or process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1574,6 +1576,10 @@ const REPORT_MAX_BYTES: usize = 1_048_576;
 const PROFILE_MAX_FIELDS: usize = 32;
 const PROFILE_MAX_KEY_BYTES: usize = 64;
 const PROFILE_MAX_TEXT_BYTES: usize = 1_024;
+const CLIENT_DOCUMENT_MAX_TEXT_BYTES: usize = 512;
+const CLIENT_DOCUMENT_MAX_NOTES_BYTES: usize = 2_048;
+const CLIENT_DOCUMENT_MAX_DELIVERABLES: usize = 20;
+const CLIENT_DOCUMENT_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
 
 fn value_from_json(value: JsonValue) -> Result<Value, String> {
     match value {
@@ -1633,6 +1639,10 @@ fn report_error(locale: Locale, position: Position, detail: &str) -> PadmaError 
 
 fn profile_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1072", position, detail)
+}
+
+fn client_document_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1073", position, detail)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1881,6 +1891,385 @@ fn profile_summary_value(
         ("device".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ])))
+}
+
+#[derive(Clone, Debug)]
+struct ClientDocumentDraft {
+    document_type: String,
+    client_name: String,
+    project_title: String,
+    currency: String,
+    amount: f64,
+    deliverables: Vec<String>,
+    reference: Option<String>,
+    valid_until: Option<String>,
+    notes: Option<String>,
+}
+
+fn client_document_string_value<'a>(
+    value: &'a Value,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<&'a str, PadmaError> {
+    let Value::String(text) = value else {
+        return Err(client_document_error(
+            locale,
+            position,
+            &format!("client document {field} must be text"),
+        ));
+    };
+    Ok(text)
+}
+
+fn client_document_text(
+    value: Option<&Value>,
+    required: bool,
+    field: &str,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<Option<String>, PadmaError> {
+    let Some(value) = value else {
+        if required {
+            return Err(client_document_error(
+                locale,
+                position,
+                "client document is missing a required text field",
+            ));
+        }
+        return Ok(None);
+    };
+    let text = client_document_string_value(value, field, locale, position)?;
+    if text.is_empty()
+        || text.len() > max_bytes
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+    {
+        return Err(client_document_error(
+            locale,
+            position,
+            "client document text must be bounded single-line content without raw HTML delimiters",
+        ));
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn client_document_currency(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let currency = client_document_string_value(value, "currency", locale, position)?;
+    if currency.len() != 3 || !currency.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(client_document_error(
+            locale,
+            position,
+            "currency must be a three-letter uppercase code",
+        ));
+    }
+    Ok(currency.to_string())
+}
+
+fn client_document_date(
+    value: Option<&Value>,
+    locale: Locale,
+    position: Position,
+) -> Result<Option<String>, PadmaError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let date = client_document_string_value(value, "validUntil", locale, position)?;
+    let valid = date.len() == 10
+        && date.as_bytes().get(4) == Some(&b'-')
+        && date.as_bytes().get(7) == Some(&b'-')
+        && date
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
+    if !valid {
+        return Err(client_document_error(
+            locale,
+            position,
+            "validUntil must use YYYY-MM-DD format",
+        ));
+    }
+    Ok(Some(date.to_string()))
+}
+
+fn client_document_draft_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<ClientDocumentDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(client_document_error(
+            locale,
+            position,
+            "client document draft must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "documentType",
+        "clientName",
+        "projectTitle",
+        "currency",
+        "amount",
+        "deliverables",
+        "reference",
+        "validUntil",
+        "notes",
+    ]);
+    if fields.len() < 6
+        || fields.len() > allowed.len()
+        || fields.keys().any(|key| !allowed.contains(key.as_str()))
+    {
+        return Err(client_document_error(
+            locale,
+            position,
+            "client document contains missing or unsupported fields",
+        ));
+    }
+    let document_type = client_document_text(
+        fields.get("documentType"),
+        true,
+        "client document type",
+        32,
+        locale,
+        position,
+    )?
+    .expect("required document type is present");
+    if !matches!(document_type.as_str(), "quote" | "invoice-draft") {
+        return Err(client_document_error(
+            locale,
+            position,
+            "documentType must be quote or invoice-draft",
+        ));
+    }
+    let client_name = client_document_text(
+        fields.get("clientName"),
+        true,
+        "client name",
+        CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+        locale,
+        position,
+    )?
+    .expect("required client name is present");
+    let project_title = client_document_text(
+        fields.get("projectTitle"),
+        true,
+        "project title",
+        CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+        locale,
+        position,
+    )?
+    .expect("required project title is present");
+    let currency = client_document_currency(
+        fields.get("currency").ok_or_else(|| {
+            client_document_error(locale, position, "client document is missing currency")
+        })?,
+        locale,
+        position,
+    )?;
+    let amount_value = fields.get("amount").ok_or_else(|| {
+        client_document_error(locale, position, "client document is missing amount")
+    })?;
+    let Value::Number(amount) = amount_value else {
+        return Err(client_document_error(
+            locale,
+            position,
+            "client-provided amount must be a number",
+        ));
+    };
+    let amount = *amount;
+    if !amount.is_finite() || !(0.0..=CLIENT_DOCUMENT_MAX_AMOUNT).contains(&amount) {
+        return Err(client_document_error(
+            locale,
+            position,
+            "client-provided amount is outside the allowed draft limit",
+        ));
+    }
+    let deliverables_value = fields.get("deliverables").ok_or_else(|| {
+        client_document_error(locale, position, "client document is missing deliverables")
+    })?;
+    let Value::List(deliverables_value) = deliverables_value else {
+        return Err(client_document_error(
+            locale,
+            position,
+            "deliverables must be a text list",
+        ));
+    };
+    if deliverables_value.is_empty() || deliverables_value.len() > CLIENT_DOCUMENT_MAX_DELIVERABLES
+    {
+        return Err(client_document_error(
+            locale,
+            position,
+            "deliverable count is outside the allowed limit",
+        ));
+    }
+    let mut deliverables = Vec::with_capacity(deliverables_value.len());
+    let mut seen_deliverables = BTreeSet::new();
+    for value in deliverables_value {
+        let deliverable = client_document_text(
+            Some(value),
+            true,
+            "deliverable",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("deliverable is required");
+        if !seen_deliverables.insert(deliverable.clone()) {
+            return Err(client_document_error(
+                locale,
+                position,
+                "deliverables must not be duplicated",
+            ));
+        }
+        deliverables.push(deliverable);
+    }
+    let reference = client_document_text(
+        fields.get("reference"),
+        false,
+        "document reference",
+        96,
+        locale,
+        position,
+    )?;
+    let valid_until = client_document_date(fields.get("validUntil"), locale, position)?;
+    let notes = client_document_text(
+        fields.get("notes"),
+        false,
+        "client document notes",
+        CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+        locale,
+        position,
+    )?;
+    Ok(ClientDocumentDraft {
+        document_type,
+        client_name,
+        project_title,
+        currency,
+        amount,
+        deliverables,
+        reference,
+        valid_until,
+        notes,
+    })
+}
+
+fn client_document_amount_text(amount: f64) -> String {
+    if amount.fract() == 0.0 {
+        format!("{amount:.0}")
+    } else {
+        amount.to_string()
+    }
+}
+
+fn client_document_markdown(
+    draft: &ClientDocumentDraft,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let heading = if draft.document_type == "quote" {
+        "Client Quote (Draft)"
+    } else {
+        "Invoice Draft (Review Only)"
+    };
+    let mut lines = vec![
+        format!("# {heading}"),
+        String::new(),
+        "**Status:** User review required. This is not a contract, payment request, tax calculation, or marketplace submission.".into(),
+        String::new(),
+        "## Project".into(),
+        format!("- **Client:** {}", report_markdown_escape(&draft.client_name)),
+        format!("- **Project:** {}", report_markdown_escape(&draft.project_title)),
+    ];
+    if let Some(reference) = &draft.reference {
+        lines.push(format!(
+            "- **Reference:** {}",
+            report_markdown_escape(reference)
+        ));
+    }
+    if let Some(valid_until) = &draft.valid_until {
+        lines.push(format!("- **Valid until:** {valid_until}"));
+    }
+    lines.push(String::new());
+    lines.push("## Scope and deliverables".into());
+    lines.extend(
+        draft
+            .deliverables
+            .iter()
+            .map(|deliverable| format!("- {}", report_markdown_escape(deliverable))),
+    );
+    lines.push(String::new());
+    lines.push("## Client-provided amount".into());
+    lines.push(format!("- **Currency:** {}", draft.currency));
+    lines.push(format!(
+        "- **Amount:** {}",
+        client_document_amount_text(draft.amount)
+    ));
+    lines.push("- **Payment action:** Disabled; discuss and complete payment only in the relevant service yourself.".into());
+    if let Some(notes) = &draft.notes {
+        lines.push(String::new());
+        lines.push("## Notes".into());
+        lines.push(report_markdown_escape(notes));
+    }
+    lines.push(String::new());
+    lines.push("## Delivery checklist".into());
+    lines.push("- [ ] Review scope, amount, and deliverables with the client.".into());
+    lines.push("- [ ] Confirm the final platform, contract, and payment steps yourself.".into());
+    lines.push("- [ ] Attach only files you are authorized to share.".into());
+    lines.push(String::new());
+    lines.push("## Automation boundary".into());
+    lines.push("- Client contact: user-reviewed".into());
+    lines.push("- Contract signing: disabled".into());
+    lines.push("- Marketplace submission: disabled".into());
+    lines.push("- Payment/withdrawal: disabled".into());
+    lines.push("- Network/browser/account/process: disabled".into());
+    let rendered = format!("{}\n", lines.join("\n"));
+    if rendered.len() > REPORT_MAX_BYTES {
+        return Err(client_document_error(
+            locale,
+            position,
+            "rendered client document exceeds the local output byte limit",
+        ));
+    }
+    Ok(rendered)
+}
+
+fn client_document_summary(draft: &ClientDocumentDraft) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "documentType".into(),
+            Value::String(draft.document_type.clone()),
+        ),
+        (
+            "deliverableCount".into(),
+            Value::Number(draft.deliverables.len() as f64),
+        ),
+        (
+            "hasReference".into(),
+            Value::Boolean(draft.reference.is_some()),
+        ),
+        (
+            "hasValidUntil".into(),
+            Value::Boolean(draft.valid_until.is_some()),
+        ),
+        ("hasNotes".into(), Value::Boolean(draft.notes.is_some())),
+        ("payment".into(), Value::String("disabled".into())),
+        (
+            "clientContact".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("contractSigning".into(), Value::String("disabled".into())),
+        (
+            "marketplaceSubmission".into(),
+            Value::String("disabled".into()),
+        ),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
 }
 
 fn filesystem_productivity_regular_file(
@@ -2778,6 +3167,85 @@ impl Interpreter {
                 "P1014",
                 position,
                 "report output path",
+            ));
+        }
+        Ok(resolved)
+    }
+
+    fn client_document_output_path(
+        &self,
+        path: &str,
+        position: Position,
+    ) -> Result<PathBuf, PadmaError> {
+        self.require_project_capability("filesystem:write", "client document", position)?;
+        if !path.ends_with(".md") {
+            return Err(client_document_error(
+                self.locale,
+                position,
+                "client document output path must end with .md",
+            ));
+        }
+        let root = self.project_root.as_ref().ok_or_else(|| {
+            client_document_error(
+                self.locale,
+                position,
+                "client document export requires a project root",
+            )
+        })?;
+        let relative = safe_relative_path(path).map_err(|_| {
+            error_for(
+                self.locale,
+                "P1014",
+                position,
+                "client document output path",
+            )
+        })?;
+        let resolved = root.join(&relative);
+        let mut current = root.clone();
+        for component in relative.components() {
+            current.push(component);
+            if current.exists()
+                && fs::symlink_metadata(&current)
+                    .map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1015",
+                            position,
+                            "client document output path",
+                        )
+                    })?
+                    .file_type()
+                    .is_symlink()
+            {
+                return Err(client_document_error(
+                    self.locale,
+                    position,
+                    "client document output path must not contain a symlink",
+                ));
+            }
+        }
+        let parent = resolved.parent().ok_or_else(|| {
+            error_for(
+                self.locale,
+                "P1014",
+                position,
+                "client document output path",
+            )
+        })?;
+        let canonical_parent = fs::canonicalize(parent).map_err(|_| {
+            error_for(
+                self.locale,
+                "P1015",
+                position,
+                "client document output path",
+            )
+        })?;
+        if !canonical_parent.starts_with(root) {
+            return Err(error_for(
+                self.locale,
+                "P1014",
+                position,
+                "client document output path",
             ));
         }
         Ok(resolved)
@@ -4360,6 +4828,43 @@ impl Interpreter {
                     let resolved_path = self.report_output_path(path, *position)?;
                     fs::write(&resolved_path, report).map_err(|_| {
                         error_for(self.locale, "P1015", *position, "report output path")
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.document_markdown" || name == "client.document_summary" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let draft = client_document_draft_from_value(&value, self.locale, *position)?;
+                    if name == "client.document_markdown" {
+                        return client_document_markdown(&draft, self.locale, *position)
+                            .map(Value::String);
+                    }
+                    return Ok(client_document_summary(&draft));
+                }
+                if name == "client.write_document" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(
+                        &path,
+                        self.locale,
+                        *position,
+                        "client document output path",
+                    )?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let draft = client_document_draft_from_value(&value, self.locale, *position)?;
+                    let document = client_document_markdown(&draft, self.locale, *position)?;
+                    let resolved_path = self.client_document_output_path(path, *position)?;
+                    fs::write(&resolved_path, document).map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1015",
+                            *position,
+                            "client document output path",
+                        )
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -11178,16 +11683,39 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "auth.session_issue" | "auth.cookie" => Some((3, 3)),
         "auth.password_verify" | "auth.session_verify" | "auth.csrf_verify" => Some((2, 2)),
         "db.get" | "db.delete" | "db.list" | "table.filter_equal" => Some((3, 3)),
-        "input" | "file.read" | "file.exists" | "http.get" | "text.len" | "text.trim"
-        | "text.upper" | "text.lower" | "path.basename" | "path.extension" | "random.pick"
-        | "json.parse" | "json.stringify" | "url.is_valid" | "url.parse" | "time.sleep"
-        | "math.abs" | "math.round" | "math.floor" | "math.ceil" | "auth.password_hash"
-        | "ai.workflow" | "table.headers" | "table.rows" | "fs.checksum" => Some((1, 1)),
+        "input"
+        | "file.read"
+        | "file.exists"
+        | "http.get"
+        | "text.len"
+        | "text.trim"
+        | "text.upper"
+        | "text.lower"
+        | "path.basename"
+        | "path.extension"
+        | "random.pick"
+        | "json.parse"
+        | "json.stringify"
+        | "url.is_valid"
+        | "url.parse"
+        | "time.sleep"
+        | "math.abs"
+        | "math.round"
+        | "math.floor"
+        | "math.ceil"
+        | "auth.password_hash"
+        | "ai.workflow"
+        | "table.headers"
+        | "table.rows"
+        | "fs.checksum"
+        | "client.document_markdown"
+        | "client.document_summary" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
         | "report.summary" | "profile.validate" | "profile.summary" => Some((2, 2)),
         "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
+        "client.write_document" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -13966,6 +14494,127 @@ mod tests {
             assert_eq!(error.code, "P1072");
         }
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn local_client_documents_render_escaped_markdown_redacted_summary_and_project_scoped_export() {
+        let root = module_fixture_dir("local-client-documents");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let source = "let draft = {\"documentType\": \"quote\", \"clientName\": \"Rina & Co\", \"projectTitle\": \"Bangla guide [draft]\", \"currency\": \"BDT\", \"amount\": 12500, \"deliverables\": [\"Responsive landing page\", \"Source files and handover\"], \"reference\": \"Q-2026-07\", \"validUntil\": \"2026-12-31\", \"notes\": \"Review scope before delivery\"}\nlet summary = client.document_summary(draft)\nlet markdown = client.document_markdown(draft)\nprint summary[\"documentType\"]\nprint summary[\"deliverableCount\"]\nprint summary[\"payment\"]\nprint summary[\"marketplaceSubmission\"]\nprint text.contains(json.stringify(summary), \"Rina\")\nprint text.contains(markdown, \"Rina &amp; Co\")\nprint client.write_document(\"out/quote.md\", draft)\n";
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), source).unwrap();
+        let document = fs::read_to_string(root.join("out/quote.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(
+            output,
+            vec!["quote", "2", "disabled", "disabled", "false", "true", "true"]
+        );
+        assert!(document.starts_with("# Client Quote (Draft)\n"));
+        assert!(document.contains("- **Client:** Rina &amp; Co"));
+        assert!(document.contains("Bangla guide \\[draft\\]"));
+        assert!(document.contains("- Marketplace submission: disabled"));
+        assert!(document.contains("- Payment/withdrawal: disabled"));
+        assert!(!document.contains("https://"));
+    }
+
+    #[test]
+    fn local_client_documents_reject_unsafe_schema_types_content_and_action_fields() {
+        let root = module_fixture_dir("local-client-document-safety");
+        let cases = [
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": []})\n",
+            "print client.document_markdown({\"documentType\": \"contract\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": [\"Page\"]})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"bdt\", \"amount\": 1, \"deliverables\": [\"Page\"]})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": -1, \"deliverables\": [\"Page\"]})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": [\"Rina\"], \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": [\"Page\"]})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"<script>alert(1)</script>\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": [\"Page\"]})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": [\"Page\"], \"paymentUrl\": \"https://example.invalid/pay\"})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": [\"Page\"], \"recipientEmail\": \"x@example.invalid\"})\n",
+            "print client.document_markdown({\"documentType\": \"quote\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"BDT\", \"amount\": 1, \"deliverables\": [\"Page\"], \"account\": \"secret\"})\n",
+        ];
+        for source in cases {
+            let error = run_bridge_project(&root, BTreeSet::new(), source).unwrap_err();
+            assert_eq!(error.code, "P1073");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn local_client_document_writer_requires_capability_and_rejects_unsafe_paths() {
+        let root = module_fixture_dir("local-client-document-writer-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink("outside", root.join("out-link")).unwrap();
+        let draft = "{\"documentType\": \"invoice-draft\", \"clientName\": \"Rina\", \"projectTitle\": \"Site\", \"currency\": \"USD\", \"amount\": 25, \"deliverables\": [\"Page\"]}";
+
+        let denied = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            &format!("print client.write_document(\"out/draft.md\", {draft})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(denied.code, "P1034");
+
+        let write_capability = BTreeSet::from(["filesystem:write".into()]);
+        let traversal = run_bridge_project(
+            &root,
+            write_capability.clone(),
+            &format!("print client.write_document(\"../outside.md\", {draft})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(traversal.code, "P1014");
+
+        let shared_storage = run_bridge_project(
+            &root,
+            write_capability.clone(),
+            &format!("print client.write_document(\"@downloads/draft.md\", {draft})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(shared_storage.code, "P1014");
+
+        let extension = run_bridge_project(
+            &root,
+            write_capability.clone(),
+            &format!("print client.write_document(\"out/draft.txt\", {draft})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(extension.code, "P1073");
+
+        let symlink = run_bridge_project(
+            &root,
+            write_capability,
+            &format!("print client.write_document(\"out-link/draft.md\", {draft})\n"),
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(symlink.code, "P1073");
+    }
+
+    #[test]
+    fn local_client_document_direct_validation_rejects_nan_and_registers_builtin_arities() {
+        let draft = Value::Map(BTreeMap::from([
+            ("documentType".into(), Value::String("quote".into())),
+            ("clientName".into(), Value::String("Rina".into())),
+            ("projectTitle".into(), Value::String("Site".into())),
+            ("currency".into(), Value::String("BDT".into())),
+            ("amount".into(), Value::Number(f64::NAN)),
+            (
+                "deliverables".into(),
+                Value::List(vec![Value::String("Page".into())]),
+            ),
+        ]));
+        let error = client_document_draft_from_value(&draft, Locale::English, Position::new(1, 1))
+            .unwrap_err();
+        assert_eq!(error.code, "P1073");
+        assert_eq!(
+            static_builtin_arity("client.document_markdown"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.document_summary"),
+            Some((1, 1))
+        );
+        assert_eq!(static_builtin_arity("client.write_document"), Some((2, 2)));
     }
 
     #[test]

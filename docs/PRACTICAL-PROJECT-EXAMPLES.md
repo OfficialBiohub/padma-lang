@@ -22,6 +22,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Filesystem productivity | `examples/filesystem-productivity` | Project-local listing, checksum, text search, and disabled copy planning | It is not file mutation, Android shared-storage access, shell execution, or a file-management daemon. |
 | Local expense reporting | `examples/local-reporting-expense` | CSV-to-Markdown local expense report | It is not tax/accounting advice, invoice payment, email/upload, shared-storage, or public publishing. |
 | Local profile validator | `examples/local-profile-validator` | Project-local JSON preferences with schema/default validation | It is not account/login state, game modification, anti-cheat bypass, network profile sync, or device settings control. |
+| Freelancer quote draft | `examples/freelancer-quote-draft` | Local escaped quote Markdown with redacted review summary | It cannot contact a client, submit to a marketplace, sign a contract, make a payment, use a browser/network, or write shared storage. |
 
 ## 1. Authorized media download
 
@@ -267,6 +268,23 @@ padma .
 ```
 
 The example reads a project-local JSON preference file, validates only declared scalar fields, applies an explicit safe default, and emits a redacted summary. It needs `filesystem = ["read"]` only for `file.read`; profile validation itself has no capability. It cannot access a user account, browser, network, device setting, running game, game item/score/account, anti-cheat system, or process. See [`LOCAL-PROFILES.md`](LOCAL-PROFILES.md) for schema limits and the legal game-project boundary.
+
+## 11. Freelancer quote draft
+
+```bash
+cd ~/padma-lang/examples/freelancer-quote-draft
+padma .
+cat out/portfolio-quote.md
+```
+
+```padma
+ধরি summary = client.document_summary(draft)
+ধরি saved = client.write_document("out/portfolio-quote.md", draft)
+দেখাও summary["payment"]
+দেখাও saved
+```
+
+The example prepares an explicit local quote draft, emits only redacted document metadata to the terminal, and writes one escaped project-local Markdown file. It needs `filesystem = ["write"]` only for the final file write. It is not a contract, tax or legal service, invoice transmission tool, marketplace client scraper, proposal sender, account/login system, e-signature service, payment/withdrawal tool, browser automation, network client, or process runner. See [`CLIENT-DOCUMENTS.md`](CLIENT-DOCUMENTS.md) for the exact fields, limits, and review boundary.
 
 ## Before you expand an example
 
