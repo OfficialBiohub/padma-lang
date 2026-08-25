@@ -1,0 +1,8 @@
+[padma]
+name = "local-reporting-expense"
+version = "0.1.0"
+entry = "main.pd"
+locale = "bn"
+
+[capabilities]
+filesystem = ["read", "write"]

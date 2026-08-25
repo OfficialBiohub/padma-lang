@@ -41,11 +41,29 @@
 
 | Increment | Planned public surface | Done হওয়ার প্রমাণ |
 |---|---|---|
-| M13.1 | `table.read`, `table.headers`, `table.rows`, `table.filter_equal`, `table.select`, `table.count_by`, `table.write_csv` | Typed bounded values, missing-grant/path/malformed-data tests, Bangla-English diagnostics, exact Termux example |
-| M13.2 | CSV/TSV dialect validation, numeric parsing policy, aggregate helpers, deterministic sort | Stable schema rules and output golden tests |
-| M13.3 | Filesystem productivity plans | Dry-run descriptors plus no-mutation/security negative tests |
-| M13.4 | HTTP API request templates | Host/secret/timeout/retry/redaction regression tests |
-| M13.5 | Developer workspace task manifests | Fixed executable allowlist, argument vector and exit-code tests |
+| M13.1 | `table.read`, `table.headers`, `table.rows`, `table.filter_equal`, `table.select`, `table.count_by`, `table.write_csv` | **Complete.** Typed bounded values, missing-grant/path/malformed-data tests, Bangla-English diagnostics, exact Termux example |
+| M13.2 | `fs.list`, `fs.checksum`, `fs.search_text`, and disabled copy/move/archive plans | **Complete.** Project-only non-symlink inspection, no-mutation/security negative tests, exact Termux example |
+| M15.1 | Local reporting toolkit | Validated table-to-Markdown/text rendering, bounded project-local `.md` export, injection/path/write denial tests |
+| M15.2 | Writing and study-note toolkit | Bangla-English text cleanup, word/line statistics, title/outline helpers, deterministic Markdown notes |
+| M15.3 | Household, student, and small-business record schemas | Attendance, expense, inventory, and task summary validation over local table data |
+| M15.4 | Freelancer/office document drafts | User-reviewed quote, invoice, portfolio, and client-report templates; no payment/account automation |
+| M15.5 | HTTP API request templates | Host/secret/timeout/retry/redaction regression tests |
+| M15.6 | Developer workspace task manifests | Fixed executable allowlist, argument vector and exit-code tests |
+
+## M15: কোন user category-র জন্য কী আসবে
+
+| ব্যবহারকারী | সবচেয়ে দরকারি tool path | বর্তমান ভিত্তি | পরবর্তী বাস্তব ফল |
+|---|---|---|---|
+| School/college student | Note, attendance, marks, simple report | Bangla REPL, JSON/CSV tables, local file write | Markdown study/attendance report |
+| Family/personal user | Expense, shopping, task list, document summary | Local tables, checksum, safe path boundary | Printable expense/task report |
+| Shop/small business | Inventory, sale record, category summary | CSV filter/select/count/export | Stock and daily summary report |
+| Freelancer/office worker | Client data, quote/invoice draft, portfolio report | Local tables, text format, Markdown export | User-reviewed client document draft |
+| Teacher/researcher | Survey/marks cleaning, result table, source report | CSV/TSV/JSON validation and aggregation | Deterministic Markdown research/class report |
+| Developer/maker | Project data, test/build plan, local API response | Project manifests, fixed bridge, local server contracts | Task manifest and API template increments |
+| Creator/media worker | Authorized local metadata, script/text report | Local files, text/JSON, authorized media boundary | Media/document metadata report plan |
+| Privacy/security learner | Hash, config inspection, local defensive report | Checksum, safe URL/file inspection, capability system | Redacted configuration/asset report |
+
+The immediate M15.1 increment is **local reporting**, because all of these categories need a readable local result after collecting or validating data. It will consume only an already-validated Padma table value, render inert Markdown/text, and write a report only when a project explicitly grants `filesystem:write`. It will not upload a report, send an email, create an invoice payment, access an account, run a macro, render raw HTML, or start a background process.
 
 ## Deliberately not automatic
 

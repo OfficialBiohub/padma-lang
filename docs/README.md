@@ -18,6 +18,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Daily-use tool roadmap](DAILY-USE-TOOL-ROADMAP.md) | Bangla-first capability matrix and priority order for practical Termux tooling |
 | [Structured data toolkit](STRUCTURED-DATA.md) | Local CSV/TSV/JSON table processing with bounded project-root file access |
 | [Filesystem productivity toolkit](FILESYSTEM-PRODUCTIVITY.md) | Bounded project-local listing, checksum, text search, and disabled copy/move/archive plans |
+| [Local reporting toolkit](LOCAL-REPORTING.md) | Validated table-to-Markdown summaries and capability-gated project-local report export |
 
 ## Security and local runtime
 

@@ -20,6 +20,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Local password check | `examples/local-password-check` | Local password hash and verification boundary | It is not a hosted login, user database, password reset, or authentication server. |
 | Structured data inventory | `examples/structured-data-inventory` | Local CSV filtering, selection, count, and report export | It is not Excel/XLSX, cloud sync, shared-storage access, or a spreadsheet macro runner. |
 | Filesystem productivity | `examples/filesystem-productivity` | Project-local listing, checksum, text search, and disabled copy planning | It is not file mutation, Android shared-storage access, shell execution, or a file-management daemon. |
+| Local expense reporting | `examples/local-reporting-expense` | CSV-to-Markdown local expense report | It is not tax/accounting advice, invoice payment, email/upload, shared-storage, or public publishing. |
 
 ## 1. Authorized media download
 
@@ -232,6 +233,23 @@ padma .
 ```
 
 The program reads only project-local regular files, reports a checksum and search match, then returns a copy descriptor whose execution state is `disabled`. It needs `filesystem = ["read"]`; it creates no destination file. It cannot copy, move, archive, delete, rename, scan other storage, invoke a shell, run in the background, or access Android Downloads. See [`FILESYSTEM-PRODUCTIVITY.md`](FILESYSTEM-PRODUCTIVITY.md) for full limits.
+
+## 9. Local expense reporting
+
+```bash
+cd ~/padma-lang/examples/local-reporting-expense
+padma .
+cat out/january-expense.md
+```
+
+```padma
+ধরি expenses = table.read("data/expenses.csv", "csv")
+ধরি summary = report.summary("January Expense Report", expenses)
+report.write_markdown("out/january-expense.md", "January Expense Report", expenses)
+দেখাও summary["rowCount"]
+```
+
+This example validates project-local CSV rows, makes an in-memory report summary, then writes a project-local Markdown file. It requires `filesystem = ["read", "write"]`. It does not calculate tax, issue a financial recommendation, send/charge an invoice, upload/email/share the report, render scripts, start a background job, or write shared Android storage. See [`LOCAL-REPORTING.md`](LOCAL-REPORTING.md) for output limits and escaping rules.
 
 ## Before you expand an example
 

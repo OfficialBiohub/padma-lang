@@ -71,6 +71,16 @@ Filesystem productivity APIs are project-only, never start a shell or child proc
 
 Tables are limited to 1 MiB, 4,096 data rows, 64 columns, 128-byte unique headers, and 4,096-byte single-line text cells. CSV supports doubled quotes in quoted single-line cells; JSON must be an array of object rows with scalar cells. Absolute paths, traversal, `@downloads`, nested JSON cells, malformed rows, duplicate headers, and oversized data are rejected. See [`STRUCTURED-DATA.md`](STRUCTURED-DATA.md) for the complete contract.
 
+## Local reporting
+
+| API | Result and boundary |
+|---|---|
+| `report.markdown(title, table)` | Renders a bounded escaped Markdown table/report string from an existing validated table. No file/network capability is required. |
+| `report.summary(title, table)` | Returns deterministic report metadata: title, table format, row count, column count, and column list. No file/network capability is required. |
+| `report.write_markdown(path, title, table)` | Writes a bounded project-local non-symlink `.md` report and returns `true`. Requires `filesystem:write` in project mode. |
+
+Report titles are single-line bounded text and reject raw `<`/`>` HTML delimiters. Table cells and headers are escaped before Markdown emission. Markdown export must remain inside the project root, use an existing non-symlink parent, end in `.md`, and stay under 1 MiB. It never uploads, emails, publishes, renders HTML/JavaScript, starts a job, creates a payment, or performs account action. See [`LOCAL-REPORTING.md`](LOCAL-REPORTING.md) for the complete contract.
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -99,4 +109,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

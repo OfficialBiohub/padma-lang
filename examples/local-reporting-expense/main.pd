@@ -1,0 +1,7 @@
+# Local expense data becomes a reviewable Markdown report.
+ধরি expenses = table.read("data/expenses.csv", "csv")
+ধরি summary = report.summary("January Expense Report", expenses)
+ধরি created = report.write_markdown("out/january-expense.md", "January Expense Report", expenses)
+
+দেখাও text.format("Expense rows: {rows}", {"rows": summary["rowCount"]})
+দেখাও text.format("Report created: {created}", {"created": created})

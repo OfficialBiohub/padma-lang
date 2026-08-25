@@ -274,3 +274,18 @@
 
 - [x] Verify and repair the Python-style REPL contract so bare Bangla and English expressions such as `১ + ১` and `1 + 1` display their resulting value, while ordinary statement output and `exit()` remain unchanged.
   - [x] Add a release-binary stdin smoke test and clear Termux update guidance to distinguish a fixed repository binary from an outdated installed executable.
+
+## M15 — Category-Based Daily-Life Tooling
+
+- [ ] Education and writing toolkit: Bangla/English text cleanup, word/line statistics, safe templating, Markdown study-note generation, and local report export.
+- [ ] Student, family, and small-business toolkit: local expense/inventory/attendance record schemas, CSV/JSON validation, bounded summaries, and printable report generation without cloud sync.
+- [ ] Freelancer and office toolkit: structured client/task data, quote/invoice draft generation, local portfolio/report templates, and explicit user-reviewed export files without payment or account automation.
+- [ ] Developer and maker toolkit: deterministic project tasks, local test/build/lint plans, HTTP JSON templates, request validation, and project-scoped secret environment-name references.
+- [ ] Web and backend toolkit: reusable request validation, JSON response helpers, static-site/report generation, local-server workflows, and separately confirmed deployment plans.
+- [ ] Privacy and defensive-security toolkit: checksums, local secret-strength checks, redacted configuration inspection, authorized URL/file inspection, and no scanning, bypass, credential capture, or exploitation.
+- [ ] AI productivity toolkit: structured prompt/request templates, JSON extraction, local review reports, and no autonomous tool execution, browser control, or generated-output auto-run.
+- [ ] Media and document toolkit: authorized local media metadata/transcode planning, document/text conversion helpers, and no unauthorized downloader, background process, or cloud upload.
+- [ ] Package ecosystem toolkit: provenance/digest verification, dependency planning, offline cache contracts, and no unreviewed remote package publication.
+- [x] Local reporting toolkit v1: render validated Padma table data as deterministic Markdown/text reports and write bounded project-local report files only when `filesystem:write` is explicitly granted.
+  - [x] Add report title, markdown table, count summary, and project-local `.md` export APIs with bounded text/table inputs and Bangla-English diagnostics.
+  - [x] Reject raw HTML/script injection, path escape, symlink/oversized output, malformed table values, and unauthorized writes; add negative tests and a standalone Termux example.

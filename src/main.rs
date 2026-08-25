@@ -306,6 +306,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1069") => (format!("Structured table data is unsafe or invalid: `{detail}`"), Some("Use bounded CSV/TSV/JSON table headers, rows, columns, and cells; keep the path inside the project root.".into())),
         (Locale::Bangla, "P1070") => (format!("filesystem productivity operation নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded project-relative regular file/directory ব্যবহার করুন; symlink, shared storage, traversal, oversized input, এবং mutation action অনুমোদিত নয়।".into())),
         (Locale::English, "P1070") => (format!("Filesystem productivity operation is unsafe or invalid: `{detail}`"), Some("Use only bounded project-relative regular files/directories; symlinks, shared storage, traversal, oversized input, and mutation actions are not allowed.".into())),
+        (Locale::Bangla, "P1071") => (format!("local report নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded title ও validated table ব্যবহার করুন; project root-এর ভেতরে non-symlink `.md` path-এ write করুন।".into())),
+        (Locale::English, "P1071") => (format!("Local report is unsafe or invalid: `{detail}`"), Some("Use a bounded title and validated table; write only to a non-symlink `.md` path inside the project root.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1565,6 +1567,8 @@ const FS_PRODUCTIVITY_MAX_DEPTH: usize = 4;
 const FS_PRODUCTIVITY_MAX_MATCHES: usize = 100;
 const FS_PRODUCTIVITY_MAX_QUERY_BYTES: usize = 128;
 const FS_PRODUCTIVITY_MAX_LINE_BYTES: usize = 4_096;
+const REPORT_MAX_TITLE_BYTES: usize = 160;
+const REPORT_MAX_BYTES: usize = 1_048_576;
 
 fn value_from_json(value: JsonValue) -> Result<Value, String> {
     match value {
@@ -1616,6 +1620,10 @@ fn table_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
 
 fn filesystem_productivity_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1070", position, detail)
+}
+
+fn report_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1071", position, detail)
 }
 
 fn filesystem_productivity_regular_file(
@@ -2096,6 +2104,106 @@ fn table_data_to_csv(table: &TableData) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
+fn report_validate_title(
+    title: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<(), PadmaError> {
+    if title.is_empty()
+        || title.len() > REPORT_MAX_TITLE_BYTES
+        || title.chars().any(char::is_control)
+        || title.contains(['<', '>'])
+    {
+        return Err(report_error(
+            locale,
+            position,
+            "report title must be non-empty bounded single-line text without raw HTML delimiters",
+        ));
+    }
+    Ok(())
+}
+
+fn report_markdown_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '\\' => escaped.push_str("\\\\"),
+            '|' => escaped.push_str("\\|"),
+            '#' | '*' | '_' | '[' | ']' | '`' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn report_markdown_from_table(
+    title: &str,
+    table: &TableData,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    report_validate_title(title, locale, position)?;
+    let headers = table
+        .headers
+        .iter()
+        .map(|header| report_markdown_escape(header))
+        .collect::<Vec<_>>();
+    let mut lines = Vec::with_capacity(table.rows.len().saturating_add(5));
+    lines.push(format!("# {}", report_markdown_escape(title)));
+    lines.push(String::new());
+    lines.push(format!("Rows: {}", table.rows.len()));
+    lines.push(String::new());
+    lines.push(format!("| {} |", headers.join(" | ")));
+    lines.push(format!(
+        "| {} |",
+        table
+            .headers
+            .iter()
+            .map(|_| "---")
+            .collect::<Vec<_>>()
+            .join(" | ")
+    ));
+    for row in &table.rows {
+        let cells = table
+            .headers
+            .iter()
+            .map(|header| report_markdown_escape(row.get(header).map(String::as_str).unwrap_or("")))
+            .collect::<Vec<_>>();
+        lines.push(format!("| {} |", cells.join(" | ")));
+    }
+    let report = format!("{}\n", lines.join("\n"));
+    if report.len() > REPORT_MAX_BYTES {
+        return Err(report_error(
+            locale,
+            position,
+            "rendered report exceeds the local report byte limit",
+        ));
+    }
+    Ok(report)
+}
+
+fn report_summary_from_table(title: &str, table: &TableData) -> Value {
+    Value::Map(BTreeMap::from([
+        ("title".into(), Value::String(title.to_string())),
+        ("format".into(), Value::String(table.format.clone())),
+        ("rowCount".into(), Value::Number(table.rows.len() as f64)),
+        (
+            "columnCount".into(),
+            Value::Number(table.headers.len() as f64),
+        ),
+        (
+            "columns".into(),
+            Value::List(table.headers.iter().cloned().map(Value::String).collect()),
+        ),
+    ]))
+}
+
 fn read_bridge_stream(mut stream: impl Read) -> Result<Vec<u8>, ()> {
     let mut result = Vec::new();
     let mut buffer = [0_u8; 8192];
@@ -2363,6 +2471,57 @@ impl Interpreter {
                 .starts_with(root)
         {
             return Err(());
+        }
+        Ok(resolved)
+    }
+
+    fn report_output_path(&self, path: &str, position: Position) -> Result<PathBuf, PadmaError> {
+        self.require_project_capability("filesystem:write", "report", position)?;
+        if !path.ends_with(".md") {
+            return Err(report_error(
+                self.locale,
+                position,
+                "report output path must end with .md",
+            ));
+        }
+        let root = self.project_root.as_ref().ok_or_else(|| {
+            report_error(
+                self.locale,
+                position,
+                "report export requires a project root",
+            )
+        })?;
+        let relative = safe_relative_path(path)
+            .map_err(|_| error_for(self.locale, "P1014", position, "report output path"))?;
+        let resolved = root.join(&relative);
+        let mut current = root.clone();
+        for component in relative.components() {
+            current.push(component);
+            if current.exists()
+                && fs::symlink_metadata(&current)
+                    .map_err(|_| error_for(self.locale, "P1015", position, "report output path"))?
+                    .file_type()
+                    .is_symlink()
+            {
+                return Err(report_error(
+                    self.locale,
+                    position,
+                    "report output path must not contain a symlink",
+                ));
+            }
+        }
+        let parent = resolved
+            .parent()
+            .ok_or_else(|| error_for(self.locale, "P1014", position, "report output path"))?;
+        let canonical_parent = fs::canonicalize(parent)
+            .map_err(|_| error_for(self.locale, "P1015", position, "report output path"))?;
+        if !canonical_parent.starts_with(root) {
+            return Err(error_for(
+                self.locale,
+                "P1014",
+                position,
+                "report output path",
+            ));
         }
         Ok(resolved)
     }
@@ -3912,6 +4071,38 @@ impl Interpreter {
                     })?;
                     fs::write(&resolved_path, output).map_err(|_| {
                         error_for(self.locale, "P1015", *position, "table output path")
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "report.markdown" || name == "report.summary" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let title = self.evaluate(&arguments[0])?;
+                    let title = expect_string(&title, self.locale, *position, "report title")?;
+                    report_validate_title(title, self.locale, *position)?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    if name == "report.markdown" {
+                        return report_markdown_from_table(title, &table, self.locale, *position)
+                            .map(Value::String);
+                    }
+                    return Ok(report_summary_from_table(title, &table));
+                }
+                if name == "report.write_markdown" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(&path, self.locale, *position, "report output path")?;
+                    let title = self.evaluate(&arguments[1])?;
+                    let title = expect_string(&title, self.locale, *position, "report title")?;
+                    let value = self.evaluate(&arguments[2])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    let report = report_markdown_from_table(title, &table, self.locale, *position)?;
+                    let resolved_path = self.report_output_path(path, *position)?;
+                    fs::write(&resolved_path, report).map_err(|_| {
+                        error_for(self.locale, "P1015", *position, "report output path")
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -10689,8 +10880,9 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "ai.workflow" | "table.headers" | "table.rows" | "fs.checksum" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
-        | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" => Some((2, 2)),
-        "text.replace" | "fs.search_text" => Some((3, 3)),
+        | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
+        | "report.summary" => Some((2, 2)),
+        "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -13326,6 +13518,92 @@ mod tests {
         .unwrap_err();
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(archive.code, "P1070");
+    }
+
+    #[test]
+    fn local_reporting_renders_escaped_markdown_summary_and_project_scoped_export() {
+        let root = module_fixture_dir("local-reporting");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::write(
+            root.join("data/inventory.csv"),
+            "name,quantity\n<script>alert(1)</script>,2\nTea,4\n",
+        )
+        .unwrap();
+        let output = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()]),
+            "let inventory = table.read(\"data/inventory.csv\", \"csv\")\nlet summary = report.summary(\"Inventory Summary\", inventory)\nlet markdown = report.markdown(\"Inventory Summary\", inventory)\nprint summary[\"rowCount\"]\nprint summary[\"columnCount\"]\nprint text.contains(markdown, \"&lt;script&gt;alert(1)&lt;/script&gt;\")\nprint report.write_markdown(\"out/inventory.md\", \"Inventory Summary\", inventory)\n",
+        )
+        .unwrap();
+        let report = fs::read_to_string(root.join("out/inventory.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(output, vec!["2", "2", "true", "true"]);
+        assert_eq!(
+            report,
+            "# Inventory Summary\n\nRows: 2\n\n| name | quantity |\n| --- | --- |\n| &lt;script&gt;alert(1)&lt;/script&gt; | 2 |\n| Tea | 4 |\n"
+        );
+    }
+
+    #[test]
+    fn local_reporting_rejects_denied_writes_unsafe_titles_paths_symlinks_and_malformed_tables() {
+        let root = module_fixture_dir("local-reporting-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink("outside", root.join("out-link")).unwrap();
+        let table =
+            "{\"format\": \"csv\", \"headers\": [\"name\"], \"rows\": [{\"name\": \"Rafi\"}]}";
+
+        let denied = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            &format!("print report.write_markdown(\"out/report.md\", \"Report\", {table})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(denied.code, "P1034");
+
+        let raw_title = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            &format!("print report.markdown(\"<script>bad</script>\", {table})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(raw_title.code, "P1071");
+
+        let write_capability = BTreeSet::from(["filesystem:write".into()]);
+        let traversal = run_bridge_project(
+            &root,
+            write_capability.clone(),
+            &format!("print report.write_markdown(\"../outside.md\", \"Report\", {table})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(traversal.code, "P1014");
+
+        let extension = run_bridge_project(
+            &root,
+            write_capability.clone(),
+            &format!("print report.write_markdown(\"out/report.txt\", \"Report\", {table})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(extension.code, "P1071");
+
+        let symlink = run_bridge_project(
+            &root,
+            write_capability.clone(),
+            &format!("print report.write_markdown(\"out-link/report.md\", \"Report\", {table})\n"),
+        )
+        .unwrap_err();
+        assert_eq!(symlink.code, "P1071");
+
+        let malformed = run_bridge_project(
+            &root,
+            write_capability,
+            "print report.markdown(\"Report\", {\"format\": \"csv\", \"headers\": [\"name\"], \"rows\": [{\"wrong\": \"Rafi\"}]})\n",
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(malformed.code, "P1069");
     }
 
     #[test]

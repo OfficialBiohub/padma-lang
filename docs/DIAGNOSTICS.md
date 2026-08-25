@@ -65,6 +65,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1068 | Visible browser takeover execution boundary | A browser takeover execution path is unavailable or prohibited in this Padma version. Only local `padma browser takeover inspect` and `padma browser takeover plan` commands are supported. |
 | P1069 | Structured data table safety | A CSV/TSV/JSON table is malformed, exceeds bounded data policy, has an unsafe schema/cell shape, or cannot be handled safely. Raw table source and file content are not echoed. |
 | P1070 | Filesystem productivity safety | A filesystem productivity input, source, directory entry, search, or dry-run plan is unsafe, malformed, over bounded limits, symlinked, non-regular, or otherwise unavailable under the project-root policy. Raw content and paths outside the project root are not echoed. |
+| P1071 | Local reporting safety | A report title, rendered output, or Markdown export path is unsafe, malformed, exceeds bounds, uses raw HTML delimiters, a symlinked component, an invalid suffix, or violates the project-root report policy. Raw source table content and paths outside the project root are not echoed. |
 
 ## Example
 
