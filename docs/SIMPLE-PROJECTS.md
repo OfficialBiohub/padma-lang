@@ -43,6 +43,25 @@ Existing flat projects remain valid. A project whose `padma.toml` has `entry = "
 
 Project mode remains safer for growing projects because sensitive actions are denied unless `padma.toml` explicitly lists a narrow capability. A directory name, `data/` folder, or `out/` folder never grants filesystem, network, process, media, browser, account, or payment authority.
 
-## Next starter templates
+## Starter templates
 
-The first generated starter is the basic project. Local data/report and local web-response templates will use the same layout and minimum capabilities, but each will be added only after its generated files, safety tests, documentation, and Termux example are complete. No starter template will silently enable network, process, browser, deployment, payment, cloud, or Android device permissions.
+`padma init` now creates one of three runnable starters. The default remains `basic`, so the existing `padma init my-project` command stays compatible.
+
+| Command | Generated local result | Minimum capability |
+|---|---|---|
+| `padma init my-project` | A Bangla-English basic `src/main.pd` program | None |
+| `padma init my-report --template data-report` | `data/sales.csv` input and an `out/sales-report.md` Markdown report | `filesystem = ["read", "write"]` |
+| `padma init my-response --template web-response` | `out/health-response.json` local response artifact | `filesystem = ["write"]` |
+
+Run any starter with its own project directory:
+
+```bash
+padma init my-report --template data-report
+cd my-report
+padma .
+cat out/sales-report.md
+```
+
+The `data-report` starter reads only its local sample CSV and writes a Markdown review report. The `web-response` starter creates a JSON response artifact; it does **not** start a server, open a port, receive a request, or deploy a website. Both generated READMEs include the exact command and boundary. Template selection accepts `basic`, `data-report`, or `web-response` exactly once; unknown/repeated options and multiple directories are rejected.
+
+No starter template silently enables network, process, browser, deployment, payment, cloud, Android shared storage, account, or device permissions.

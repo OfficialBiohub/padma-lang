@@ -294,13 +294,13 @@
 
 - [x] Define one beginner-friendly, advanced-language-style Padma project layout with `padma.toml`, `main.pd`, optional `src/`, `data/`, `out/`, `tests/`, and `README.md`, while preserving existing flat projects and `padma file.pd` execution.
 - [x] Add a `padma init` starter-project command that creates only safe local source/template files, refuses a non-empty target directory, never contacts a network, and uses no shell command.
-- [ ] Provide simple starter templates for basic script, local data/report, and local web response projects with minimum capabilities and exact Termux commands.
+- [x] Provide simple starter templates for basic script, local data/report, and local web response projects with minimum capabilities and exact Termux commands.
 - [x] Document one-command create/run/check/fmt/test flow, migration-safe compatibility rules, Bangla-English diagnostics, and beginner versus advanced project layouts.
 - [x] Add positive, non-empty-directory, unsafe-name/path, generated-template, and no-network/no-process regression tests before publishing the workflow.
 
 ## M17 — Expanded Category-Based Daily Tools
 
-- [ ] Add safe project templates for basic script, local data/report, and local web response while preserving the simple `src/`, `data/`, `out/`, and `tests/` layout and minimum capability grants.
+- [x] Add safe project templates for basic script, local data/report, and local web response while preserving the simple `src/`, `data/`, `out/`, and `tests/` layout and minimum capability grants.
 - [ ] Education, family, and small-business tools: local study-note, attendance, expense, inventory, and printable report schemas built on validated tables and local reports.
 - [ ] Freelancer and office tools: local client/task, quote/invoice draft, portfolio, and reusable Markdown report templates without payment, account, email, or cloud automation.
 - [ ] Developer and web tools: deterministic local task/test/lint plans, JSON request templates, request validation, local response helpers, and separately confirmed remote deployment planning.
@@ -320,3 +320,10 @@
 - [x] Implement the first client-document foundation: validate a bounded quote/invoice draft map and render an escaped project-local Markdown document only with explicit `filesystem:write`, while marking delivery/payment/contact actions as user-reviewed and disabled.
   - [x] Add tests for missing/unsafe fields, raw HTML/script content, path/symlink/output limits, missing write grant, and no payment/contact/network/process action.
   - [x] Add a standalone Termux freelancer quote example, public guide, and exact output boundary before marking complete.
+
+## M19 — Verified Capability Audit and Feature-by-Feature Delivery
+
+- [x] Build a checked capability inventory that separates implemented runtime behavior, runnable examples, test-only coverage, incomplete work, and documentation/design-only plans without overstating any item.
+- [x] Reclassify the existing daily-use and freelancer roadmap into a dependency-aware P0/P1/P2 backlog, preserving explicit safety exclusions and showing the evidence required before an item can be marked complete.
+- [x] Select the first audited P0 capability and implement it end to end: parser/runtime or CLI path where needed, localized diagnostics, capability/path boundaries, positive and negative tests, standalone Termux example, public guide, full verification, focused commit, and push.
+- [ ] Repeat the same audited completion gate for each subsequent selected feature; do not mark a roadmap capability complete from documentation, a plan, or a partial example alone.

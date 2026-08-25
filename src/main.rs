@@ -9435,7 +9435,118 @@ fn lint_disabled_rules_for_path(path: &str) -> Result<BTreeSet<String>, String> 
     }
 }
 
-fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StarterTemplate {
+    Basic,
+    DataReport,
+    WebResponse,
+}
+
+impl StarterTemplate {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "basic" => Ok(Self::Basic),
+            "data-report" => Ok(Self::DataReport),
+            "web-response" => Ok(Self::WebResponse),
+            _ => Err(
+                "P1032: starter template must be basic, data-report, or web-response".to_string(),
+            ),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Basic => "basic",
+            Self::DataReport => "data-report",
+            Self::WebResponse => "web-response",
+        }
+    }
+
+    fn capabilities(self) -> BTreeSet<String> {
+        match self {
+            Self::Basic => BTreeSet::new(),
+            Self::DataReport => {
+                BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()])
+            }
+            Self::WebResponse => BTreeSet::from(["filesystem:write".into()]),
+        }
+    }
+
+    fn manifest_capabilities(self) -> &'static str {
+        match self {
+            Self::Basic => "",
+            Self::DataReport => "filesystem = [\"read\", \"write\"]\n",
+            Self::WebResponse => "filesystem = [\"write\"]\n",
+        }
+    }
+
+    fn source(self) -> &'static str {
+        match self {
+            Self::Basic => {
+                "# padma:locale=bn\n# আপনার Padma code এখানে লিখুন।\nদেখাও \"পদ্ম project ready\"\n"
+            }
+            Self::DataReport => {
+                "# padma:locale=bn\n# Project-local CSV থেকে একটি review report তৈরি করুন।\nধরি sales = table.read(\"data/sales.csv\", \"csv\")\nধরি summary = report.summary(\"Starter Sales Report\", sales)\nধরি saved = report.write_markdown(\"out/sales-report.md\", \"Starter Sales Report\", sales)\nদেখাও text.format(\"Rows: {rowCount}\", summary)\nদেখাও text.format(\"Report saved: {saved}\", {\"saved\": saved})\n"
+            }
+            Self::WebResponse => {
+                "# padma:locale=bn\n# এটি public server নয়; একটি local JSON response artifact তৈরি করে।\nধরি response = backend.response(200, {\"Content-Type\": \"application/json\"}, {\"ok\": true, \"message\": \"Padma local response ready\"})\nধরি saved = automation.write_json(\"out/health-response.json\", response)\nদেখাও text.format(\"Response saved: {saved}\", {\"saved\": saved})\n"
+            }
+        }
+    }
+
+    fn data_fixture(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Self::DataReport => Some(("sales.csv", "item,amount\nNotebook,120\nPen,30\n")),
+            Self::Basic | Self::WebResponse => None,
+        }
+    }
+
+    fn readme(self, project_name: &str) -> String {
+        match self {
+            Self::Basic => format!(
+                "# {project_name}\n\n```bash\npadma .\npadma check src/main.pd\npadma fmt src/main.pd\npadma lint src/main.pd\n```\n\nThis basic starter has no capabilities. Write Padma code in `src/main.pd`; keep optional local input files in `data/` and generated local files in `out/`. Add a capability in `padma.toml` only when code needs it.\n"
+            ),
+            Self::DataReport => format!(
+                "# {project_name}\n\nThis starter reads `data/sales.csv` and writes `out/sales-report.md`.\n\n```bash\npadma .\ncat out/sales-report.md\npadma check src/main.pd\n```\n\nIt grants only project-local `filesystem = [\"read\", \"write\"]` for the CSV input and Markdown output. It does not contact a cloud service, read Android shared storage, send a report, calculate tax, create a payment, or start a background process.\n"
+            ),
+            Self::WebResponse => format!(
+                "# {project_name}\n\nThis starter creates the local JSON response artifact `out/health-response.json`.\n\n```bash\npadma .\ncat out/health-response.json\npadma check src/main.pd\n```\n\nIt grants only project-local `filesystem = [\"read\", \"write\"]` for generated output. It does not start a web server, open a network port, deploy a website, receive requests, create an account, or contact a remote API.\n"
+            ),
+        }
+    }
+}
+
+fn parse_init_options(options: &[String]) -> Result<(PathBuf, StarterTemplate), String> {
+    let mut directory = None;
+    let mut template = StarterTemplate::Basic;
+    let mut template_seen = false;
+    let mut index = 0;
+    while index < options.len() {
+        let option = &options[index];
+        if option == "--template" {
+            if template_seen || index + 1 >= options.len() {
+                return Err("P1032: --template must appear once with a template name".to_string());
+            }
+            template = StarterTemplate::parse(&options[index + 1])?;
+            template_seen = true;
+            index += 2;
+            continue;
+        }
+        if option.starts_with('-') {
+            return Err("P1032: unsupported padma init option".to_string());
+        }
+        if directory.replace(PathBuf::from(option)).is_some() {
+            return Err("P1032: padma init accepts one project directory".to_string());
+        }
+        index += 1;
+    }
+    Ok((directory.unwrap_or_else(|| PathBuf::from(".")), template))
+}
+
+fn initialize_project_with_template(
+    directory: &Path,
+    template: StarterTemplate,
+) -> Result<ProjectManifest, String> {
     if directory
         .components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
@@ -9478,7 +9589,7 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
         version: "0.1.0".to_string(),
         entry: "src/main.pd".to_string(),
         locale: "bn".to_string(),
-        capabilities: BTreeSet::new(),
+        capabilities: template.capabilities(),
         lint_disabled: BTreeSet::new(),
         dependencies: BTreeMap::new(),
     };
@@ -9490,31 +9601,31 @@ fn initialize_project(directory: &Path) -> Result<ProjectManifest, String> {
     fs::write(
         directory.join("padma.toml"),
         format!(
-            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Add only the capability your project actually needs.\n[capabilities]\n\n[lint]\ndisable = []\n",
-            manifest.name, manifest.version, manifest.entry, manifest.locale
+            "[padma]\nname = \"{}\"\nversion = \"{}\"\nentry = \"{}\"\nlocale = \"{}\"\n\n# Starter template: {}. Add only the capability your project actually needs.\n[capabilities]\n{}\n[lint]\ndisable = []\n",
+            manifest.name,
+            manifest.version,
+            manifest.entry,
+            manifest.locale,
+            template.name(),
+            template.manifest_capabilities(),
         ),
     )
     .map_err(|error| format!("P1032: cannot write manifest: {error}"))?;
     write_package_lock(directory)?;
-    fs::write(
-        directory.join("src/main.pd"),
-        "# padma:locale=bn\n# আপনার Padma code এখানে লিখুন।\nদেখাও \"পদ্ম project ready\"\n",
-    )
-    .map_err(|error| format!("P1032: cannot write starter source: {error}"))?;
+    fs::write(directory.join("src/main.pd"), template.source())
+        .map_err(|error| format!("P1032: cannot write starter source: {error}"))?;
     fs::write(directory.join("data/.gitkeep"), "")
         .map_err(|error| format!("P1032: cannot create data placeholder: {error}"))?;
+    if let Some((name, content)) = template.data_fixture() {
+        fs::write(directory.join("data").join(name), content)
+            .map_err(|error| format!("P1032: cannot write starter data fixture: {error}"))?;
+    }
     fs::write(directory.join("out/.gitkeep"), "")
         .map_err(|error| format!("P1032: cannot create output placeholder: {error}"))?;
     fs::write(directory.join("tests/.gitkeep"), "")
         .map_err(|error| format!("P1032: cannot create tests placeholder: {error}"))?;
-    fs::write(
-        directory.join("README.md"),
-        format!(
-            "# {}\n\n```bash\npadma .\npadma check src/main.pd\npadma fmt src/main.pd\npadma lint src/main.pd\n```\n\nWrite Padma code in `src/main.pd`. Keep optional local input files in `data/` and generated local files in `out/`. Add a capability in `padma.toml` only when code needs it.\n",
-            manifest.name
-        ),
-    )
-    .map_err(|error| format!("P1032: cannot write project README: {error}"))?;
+    fs::write(directory.join("README.md"), template.readme(&manifest.name))
+        .map_err(|error| format!("P1032: cannot write project README: {error}"))?;
     Ok(manifest)
 }
 
@@ -12210,15 +12321,20 @@ fn lint_json_with_disabled(path: &str, source: &str, disabled_rules: &BTreeSet<S
     .to_string()
 }
 
-fn usage(locale: Locale) -> &'static str {
-    match locale {
+fn usage(locale: Locale) -> String {
+    let text = match locale {
         Locale::Bangla => {
             "ব্যবহার: padma [file.pd|.] অথবা padma <run|check|fmt|lint|ast> <file.pd>\n\nকমান্ড:\n  padma                 interactive shell চালু করুন\n  padma <file.pd>       Padma script চালান\n  padma .               padma.toml project চালান\n  padma serve [project] local health server চালান\n  padma init [folder]   নতুন Padma project তৈরি করুন\n  padma capabilities <project>  project permission দেখুন\n  padma package lock [project]  verified local package lockfile লিখুন\n  padma package verify [project]  package digest ও lockfile যাচাই করুন\n  padma package inspect <name> [project]  local package metadata দেখুন\n  padma ai inspect [project]  AI workflow manifest নিরাপদভাবে inspect করুন\n  padma ai plan [project]  network ছাড়া AI workflow plan দেখুন\n  padma ai tools inspect [project]  AI tool manifest local inspect করুন\n  padma ai tools plan [project]  tool/agent ছাড়া AI tool plan দেখুন\n  padma ai training inspect [project]  AI training manifest local inspect করুন\n  padma ai training plan [project]  training ছাড়া resource-bounded plan দেখুন\n  padma browser inspect [project]  browser plan manifest inspect করুন\n  padma browser plan [project]  browser ছাড়া, network ছাড়া navigation plan দেখুন\n  padma browser draft inspect [project]  browser interaction draft local inspect করুন\n  padma browser draft plan [project]  browser ছাড়া inert user-takeover draft plan দেখুন\n  padma browser takeover inspect [project]  visible user-takeover checklist local inspect করুন\n  padma browser takeover plan [project]  browser ছাড়া sensitive-action takeover plan দেখুন\n  padma deploy plan [project]  dry-run deployment plan দেখুন\n  padma deploy inspect [project]  deployment manifest inspect করুন\n  padma render plan [project]  Git-linked Render release plan দেখুন\n  padma render inspect [project]  Render release manifest inspect করুন\n  padma render api-plan [project]  Render API deploy/rollback plan দেখুন\n  padma render deploy --confirm <token> [project]  confirmed Render deploy চালান\n  padma render rollback --confirm <token> [project]  confirmed Render rollback চালান\n  padma gui inspect [project]  local GUI manifest দেখুন\n  padma gui plan [project]  read-only GUI renderer plan দেখুন\n  padma android inspect [project]  Android build manifest দেখুন\n  padma android plan [project]  read-only Android APK build plan দেখুন\n  padma check --json <file.pd>  JSON diagnostic দিন\n  padma fmt <file.pd>   source format করুন\n  padma fmt --check <file.pd>  source পরিবর্তন দরকার কি না দেখুন\n  padma lint <file.pd>  style warning দেখুন\n  padma lint --json <file.pd>  JSON lint report দিন\n  padma --version       version দেখুন\n  padma --help          এই help দেখুন\n\nউদাহরণ:\n  padma init আমার-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma browser draft plan .\n  padma browser takeover plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-bn.pd\n"
         }
         Locale::English => {
             "Usage: padma [file.pd|.] or padma <run|check|fmt|lint|ast> <file.pd>\n\nCommands:\n  padma                 open the interactive shell\n  padma <file.pd>       run a Padma script\n  padma .               run a padma.toml project\n  padma serve [project] run a loopback local health server\n  padma init [folder]   create a new Padma project\n  padma capabilities <project>  inspect project permissions\n  padma package lock [project]  write a verified local package lockfile\n  padma package verify [project]  verify local package digests and lockfile\n  padma package inspect <name> [project]  inspect local package metadata\n  padma ai inspect [project]  inspect an AI workflow manifest safely\n  padma ai plan [project]  print an AI workflow plan without network access\n  padma ai tools inspect [project]  inspect an AI tool manifest locally\n  padma ai tools plan [project]  print an AI tool plan without tools or an agent\n  padma ai training inspect [project]  inspect an AI training manifest locally\n  padma ai training plan [project]  print a training plan without dataset reads or training\n  padma browser inspect [project]  inspect a browser plan manifest locally\n  padma browser plan [project]  print a navigation plan without browser or network access\n  padma browser draft inspect [project]  inspect a browser interaction draft locally\n  padma browser draft plan [project]  print an inert, user-takeover draft plan without a browser\n  padma browser takeover inspect [project]  inspect a visible user-takeover checklist locally\n  padma browser takeover plan [project]  print a sensitive-action takeover plan without a browser\n  padma deploy plan [project]  print a dry-run deployment plan\n  padma deploy inspect [project]  inspect a deployment manifest locally\n  padma render plan [project]  print a Git-linked Render release plan\n  padma render inspect [project]  inspect a Render release manifest locally\n  padma render api-plan [project]  print a Render API deploy/rollback plan\n  padma render deploy --confirm <token> [project]  run a confirmed Render deploy\n  padma render rollback --confirm <token> [project]  run a confirmed Render rollback\n  padma gui inspect [project]  inspect a local GUI manifest\n  padma gui plan [project]  print a read-only GUI renderer plan\n  padma android inspect [project]  inspect an Android build manifest\n  padma android plan [project]  print a read-only Android APK build plan\n  padma check --json <file.pd>  emit JSON diagnostics\n  padma fmt <file.pd>   format a source file in place\n  padma fmt --check <file.pd>  report whether formatting is needed\n  padma lint <file.pd>  report style warnings\n  padma lint --json <file.pd>  emit JSON lint warnings\n  padma --version       show the installed version\n  padma --help          show this help\n\nExamples:\n  padma init my-project\n  padma serve .\n  padma ai plan .\n  padma ai tools plan .\n  padma ai training plan .\n  padma browser plan .\n  padma browser draft plan .\n  padma browser takeover plan .\n  padma render api-plan .\n  padma gui plan .\n  padma android plan .\n  padma examples/hello-en.pd\n"
         }
-    }
+    };
+    let starter_help = match locale {
+        Locale::Bangla => "\nStarter template:\n  padma init আমার-report --template data-report\n  padma init আমার-response --template web-response\n",
+        Locale::English => "\nStarter templates:\n  padma init my-report --template data-report\n  padma init my-response --template web-response\n",
+    };
+    format!("{text}{starter_help}")
 }
 fn write_local_server_response(stream: &mut TcpStream, status: &str, body: &str) -> io::Result<()> {
     write!(
@@ -12649,17 +12765,18 @@ fn main() {
         return;
     }
     if arguments.get(1).map(String::as_str) == Some("init") {
-        let directory = arguments
-            .get(2)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."));
-        if arguments.len() > 3 {
-            eprintln!("{}", usage(Locale::English));
-            process::exit(64);
-        }
-        match initialize_project(&directory) {
+        let (directory, template) = match parse_init_options(&arguments[2..]) {
+            Ok(values) => values,
+            Err(error) => {
+                eprintln!("{error}");
+                eprintln!("{}", usage(Locale::English));
+                process::exit(64);
+            }
+        };
+        match initialize_project_with_template(&directory, template) {
             Ok(manifest) => println!(
-                "Created Padma project `{}`.\nNext:\n  cd {}\n  padma .\n  padma check src/main.pd",
+                "Created Padma {} starter `{}`.\nNext:\n  cd {}\n  padma .\n  padma check src/main.pd",
+                template.name(),
                 manifest.name,
                 directory.display()
             ),
@@ -13213,7 +13330,8 @@ mod tests {
     fn initializes_and_runs_a_manifest_project() {
         let directory = module_fixture_dir("project-init");
         let project_directory = directory.join("bangla-project");
-        let manifest = initialize_project(&project_directory).unwrap();
+        let manifest =
+            initialize_project_with_template(&project_directory, StarterTemplate::Basic).unwrap();
         assert_eq!(manifest.name, "bangla-project");
         assert!(project_directory.join("padma.toml").is_file());
         assert!(project_directory.join("padma.lock").is_file());
@@ -13234,22 +13352,123 @@ mod tests {
     }
 
     #[test]
+    fn initializes_and_runs_data_report_and_web_response_starter_templates() {
+        let root = module_fixture_dir("project-starter-templates");
+        let report_directory = root.join("report-project");
+        let report_manifest =
+            initialize_project_with_template(&report_directory, StarterTemplate::DataReport)
+                .unwrap();
+        assert_eq!(
+            report_manifest.capabilities,
+            BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()])
+        );
+        assert!(report_directory.join("data/sales.csv").is_file());
+        let (loaded_report, report_entry) = load_project_manifest(&report_directory).unwrap();
+        let report_source = project_source_with_locale(
+            fs::read_to_string(&report_entry).unwrap(),
+            &loaded_report.locale,
+        );
+        let (report_program, report_locale) = compile(&report_source).unwrap();
+        let mut report_interpreter = Interpreter::with_project_capabilities(
+            report_locale,
+            report_entry,
+            report_directory.clone(),
+            loaded_report.capabilities,
+        );
+        report_interpreter.run(&report_program).unwrap();
+        assert_eq!(
+            report_interpreter.output,
+            vec!["Rows: 2", "Report saved: true"]
+        );
+        assert!(
+            fs::read_to_string(report_directory.join("out/sales-report.md"))
+                .unwrap()
+                .starts_with("# Starter Sales Report\n")
+        );
+
+        let web_directory = root.join("web-project");
+        let web_manifest =
+            initialize_project_with_template(&web_directory, StarterTemplate::WebResponse).unwrap();
+        assert_eq!(
+            web_manifest.capabilities,
+            BTreeSet::from(["filesystem:write".into()])
+        );
+        let (loaded_web, web_entry) = load_project_manifest(&web_directory).unwrap();
+        let web_source =
+            project_source_with_locale(fs::read_to_string(&web_entry).unwrap(), &loaded_web.locale);
+        let (web_program, web_locale) = compile(&web_source).unwrap();
+        let mut web_interpreter = Interpreter::with_project_capabilities(
+            web_locale,
+            web_entry,
+            web_directory.clone(),
+            loaded_web.capabilities,
+        );
+        web_interpreter.run(&web_program).unwrap();
+        assert_eq!(web_interpreter.output, vec!["Response saved: true"]);
+        let response: JsonValue = serde_json::from_str(
+            &fs::read_to_string(web_directory.join("out/health-response.json")).unwrap(),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(response["status"], 200.0);
+        assert_eq!(response["body"]["ok"], true);
+    }
+
+    #[test]
+    fn parses_starter_template_options_and_rejects_ambiguous_or_unsafe_forms() {
+        assert_eq!(
+            parse_init_options(&["sample".into(), "--template".into(), "data-report".into()])
+                .unwrap(),
+            (PathBuf::from("sample"), StarterTemplate::DataReport)
+        );
+        assert_eq!(
+            parse_init_options(&["--template".into(), "web-response".into(), "sample".into()])
+                .unwrap(),
+            (PathBuf::from("sample"), StarterTemplate::WebResponse)
+        );
+        assert_eq!(
+            parse_init_options(&[]).unwrap(),
+            (PathBuf::from("."), StarterTemplate::Basic)
+        );
+        for options in [
+            vec!["--template".into()],
+            vec!["--template".into(), "unknown".into()],
+            vec![
+                "--template".into(),
+                "basic".into(),
+                "--template".into(),
+                "basic".into(),
+            ],
+            vec!["one".into(), "two".into()],
+            vec!["--unsafe".into()],
+        ] {
+            assert!(parse_init_options(&options)
+                .unwrap_err()
+                .starts_with("P1032"));
+        }
+    }
+
+    #[test]
     fn project_init_rejects_non_empty_traversal_and_symlink_targets() {
         let root = module_fixture_dir("project-init-safety");
         let non_empty = root.join("non-empty");
         fs::create_dir_all(&non_empty).unwrap();
         fs::write(non_empty.join("keep.txt"), "keep").unwrap();
-        let non_empty_error = initialize_project(&non_empty).unwrap_err();
+        let non_empty_error =
+            initialize_project_with_template(&non_empty, StarterTemplate::Basic).unwrap_err();
         assert!(non_empty_error.contains("not empty"));
 
-        let traversal_error = initialize_project(Path::new("../padma-unsafe")).unwrap_err();
+        let traversal_error =
+            initialize_project_with_template(Path::new("../padma-unsafe"), StarterTemplate::Basic)
+                .unwrap_err();
         assert!(traversal_error.contains("safe relative path"));
 
         let real = root.join("real");
         fs::create_dir_all(&real).unwrap();
         let link = root.join("link");
         std::os::unix::fs::symlink("real", &link).unwrap();
-        let link_error = initialize_project(&link).unwrap_err();
+        let link_error =
+            initialize_project_with_template(&link, StarterTemplate::Basic).unwrap_err();
         fs::remove_dir_all(root).unwrap();
         assert!(link_error.contains("must not be a symlink"));
     }
