@@ -343,7 +343,9 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::Bangla, "P1088") => (format!("local optimisation request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded finite quadratic objective, epsilon, ও learning rate ব্যবহার করুন; Padma একবারের pure local calculation দেবে, loop/callback/provider/QPU/network/process execution নয়।".into())),
         (Locale::English, "P1088") => (format!("Local optimisation request is unsafe or invalid: `{detail}`"), Some("Use only bounded finite quadratic objectives, epsilon, and learning rates; Padma returns one pure local calculation, not loop/callback/provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1089") => (format!("local OpenQASM subset assessment নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু Padma-র bounded renderer থেকে পাওয়া exact ASCII OpenQASM 3.0 text দিন; এটি parser/import/execution/provider/QPU/network/process API নয়।".into())),
-        (Locale::English, "P1089") => (format!("Local OpenQASM subset assessment is unsafe or invalid: `{detail}`"), Some("Use only exact ASCII OpenQASM 3.0 text emitted by Padma's bounded renderer; this is not a parser/import/execution/provider/QPU/network/process API.".into())),
+        (Locale::English, "P1089") => (format!("Local OpenQASM subset assessment is unsafe or invalid: `{detail}"), Some("Use only exact ASCII OpenQASM 3.0 text emitted by Padma's bounded renderer; this is not a parser/import/execution/provider/QPU/network/process API.".into())),
+        (Locale::Bangla, "P1090") => (format!("quantum provider readiness assessment নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded provider label, reviewed artifact metadata, এবং public policy note ব্যবহার করুন; Padma token/credential/account/job/endpoint পড়বে না বা provider/QPU/network/process action চালাবে না।".into())),
+        (Locale::English, "P1090") => (format!("Quantum provider readiness assessment is unsafe or invalid: `{detail}"), Some("Use only a bounded provider label, reviewed artifact metadata, and public policy note; Padma will not read tokens/credentials/accounts/jobs/endpoints or run provider/QPU/network/process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1743,6 +1745,14 @@ fn local_optimization_error(locale: Locale, position: Position, detail: &str) ->
 
 fn quantum_interchange_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1089", position, detail)
+}
+
+fn quantum_provider_assessment_error(
+    locale: Locale,
+    position: Position,
+    detail: &str,
+) -> PadmaError {
+    error_for(locale, "P1090", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4767,6 +4777,8 @@ const QUANTUM_SAMPLER_MAX_SHOTS: usize = 100_000;
 const QUANTUM_SAMPLER_MAX_SEED: u64 = 9_007_199_254_740_991;
 const QUANTUM_HAMILTONIAN_MAX_TERMS: usize = 64;
 const QUANTUM_HAMILTONIAN_MAX_COEFFICIENT: f64 = 1_000_000.0;
+const QUANTUM_PROVIDER_POLICY_MAX_BYTES: usize = 256;
+const QUANTUM_PROVIDER_ARTIFACT_MAX_BYTES: usize = 1_048_576;
 const LOCAL_OPTIMIZATION_MAX_PARAMETERS: usize = 16;
 const LOCAL_OPTIMIZATION_MAX_ABS_VALUE: f64 = 1_000_000.0;
 const LOCAL_OPTIMIZATION_MIN_EPSILON: f64 = 0.000_001;
@@ -4808,6 +4820,15 @@ struct QuantumHamiltonianTerm {
 #[derive(Clone, Debug)]
 struct QuantumHamiltonian {
     terms: Vec<QuantumHamiltonianTerm>,
+}
+
+#[derive(Clone, Debug)]
+struct QuantumProviderAssessmentRequest {
+    provider: String,
+    artifact_format: String,
+    artifact_source_sha256: String,
+    artifact_source_bytes: usize,
+    policy_note: String,
 }
 
 #[derive(Clone, Debug)]
@@ -5239,6 +5260,240 @@ fn quantum_assess_openqasm3(
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ])))
+}
+
+fn quantum_provider_public_policy_note(
+    value: Option<&Value>,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let Some(Value::String(note)) = value else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider policy note must be text",
+        ));
+    };
+    let lowered = note.to_ascii_lowercase();
+    if note.is_empty()
+        || note.len() > QUANTUM_PROVIDER_POLICY_MAX_BYTES
+        || note.chars().any(char::is_control)
+        || note.contains(['<', '>'])
+        || note.contains("://")
+        || note.contains('@')
+        || note.contains("www.")
+        || [
+            "token",
+            "secret",
+            "password",
+            "credential",
+            "api key",
+            "apikey",
+            "bearer",
+            "cookie",
+            "session",
+            "account",
+            "job id",
+            "endpoint",
+            "arn:",
+            "crn",
+        ]
+        .iter()
+        .any(|forbidden| lowered.contains(forbidden))
+    {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider policy note must be bounded public text without secret, account, job, endpoint, URL, or raw markup delimiters",
+        ));
+    }
+    Ok(note.to_string())
+}
+
+fn quantum_provider_assessment_request_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<QuantumProviderAssessmentRequest, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness request must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from(["provider", "artifact", "policyNote"]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness request contains missing or unsupported fields",
+        ));
+    }
+    let Some(Value::String(provider)) = fields.get("provider") else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider label must be text",
+        ));
+    };
+    if !matches!(
+        provider.as_str(),
+        "ibm-quantum" | "aws-braket" | "other-reviewed"
+    ) {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider label is not supported by the local assessment contract",
+        ));
+    }
+    let Some(Value::Map(artifact)) = fields.get("artifact") else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact must be a map",
+        ));
+    };
+    let artifact_allowed = BTreeSet::from(["format", "sourceSha256", "sourceBytes"]);
+    if artifact.len() != artifact_allowed.len()
+        || artifact
+            .keys()
+            .any(|key| !artifact_allowed.contains(key.as_str()))
+    {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact contains missing or unsupported fields",
+        ));
+    }
+    let Some(Value::String(artifact_format)) = artifact.get("format") else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact format must be text",
+        ));
+    };
+    if artifact_format != "openqasm-3.0-padma-renderer-subset" {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact format is not supported",
+        ));
+    }
+    let Some(Value::String(artifact_source_sha256)) = artifact.get("sourceSha256") else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact source SHA-256 must be text",
+        ));
+    };
+    let valid_sha256 = artifact_source_sha256.len() == 71
+        && artifact_source_sha256.starts_with("sha256:")
+        && artifact_source_sha256[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'));
+    if !valid_sha256 {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact source SHA-256 must be lowercase sha256:<64-hex>",
+        ));
+    }
+    let Some(Value::Number(source_bytes)) = artifact.get("sourceBytes") else {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact source bytes must be a whole number",
+        ));
+    };
+    if !source_bytes.is_finite()
+        || source_bytes.fract() != 0.0
+        || *source_bytes < 1.0
+        || *source_bytes > QUANTUM_PROVIDER_ARTIFACT_MAX_BYTES as f64
+    {
+        return Err(quantum_provider_assessment_error(
+            locale,
+            position,
+            "provider readiness artifact source bytes are outside the local range",
+        ));
+    }
+    let policy_note =
+        quantum_provider_public_policy_note(fields.get("policyNote"), locale, position)?;
+    Ok(QuantumProviderAssessmentRequest {
+        provider: provider.clone(),
+        artifact_format: artifact_format.clone(),
+        artifact_source_sha256: artifact_source_sha256.clone(),
+        artifact_source_bytes: *source_bytes as usize,
+        policy_note,
+    })
+}
+
+fn quantum_provider_required_controls(provider: &str) -> Value {
+    let mut controls = vec![
+        Value::String("dedicated-capability-design-required".into()),
+        Value::String("credential-reference-without-secret-storage-required".into()),
+        Value::String("fresh-visible-confirmation-before-each-remote-job-required".into()),
+        Value::String("current-cost-and-quota-disclosure-required".into()),
+        Value::String("job-identifier-cancellation-and-provenance-design-required".into()),
+        Value::String("bounded-polling-and-result-retention-policy-required".into()),
+    ];
+    if provider == "other-reviewed" {
+        controls.push(Value::String(
+            "provider-specific-adapter-security-review-required".into(),
+        ));
+    }
+    Value::List(controls)
+}
+
+fn quantum_provider_readiness_assessment(request: &QuantumProviderAssessmentRequest) -> Value {
+    Value::Map(BTreeMap::from([
+        ("assessmentVersion".into(), Value::Number(1.0)),
+        ("provider".into(), Value::String(request.provider.clone())),
+        (
+            "artifactFormat".into(),
+            Value::String(request.artifact_format.clone()),
+        ),
+        (
+            "artifactSourceSha256".into(),
+            Value::String(request.artifact_source_sha256.clone()),
+        ),
+        (
+            "artifactSourceBytes".into(),
+            Value::Number(request.artifact_source_bytes as f64),
+        ),
+        (
+            "policyNote".into(),
+            Value::String("accepted-not-returned".into()),
+        ),
+        (
+            "policyNoteBytes".into(),
+            Value::Number(request.policy_note.len() as f64),
+        ),
+        (
+            "reviewState".into(),
+            Value::String("assessment-only".into()),
+        ),
+        (
+            "requiredControls".into(),
+            quantum_provider_required_controls(&request.provider),
+        ),
+        ("capability".into(), Value::String("not-defined".into())),
+        ("authentication".into(), Value::String("disabled".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("account".into(), Value::String("not-read".into())),
+        ("endpoint".into(), Value::String("not-configured".into())),
+        ("backendSelection".into(), Value::String("disabled".into())),
+        ("costQuota".into(), Value::String("not-queried".into())),
+        ("submission".into(), Value::String("disabled".into())),
+        ("job".into(), Value::String("not-created".into())),
+        ("polling".into(), Value::String("disabled".into())),
+        ("cancellation".into(), Value::String("disabled".into())),
+        ("provenance".into(), Value::String("not-created".into())),
+        ("providerSdk".into(), Value::String("disabled".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
 }
 
 fn quantum_apply_single_qubit(
@@ -9334,6 +9589,18 @@ impl Interpreter {
                         ));
                     };
                     return quantum_assess_openqasm3(&circuit, &source, self.locale, *position);
+                }
+                if name == "quantum.provider_readiness" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let request_value = self.evaluate(&arguments[0])?;
+                    let request = quantum_provider_assessment_request_from_value(
+                        &request_value,
+                        self.locale,
+                        *position,
+                    )?;
+                    return Ok(quantum_provider_readiness_assessment(&request));
                 }
                 if name == "quantum.circuit_summary"
                     || name == "quantum.openqasm3"
@@ -16509,7 +16776,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "quantum.circuit_summary"
         | "quantum.openqasm3"
         | "quantum.simulate_probabilities"
-        | "optimize.quadratic_value" => Some((1, 1)),
+        | "optimize.quadratic_value"
+        | "quantum.provider_readiness" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
@@ -20533,6 +20801,127 @@ mod tests {
             .code,
             "P1083"
         );
+    }
+
+    #[test]
+    fn local_quantum_provider_readiness_returns_deterministic_redacted_assessment_only() {
+        let hash = format!("sha256:{}", "a".repeat(64));
+        let request = format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 128}}, \"policyNote\": \"Review current cost and cancellation controls before manual approval\"}}");
+        let source = format!("let request = {request}\nlet first = quantum.provider_readiness(request)\nlet second = quantum.provider_readiness(request)\nprint first[\"assessmentVersion\"]\nprint first[\"provider\"]\nprint first[\"artifactFormat\"]\nprint first[\"artifactSourceSha256\"]\nprint first[\"artifactSourceBytes\"]\nprint first[\"policyNote\"]\nprint first[\"policyNoteBytes\"] > 0\nprint first[\"reviewState\"]\nprint first[\"requiredControls\"][0]\nprint first[\"capability\"]\nprint first[\"authentication\"]\nprint first[\"credential\"]\nprint first[\"endpoint\"]\nprint first[\"costQuota\"]\nprint first[\"submission\"]\nprint first[\"job\"]\nprint first[\"polling\"]\nprint first[\"cancellation\"]\nprint first[\"provenance\"]\nprint first[\"providerSdk\"]\nprint first[\"qpu\"]\nprint first[\"network\"]\nprint first[\"childProcess\"]\nprint text.contains(json.stringify(first), \"manual approval\")\nprint json.stringify(first) == json.stringify(second)\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-provider-readiness"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "1",
+                "ibm-quantum",
+                "openqasm-3.0-padma-renderer-subset",
+                &hash,
+                "128",
+                "accepted-not-returned",
+                "true",
+                "assessment-only",
+                "dedicated-capability-design-required",
+                "not-defined",
+                "disabled",
+                "not-read",
+                "not-configured",
+                "not-queried",
+                "disabled",
+                "not-created",
+                "disabled",
+                "disabled",
+                "not-created",
+                "disabled",
+                "disabled",
+                "disabled",
+                "disabled",
+                "false",
+                "true",
+            ]
+        );
+        let other = format!("{{\"provider\": \"other-reviewed\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"Manual provider review is required\"}}");
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-provider-readiness-other"),
+                BTreeSet::new(),
+                &format!("let result = quantum.provider_readiness({other})\nprint result[\"requiredControls\"][6]\n"),
+            )
+            .unwrap(),
+            vec!["provider-specific-adapter-security-review-required"]
+        );
+        assert_eq!(
+            static_builtin_arity("quantum.provider_readiness"),
+            Some((1, 1))
+        );
+    }
+
+    #[test]
+    fn local_quantum_provider_readiness_rejects_unsafe_or_external_request_material() {
+        let hash = format!("sha256:{}", "a".repeat(64));
+        for request in [
+            "{}".to_string(),
+            "true".to_string(),
+            format!("{{\"provider\": \"unknown\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"Manual review\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{}}, \"policyNote\": \"Manual review\"}}"),
+            format!("{{\"provider\": \"aws-braket\", \"artifact\": {{\"format\": \"qir\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"Manual review\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"sha256:{}\", \"sourceBytes\": 1}}, \"policyNote\": \"Manual review\"}}", "A".repeat(64)),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 0}}, \"policyNote\": \"Manual review\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1.5}}, \"policyNote\": \"Manual review\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1, \"source\": \"OPENQASM 3.0;\"}}, \"policyNote\": \"Manual review\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"token value here\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"https://provider.example\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"Manual review\", \"credential\": \"secret\"}}"),
+            format!("{{\"provider\": \"ibm-quantum\", \"artifact\": {{\"format\": \"openqasm-3.0-padma-renderer-subset\", \"sourceSha256\": \"{hash}\", \"sourceBytes\": 1}}, \"policyNote\": \"Manual review\", \"submitNow\": true}}"),
+        ] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-quantum-provider-readiness-invalid"),
+                    BTreeSet::new(),
+                    &format!("print quantum.provider_readiness({request})\n"),
+                )
+                .unwrap_err()
+                .code,
+                "P1090"
+            );
+        }
+        let non_finite = Value::Map(BTreeMap::from([
+            ("provider".into(), Value::String("ibm-quantum".into())),
+            (
+                "artifact".into(),
+                Value::Map(BTreeMap::from([
+                    (
+                        "format".into(),
+                        Value::String("openqasm-3.0-padma-renderer-subset".into()),
+                    ),
+                    ("sourceSha256".into(), Value::String(hash)),
+                    ("sourceBytes".into(), Value::Number(f64::NAN)),
+                ])),
+            ),
+            ("policyNote".into(), Value::String("Manual review".into())),
+        ]));
+        assert_eq!(
+            quantum_provider_assessment_request_from_value(
+                &non_finite,
+                Locale::English,
+                Position::new(1, 1),
+            )
+            .unwrap_err()
+            .code,
+            "P1090"
+        );
+        let bangla_error = run_bridge_project(
+            &module_fixture_dir("local-quantum-provider-readiness-bangla"),
+            BTreeSet::new(),
+            "দেখাও quantum.provider_readiness({})\n",
+        )
+        .unwrap_err();
+        assert_eq!(bangla_error.code, "P1090");
+        assert!(bangla_error.message.contains("নিরাপদ বা সঠিক নয়"));
     }
 
     #[test]

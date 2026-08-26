@@ -451,4 +451,7 @@
 
 ### M37 — Provider Integration Assessment
 
-- [ ] Document, but do not implement by default, credentialed IBM/AWS/other provider adapters until a separate user-confirmed project defines capability grants, secrets handling, explicit cost/quota visibility, job confirmation/cancellation, provenance, polling limits, and security review.
+- [x] Define a strict provider-neutral, no-side-effect assessment request for declared IBM/AWS/other provider labels, reviewed program artifact metadata, and user-supplied public provider-policy notes only; reject credentials, tokens, endpoints, account/session/job IDs, URLs, circuit source, and executable action fields.
+- [x] Implement deterministic local provider readiness/required-controls output with fixed disabled transport/submission/polling/cancellation markers; do not add authentication, network, QPU selection, pricing retrieval, job creation, provider SDK, or secret access.
+- [x] Add a bilingual diagnostic and regressions for malformed/unknown/provider/action/credential fields, bounded provider notes, deterministic output, redaction/no-secret output, and no filesystem/network/process/provider side effects.
+- [x] Publish a standalone Termux assessment example, public provider-boundary contract with source citations, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.

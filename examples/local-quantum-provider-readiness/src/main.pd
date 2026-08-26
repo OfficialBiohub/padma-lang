@@ -1,0 +1,13 @@
+ধরি request = {"provider": "aws-braket", "artifact": {"format": "openqasm-3.0-padma-renderer-subset", "sourceSha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sourceBytes": 128}, "policyNote": "Manual review of current cost and cancellation controls"}
+ধরি readiness = quantum.provider_readiness(request)
+
+দেখাও readiness["provider"]
+দেখাও readiness["artifactSourceBytes"]
+দেখাও readiness["policyNote"]
+দেখাও readiness["reviewState"]
+দেখাও readiness["requiredControls"][0]
+দেখাও readiness["capability"]
+দেখাও readiness["costQuota"]
+দেখাও readiness["submission"]
+দেখাও readiness["cancellation"]
+দেখাও readiness["network"]
