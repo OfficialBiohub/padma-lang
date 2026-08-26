@@ -11,6 +11,7 @@ This feature evaluates a previously validated Padma quantum circuit **inside the
 | API | Result | Capability |
 |---|---|---|
 | `quantum.simulate_probabilities(circuit)` | Deterministic full-register basis probability map and simulator metadata. | None |
+| `quantum.expectation_pauli(circuit, observable)` | Deterministic real expectation for one strict full-register Pauli product. | None |
 
 The simulator consumes the same strict circuit map accepted by `quantum.openqasm3`. It does not add `shots`, `seed`, `provider`, `device`, `noiseModel`, `backend`, credentials, URLs, or any other fields.
 
@@ -53,7 +54,7 @@ The returned numbers are deterministic probability values, **not shot counts** o
 
 ## Explicitly not included
 
-This v1 does not provide amplitude injection/export, density matrices, mid-circuit measurement, collapse, random sampling/counts, parameterized rotations, expectation values, QAOA/QML/Grover algorithms, noise mitigation, hardware calibration, QPU selection, provider accounts, cloud transport, or results from a real quantum device.
+This v1 does not provide amplitude injection/export, density matrices, mid-circuit measurement, collapse, random sampling/counts, parameterized rotations, Pauli sums/Hamiltonians, gradients, QAOA/QML/Grover algorithms, noise mitigation, hardware calibration, QPU selection, provider accounts, cloud transport, or results from a real quantum device. Single Pauli-product expectations are documented separately in [`LOCAL-QUANTUM-OBSERVABLES.md`](LOCAL-QUANTUM-OBSERVABLES.md).
 
 ## References
 

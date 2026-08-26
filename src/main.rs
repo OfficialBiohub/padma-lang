@@ -334,6 +334,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1083") => (format!("Local quantum circuit plan is unsafe or invalid: `{detail}`"), Some("Use only supported gates and bounded local qubit/measurement maps; Padma will not run a provider, QPU, simulator, credential, network, or process.".into())),
         (Locale::Bangla, "P1084") => (format!("local quantum simulator সীমা বা state invariant অতিক্রম করেছে: `{detail}`"), Some("ছোট bounded circuit ব্যবহার করুন; এটি শুধু deterministic local probability calculation, provider/QPU/network/process execution নয়।".into())),
         (Locale::English, "P1084") => (format!("Local quantum simulator limit or state invariant failed: `{detail}`"), Some("Use a small bounded circuit; this is deterministic local probability calculation only, not provider/QPU/network/process execution.".into())),
+        (Locale::Bangla, "P1085") => (format!("local Pauli observable নিরাপদ বা সঠিক নয়: `{detail}`"), Some("Circuit-এর qubit count-এর সমান দৈর্ঘ্যের শুধু I, X, Y, Z Pauli text ব্যবহার করুন; এটি local deterministic expectation analysis, provider/QPU/network/process execution নয়।".into())),
+        (Locale::English, "P1085") => (format!("Local Pauli observable is unsafe or invalid: `{detail}`"), Some("Use only I, X, Y, Z Pauli text whose length matches the circuit qubit count; this is local deterministic expectation analysis, not provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1713,6 +1715,10 @@ fn quantum_plan_error(locale: Locale, position: Position, detail: &str) -> Padma
 
 fn quantum_simulator_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1084", position, detail)
+}
+
+fn quantum_observable_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1085", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -5092,11 +5098,11 @@ fn quantum_apply_cx(state: &mut [(f64, f64)], control: usize, target: usize) {
     }
 }
 
-fn quantum_simulation_probability_map(
+fn quantum_local_state_vector(
     circuit: &QuantumCircuitPlan,
     locale: Locale,
     position: Position,
-) -> Result<Value, PadmaError> {
+) -> Result<Vec<(f64, f64)>, PadmaError> {
     if circuit.qubits > QUANTUM_SIMULATOR_MAX_QUBITS {
         return Err(quantum_simulator_error(
             locale,
@@ -5174,6 +5180,20 @@ fn quantum_simulation_probability_map(
             "state-vector normalization is outside the local simulator tolerance",
         ));
     }
+    Ok(state)
+}
+
+fn quantum_simulation_probability_map(
+    circuit: &QuantumCircuitPlan,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let state = quantum_local_state_vector(circuit, locale, position)?;
+    let basis_count = state.len();
+    let raw_total: f64 = state
+        .iter()
+        .map(|(real, imaginary)| real * real + imaginary * imaginary)
+        .sum();
     let mut probabilities: Vec<(String, f64)> = state
         .iter()
         .enumerate()
@@ -5236,6 +5256,84 @@ fn quantum_simulation_probability_map(
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ])))
+}
+
+fn quantum_expectation_pauli(
+    circuit: &QuantumCircuitPlan,
+    observable: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    if !observable.is_ascii() || observable.len() != circuit.qubits || observable.is_empty() {
+        return Err(quantum_observable_error(
+            locale,
+            position,
+            "Pauli observable must be non-empty ASCII text with one character per qubit",
+        ));
+    }
+    let paulis: Vec<char> = observable.chars().collect();
+    if paulis
+        .iter()
+        .any(|pauli| !matches!(pauli, 'I' | 'X' | 'Y' | 'Z'))
+    {
+        return Err(quantum_observable_error(
+            locale,
+            position,
+            "Pauli observable may contain only I, X, Y, or Z",
+        ));
+    }
+    let state = quantum_local_state_vector(circuit, locale, position)?;
+    let mut real = 0.0;
+    let mut imaginary = 0.0;
+    for (basis, source) in state.iter().enumerate() {
+        let mut transformed_basis = basis;
+        let mut coefficient = (1.0, 0.0);
+        for qubit in 0..circuit.qubits {
+            match paulis[circuit.qubits - 1 - qubit] {
+                'I' => {}
+                'X' => transformed_basis ^= 1usize << qubit,
+                'Y' => {
+                    if basis & (1usize << qubit) == 0 {
+                        coefficient = (-coefficient.1, coefficient.0);
+                    } else {
+                        coefficient = (coefficient.1, -coefficient.0);
+                    }
+                    transformed_basis ^= 1usize << qubit;
+                }
+                'Z' => {
+                    if basis & (1usize << qubit) != 0 {
+                        coefficient = (-coefficient.0, -coefficient.1);
+                    }
+                }
+                _ => unreachable!("validated Pauli observable"),
+            }
+        }
+        let transformed = (
+            coefficient.0 * source.0 - coefficient.1 * source.1,
+            coefficient.0 * source.1 + coefficient.1 * source.0,
+        );
+        let target = state[transformed_basis];
+        real += target.0 * transformed.0 + target.1 * transformed.1;
+        imaginary += target.0 * transformed.1 - target.1 * transformed.0;
+    }
+    if !real.is_finite()
+        || !imaginary.is_finite()
+        || imaginary.abs() > QUANTUM_SIMULATOR_EPSILON
+        || real < -1.0 - QUANTUM_SIMULATOR_EPSILON
+        || real > 1.0 + QUANTUM_SIMULATOR_EPSILON
+    {
+        return Err(quantum_observable_error(
+            locale,
+            position,
+            "Pauli expectation is not a finite real value in the normalized range",
+        ));
+    }
+    let rounded = if real.abs() < 0.5e-12 {
+        0.0
+    } else {
+        (real * 1e12).round() / 1e12
+    };
+    Ok(Value::Number(rounded.clamp(-1.0, 1.0)))
 }
 
 fn filesystem_productivity_regular_file(
@@ -8119,6 +8217,22 @@ impl Interpreter {
                     let value = self.evaluate(&arguments[0])?;
                     let circuit = quantum_circuit_from_value(&value, self.locale, *position)?;
                     return quantum_simulation_probability_map(&circuit, self.locale, *position);
+                }
+                if name == "quantum.expectation_pauli" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let circuit_value = self.evaluate(&arguments[0])?;
+                    let observable_value = self.evaluate(&arguments[1])?;
+                    let circuit =
+                        quantum_circuit_from_value(&circuit_value, self.locale, *position)?;
+                    let observable = expect_string(
+                        &observable_value,
+                        self.locale,
+                        *position,
+                        "Pauli observable",
+                    )?;
+                    return quantum_expectation_pauli(&circuit, observable, self.locale, *position);
                 }
                 if name == "quantum.circuit_summary"
                     || name == "quantum.openqasm3"
@@ -15313,6 +15427,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "client.write_delivery_package" => Some((2, 2)),
         "client.write_template" => Some((2, 2)),
         "quantum.write_openqasm3" => Some((2, 2)),
+        "quantum.expectation_pauli" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -19287,6 +19402,93 @@ mod tests {
         assert_eq!(
             static_builtin_arity("quantum.simulate_probabilities"),
             Some((1, 1))
+        );
+    }
+
+    #[test]
+    fn local_quantum_observable_returns_deterministic_bell_pauli_expectations() {
+        let bell = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"cx\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        let source = format!("let bell = {bell}\nlet first = quantum.expectation_pauli(bell, \"ZZ\")\nlet second = quantum.expectation_pauli(bell, \"ZZ\")\nprint first\nprint quantum.expectation_pauli(bell, \"XX\")\nprint quantum.expectation_pauli(bell, \"YY\")\nprint quantum.expectation_pauli(bell, \"II\")\nprint first == second\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-observables-bell"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(output, vec!["1", "1", "-1", "1", "true"]);
+    }
+
+    #[test]
+    fn local_quantum_observable_handles_y_phase_and_pauli_string_ordering() {
+        let phase = "{\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"s\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        let product = "{\"qubits\": 2, \"operations\": [{\"gate\": \"x\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        let source = format!("let phase = {phase}\nlet product = {product}\nprint quantum.expectation_pauli(phase, \"Y\")\nprint quantum.expectation_pauli(phase, \"X\")\nprint quantum.expectation_pauli(phase, \"Z\")\nprint quantum.expectation_pauli(product, \"IZ\")\nprint quantum.expectation_pauli(product, \"ZI\")\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-observables-order"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(output, vec!["1", "0", "0", "-1", "1"]);
+    }
+
+    #[test]
+    fn local_quantum_observable_rejects_invalid_input_and_preserves_local_only_boundary() {
+        let valid = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        for observable in ["\"\"", "\"Z\"", "\"ZA\"", "\"Z🙂\""] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-quantum-observables-invalid"),
+                    BTreeSet::new(),
+                    &format!("print quantum.expectation_pauli({valid}, {observable})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1085"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-observables-type"),
+                BTreeSet::new(),
+                &format!("print quantum.expectation_pauli({valid}, true)\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1010"
+        );
+        let measurements = (0..13)
+            .map(|index| format!("{{\"qubit\": {index}, \"bit\": {index}}}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let oversized = format!("{{\"qubits\": 13, \"operations\": [{{\"gate\": \"h\", \"targets\": [0]}}], \"measurements\": [{measurements}]}}");
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-observables-limit"),
+                BTreeSet::new(),
+                &format!(
+                    "print quantum.expectation_pauli({oversized}, \"{}\")\n",
+                    "I".repeat(13)
+                )
+            )
+            .unwrap_err()
+            .code,
+            "P1084"
+        );
+        let provider = "{\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}], \"provider\": \"remote\"}";
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-observables-provider"),
+                BTreeSet::new(),
+                &format!("print quantum.expectation_pauli({provider}, \"Z\")\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1083"
+        );
+        assert_eq!(
+            static_builtin_arity("quantum.expectation_pauli"),
+            Some((2, 2))
         );
     }
 

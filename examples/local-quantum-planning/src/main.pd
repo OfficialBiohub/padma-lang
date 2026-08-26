@@ -7,5 +7,7 @@
 দেখাও text.format("Provider: {provider}", summary)
 দেখাও simulation["probabilities"]["00"]
 দেখাও simulation["probabilities"]["11"]
+দেখাও quantum.expectation_pauli(circuit, "ZZ")
+দেখাও quantum.expectation_pauli(circuit, "XX")
 দেখাও text.contains(quantum.openqasm3(circuit), "OPENQASM 3.0;")
 দেখাও quantum.write_openqasm3("out/bell-plan.qasm", circuit)

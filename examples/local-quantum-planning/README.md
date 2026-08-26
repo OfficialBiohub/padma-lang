@@ -19,13 +19,15 @@ Operations: 2
 Provider: not-configured
 0.5
 0.5
+1
+1
 true
 true
 ```
 
-The `superposition` operation expands to a Hadamard instruction for each listed target and `entangle-linear` expands to a linear `cx` chain. The bounded local simulator starts from `|00⟩` and returns deterministic all-basis probabilities; for this circuit, only `00` and `11` have probability `0.5`. Padma then writes static qubit/bit declarations, reset, gates, and declared measurement mappings in deterministic order.
+The `superposition` operation expands to a Hadamard instruction for each listed target and `entangle-linear` expands to a linear `cx` chain. The bounded local simulator starts from `|00⟩` and returns deterministic all-basis probabilities; for this circuit, only `00` and `11` have probability `0.5`. The next two output lines are the `ZZ` and `XX` Pauli-product expectations, both `1` for this Bell-style state. Padma then writes static qubit/bit declarations, reset, gates, and declared measurement mappings in deterministic order.
 
-The `filesystem = ["write"]` grant only permits the project-local `.qasm` output; `quantum.simulate_probabilities` itself needs no capability. This example does **not** return sampled measurement counts, validate a quantum algorithm, estimate performance, access IBM Quantum/Amazon Braket/any provider, read credentials, send a network request, submit a quantum task, or start a process.
+The `filesystem = ["write"]` grant only permits the project-local `.qasm` output; `quantum.simulate_probabilities` and `quantum.expectation_pauli` need no capability. This example does **not** return sampled measurement counts, evaluate a Pauli sum/Hamiltonian or quantum algorithm, estimate performance, access IBM Quantum/Amazon Braket/any provider, read credentials, send a network request, submit a quantum task, or start a process.
 
 Remove the generated plan when finished:
 

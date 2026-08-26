@@ -406,3 +406,10 @@
 - [x] Implement local state-vector evolution for the v1 gate subset and full-register computational-basis probability distribution; reject unsupported partial-measurement/collapse semantics until separately modelled.
 - [x] Add localized diagnostics and regression tests for resource limits, unsupported/invalid operations, numeric normalization, Bell-style entanglement probability, deterministic ordering, no provider/QPU/network/process/credential access, and no external side effect.
 - [x] Publish an updated Termux example, simulator contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
+
+## M31 — Local Pauli Observable Analysis
+
+- [x] Define a strict fixed-length Pauli-string observable contract over the existing 12-qubit local simulator, using only `I`, `X`, `Y`, and `Z` with an explicit qubit-to-string ordering.
+- [x] Implement deterministic real expectation-value evaluation `⟨ψ|P|ψ⟩` for the existing local state vector, bounded numeric rounding, and no sampled measurement, parameter optimisation, cloud execution, provider, credential, network, or process action.
+- [x] Add bilingual diagnostics and regressions for invalid/empty/wrong-length/non-Pauli observable text, numeric invariants, Bell-state `ZZ`/`XX`, product-state expectations, deterministic output, resource limits, and no external side effect.
+- [x] Publish an updated Termux example, observable contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
