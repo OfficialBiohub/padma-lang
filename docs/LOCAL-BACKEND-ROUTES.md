@@ -19,7 +19,7 @@ M39 Padma-তে beginner-friendly backend foundation-এর প্রথম rou
 
 ## Capability boundary
 
-এই helper-এর জন্য capability grant লাগে না, কারণ এটি pure local data transformation। Existing `padma serve .` আলাদা CLI capability: সেটি শুধু `127.0.0.1:8080/health` loopback health endpoint চালায় এবং project manifest-এ `server:local` grant চায়। M39 route helper এখনও custom routes-কে socket listener-এ attach করে না। সেই পরের increment-এর জন্য request-body limits, graceful shutdown, timeout, route dispatch lifecycle, observability, authentication, database transaction policy, এবং production deployment model আলাদা করে design/test করতে হবে।
+এই helper-এর জন্য capability grant লাগে না, কারণ এটি pure local data transformation। M40-এ existing `padma serve .`-এর সঙ্গে project-root-এর `server-routes.json` যুক্ত হয়েছে। Manifest-এ `server:local` grant থাকলে server fixed `127.0.0.1:8080` loopback-এ bind করে, route file validate করে, bounded HTTP request নেয়, এবং `server.route_response` semantics ব্যবহার করে JSON response দেয়। `server-routes.json` না থাকলে কেবল `/health` endpoint থাকে। Ctrl-C দিয়ে process বন্ধ করা যায়; server public interface-এ bind করে না।
 
 এটি educational website, government portal, e-commerce API, বা public production server নয়। এগুলোর জন্য পরের ধাপে database schema, authentication/authorization, validation, audit, rate limits, deployment, backup, and operational review লাগবে। এই milestone কেবল একই route semantics beginner-friendlyভাবে practice করার নিরাপদ building block।
 
@@ -29,14 +29,28 @@ M39 Padma-তে beginner-friendly backend foundation-এর প্রথম rou
 
 ## Termux
 
+প্রথমে pure route helper দেখুন:
+
 ```sh
-cd ~/padma-lang
-cargo build --release
-cd examples/local-backend-routes
+cd ~/padma-lang/examples/local-backend-routes
 ../../target/release/padma .
 ```
 
-এই example local response maps print করে; এটি network server চালায় না।
+তারপর actual loopback server চালান:
+
+```sh
+../../target/release/padma serve .
+```
+
+অন্য Termux session থেকে পরীক্ষা করুন:
+
+```sh
+curl --noproxy '*' -i http://127.0.0.1:8080/students
+curl --noproxy '*' -i http://127.0.0.1:8080/products
+curl --noproxy '*' -i http://127.0.0.1:8080/missing
+```
+
+Server বন্ধ করতে server session-এ `Ctrl-C` চাপুন। `server-routes.json` project root-এর বাইরে পড়া হয় না; এটি public network server নয়।
 
 ## Related references
 

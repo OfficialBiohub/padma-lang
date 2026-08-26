@@ -469,3 +469,10 @@
 - [x] Implement deterministic in-memory route matching and JSON response envelopes with bounded paths/routes/bodies, 404 fallback, no socket/network/process side effect, bilingual P1091, and positive/negative regression tests.
 - [x] Publish beginner-facing documentation and an education/e-commerce-style Termux example.
 - [x] Run the full repository verification, focused commit, and GitHub push before marking M39 complete.
+
+## M40 — Fixed Local Loopback Route Server
+
+- [x] Define a fixed loopback-only server contract using explicit `server:local` capability, safe bind policy, bounded request/header/body limits, route-map loading rules, and no public-interface or remote deployment behavior.
+- [x] Implement custom route dispatch over `server.route_response`, bounded HTTP parsing/response writing, request rejection, fixed port policy, and graceful shutdown without callbacks, arbitrary processes, database access, authentication, payment, or cloud actions.
+- [x] Add integration and negative security tests for loopback binding, malformed/oversized requests, unknown routes, unsafe route files, missing capability, deterministic JSON responses, shutdown, and no external side effects; add a Termux smoke workflow.
+- [x] Publish beginner backend documentation and education/government/e-commerce boundaries, then run full repository verification, focused commit, and GitHub push before marking M40 complete.

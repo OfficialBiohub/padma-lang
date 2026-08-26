@@ -1,0 +1,20 @@
+[
+  {
+    "method": "GET",
+    "path": "/health",
+    "status": 200,
+    "body": {"status": "ok", "project": "local-backend-routes"}
+  },
+  {
+    "method": "GET",
+    "path": "/students",
+    "status": 200,
+    "body": {"ok": true, "items": ["Rafi", "Mitu"]}
+  },
+  {
+    "method": "GET",
+    "path": "/products",
+    "status": 200,
+    "body": {"ok": true, "items": [{"name": "খাতা", "price": 50}]}
+  }
+]

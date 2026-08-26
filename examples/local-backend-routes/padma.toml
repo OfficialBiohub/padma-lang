@@ -3,3 +3,6 @@ name = "local-backend-routes"
 version = "0.1.0"
 entry = "src/main.pd"
 locale = "bn"
+
+[capabilities]
+server = ["local"]

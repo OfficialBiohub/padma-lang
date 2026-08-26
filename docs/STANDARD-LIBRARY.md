@@ -215,7 +215,7 @@ The only v1 objective has equal-length `parameters`, `targets`, positive `weight
 
 The request method is one of `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`; the ASCII path starts with `/`, is at most 128 bytes, and has no query, fragment, whitespace, or `..` traversal. Every route has exactly `method`, `path`, `status`, and `body`; status is an integer from `100` through `599`, and the finite JSON body is at most 256 KiB. Duplicate method/path routes and unknown fields are rejected with `P1091`. A missing route returns a deterministic 404 envelope. See [`LOCAL-BACKEND-ROUTES.md`](LOCAL-BACKEND-ROUTES.md).
 
-This helper is a response-routing foundation, not a custom socket server or a full backend framework. Existing `padma serve .` remains a separate loopback health server requiring `server:local`; it does not automatically attach these routes. Authentication, database transactions, request-body parsing, rate limits, audit logging, public deployment, payment, and e-commerce checkout are separate future capabilities.
+This helper is the deterministic route-dispatch layer used by the fixed local server. `padma serve .` requires `server:local`, reads only the optional project-root `server-routes.json`, binds only to `127.0.0.1:8080`, applies bounded request/header/body limits, and returns JSON responses for exact method/path matches. It can be stopped with the terminal interrupt signal. Authentication, database transactions, rate limits, audit logging, public deployment, payment, and e-commerce checkout are separate future capabilities. The server does not bind a public interface or start arbitrary callbacks/processes.
 
 ## Interoperability bridge
 

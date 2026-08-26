@@ -17617,6 +17617,64 @@ fn write_local_server_response(stream: &mut TcpStream, status: &str, body: &str)
     )
 }
 
+const LOCAL_SERVER_MAX_REQUEST_BYTES: usize = 16 * 1024;
+const LOCAL_SERVER_ROUTES_FILE: &str = "server-routes.json";
+
+fn load_local_server_routes(directory: &Path) -> Result<Option<Value>, String> {
+    let path = directory.join(LOCAL_SERVER_ROUTES_FILE);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("P1091: server route file metadata could not be read".into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("P1091: server route file must be a regular project-local file".into());
+    }
+    if metadata.len() > LOCAL_BACKEND_ROUTE_MAX_BODY_BYTES as u64 {
+        return Err("P1091: server route file exceeds the local byte limit".into());
+    }
+    let text = fs::read_to_string(&path)
+        .map_err(|_| "P1091: server route file must be UTF-8 JSON".to_string())?;
+    let json: JsonValue = serde_json::from_str(&text)
+        .map_err(|_| "P1091: server route file is not valid JSON".to_string())?;
+    let routes = value_from_json(json)
+        .map_err(|_| "P1091: server route JSON contains unsupported values".to_string())?;
+    let probe = Value::Map(BTreeMap::from([
+        ("method".into(), Value::String("GET".into())),
+        ("path".into(), Value::String("/__padma_route_probe".into())),
+    ]));
+    local_backend_route_response(&probe, &routes, Locale::English, Position::new(1, 1))
+        .map_err(|error| format!("{}: invalid server route schema", error.code))?;
+    Ok(Some(routes))
+}
+
+fn parse_local_http_request(bytes: &[u8]) -> Result<Value, &'static str> {
+    if bytes.is_empty() || bytes.len() > LOCAL_SERVER_MAX_REQUEST_BYTES {
+        return Err("request exceeds the local byte limit");
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| "request must be UTF-8")?;
+    let header_end = text
+        .find("\r\n\r\n")
+        .ok_or("request headers are incomplete")?;
+    let headers = &text[..header_end];
+    let mut lines = headers.lines();
+    let request_line = lines.next().ok_or("request line is missing")?;
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+    if parts.len() != 3 || !matches!(parts[2], "HTTP/1.0" | "HTTP/1.1") {
+        return Err("request line must use HTTP/1.0 or HTTP/1.1");
+    }
+    for header in lines {
+        let lower = header.to_ascii_lowercase();
+        if lower.starts_with("content-length:") || lower.starts_with("transfer-encoding:") {
+            return Err("request bodies are not supported in this bounded increment");
+        }
+    }
+    Ok(Value::Map(BTreeMap::from([
+        ("method".into(), Value::String(parts[0].into())),
+        ("path".into(), Value::String(parts[1].into())),
+    ])))
+}
+
 fn serve_local_project(directory: &Path) -> Result<(), String> {
     let (manifest, _) = load_project_manifest(directory)?;
     if !manifest.capabilities.contains("server:local") {
@@ -17639,36 +17697,115 @@ fn serve_local_project(directory: &Path) -> Result<(), String> {
         ));
     }
 
+    let routes = load_local_server_routes(directory)?;
     let listener = TcpListener::bind("127.0.0.1:8080")
         .map_err(|error| format!("cannot bind loopback server: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("cannot configure loopback server: {error}"))?;
     println!(
-        "Padma local server for `{}`: http://127.0.0.1:8080/health",
+        "Padma local server for `{}`: http://127.0.0.1:8080/health (Ctrl-C to stop)",
         manifest.name
     );
-    for incoming in listener.incoming() {
-        let mut stream = match incoming {
-            Ok(stream) => stream,
-            Err(_) => continue,
+    if routes.is_some() {
+        println!("Custom routes: server-routes.json");
+    }
+    loop {
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
+                continue;
+            }
+            Err(error) => return Err(format!("loopback server accept failed: {error}")),
         };
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let mut request = [0u8; 8192];
-        let read = stream.read(&mut request).unwrap_or(0);
-        let first_line = std::str::from_utf8(&request[..read])
-            .ok()
-            .and_then(|text| text.lines().next())
-            .unwrap_or("");
-        let (status, body) =
-            if first_line.starts_with("GET /health ") || first_line.starts_with("HEAD /health ") {
-                (
-                    "200 OK",
-                    serde_json::json!({"status":"ok", "project":manifest.name}).to_string(),
-                )
-            } else {
-                ("404 Not Found", "{\"error\":\"not found\"}".to_string())
-            };
-        let _ = write_local_server_response(&mut stream, status, &body);
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+        let mut request = Vec::with_capacity(1024);
+        let mut buffer = [0u8; 1024];
+        let parsed_request = loop {
+            if request.len() >= LOCAL_SERVER_MAX_REQUEST_BYTES {
+                break Err("request exceeds the local byte limit");
+            }
+            let read = stream.read(&mut buffer).unwrap_or(0);
+            if read == 0 {
+                break parse_local_http_request(&request);
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break parse_local_http_request(&request);
+            }
+        };
+        let (status, body) = match parsed_request {
+            Ok(request) => {
+                if let Some(routes) = routes.as_ref() {
+                    match local_backend_route_response(
+                        &request,
+                        routes,
+                        if manifest.locale == "bn" {
+                            Locale::Bangla
+                        } else {
+                            Locale::English
+                        },
+                        Position::new(1, 1),
+                    ) {
+                        Ok(Value::Map(response)) => {
+                            let status = response
+                                .get("status")
+                                .and_then(|value| match value {
+                                    Value::Number(number) => Some(*number as u16),
+                                    _ => None,
+                                })
+                                .unwrap_or(500);
+                            let reason = response
+                                .get("statusText")
+                                .and_then(|value| match value {
+                                    Value::String(text) => Some(text.as_str()),
+                                    _ => None,
+                                })
+                                .unwrap_or("Internal Server Error");
+                            let body = response
+                                .get("body")
+                                .and_then(|value| match value {
+                                    Value::String(text) => Some(text.clone()),
+                                    _ => None,
+                                })
+                                .unwrap_or_else(|| "{\"error\":\"invalid response\"}".into());
+                            (format!("{status} {reason}"), body)
+                        }
+                        Ok(_) => (
+                            "500 Internal Server Error".into(),
+                            "{\"error\":\"invalid response\"}".into(),
+                        ),
+                        Err(_) => (
+                            "400 Bad Request".into(),
+                            "{\"error\":\"invalid route request\"}".into(),
+                        ),
+                    }
+                } else {
+                    let is_health = matches!(
+                        request,
+                        Value::Map(ref values)
+                            if values.get("method") == Some(&Value::String("GET".into()))
+                                && values.get("path") == Some(&Value::String("/health".into()))
+                    );
+                    if is_health {
+                        (
+                            "200 OK".into(),
+                            serde_json::json!({"status":"ok", "project":manifest.name}).to_string(),
+                        )
+                    } else {
+                        ("404 Not Found".into(), "{\"error\":\"not found\"}".into())
+                    }
+                }
+            }
+            Err(_) => (
+                "400 Bad Request".into(),
+                "{\"error\":\"bad request\"}".into(),
+            ),
+        };
+        let _ = write_local_server_response(&mut stream, &status, &body);
     }
-    Ok(())
 }
 
 fn main() {
@@ -18999,6 +19136,52 @@ mod tests {
         assert!(error.starts_with("P1034"));
         assert!(error.contains("server:local"));
         assert!(error.contains("[capabilities]"));
+    }
+
+    #[test]
+    fn local_http_request_parser_enforces_bounded_header_contract() {
+        let request =
+            parse_local_http_request(b"GET /students HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
+        assert_eq!(
+            request,
+            Value::Map(BTreeMap::from([
+                ("method".into(), Value::String("GET".into())),
+                ("path".into(), Value::String("/students".into())),
+            ]))
+        );
+        assert!(parse_local_http_request(
+            b"POST /students HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"
+        )
+        .is_err());
+        assert!(parse_local_http_request(b"GET /students HTTP/2.0\r\n\r\n").is_err());
+        assert!(parse_local_http_request(b"GET /students HTTP/1.1\r\n").is_err());
+        assert!(parse_local_http_request(&vec![b'x'; LOCAL_SERVER_MAX_REQUEST_BYTES + 1]).is_err());
+        assert!(parse_local_http_request(&[0xff, 0xfe, 0xfd, b'\r', b'\n', b'\r', b'\n']).is_err());
+    }
+
+    #[test]
+    fn local_server_route_file_is_project_local_and_schema_validated() {
+        let root = module_fixture_dir("local-server-routes");
+        fs::write(
+            root.join(LOCAL_SERVER_ROUTES_FILE),
+            "[{\"method\":\"GET\",\"path\":\"/health\",\"status\":200,\"body\":{\"ok\":true}}]",
+        )
+        .unwrap();
+        let routes = load_local_server_routes(&root).unwrap().unwrap();
+        let request = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/health".into())),
+        ]));
+        let response =
+            local_backend_route_response(&request, &routes, Locale::English, Position::new(1, 1))
+                .unwrap();
+        match response {
+            Value::Map(map) => assert_eq!(map.get("status"), Some(&Value::Number(200.0))),
+            other => panic!("unexpected route response: {other:?}"),
+        }
+        fs::write(root.join(LOCAL_SERVER_ROUTES_FILE), "{\"unsafe\":true}").unwrap();
+        assert!(load_local_server_routes(&root).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
