@@ -437,7 +437,10 @@
 
 ### M35 — Bounded Classical Optimisation Building Blocks
 
-- [ ] Add explicitly bounded deterministic classical numerical primitives suitable for local variational experiments only after parameter and Hamiltonian contracts exist; do not claim QAOA/VQE/QML frameworks until each algorithm and test suite exists.
+- [x] Define a strict bounded separable quadratic objective map over explicit real parameter vectors, with exact target vectors and finite positive weights only; do not accept executable code, callbacks, URLs, files, provider, quantum job, or symbolic fields.
+- [x] Implement deterministic local objective evaluation, centered finite-difference gradient, and one projected gradient-descent step proposal with explicit learning rate/epsilon/bounds; return no mutation and no loop/auto-run authority.
+- [x] Add bilingual diagnostics and regressions for malformed/unknown maps, non-finite/mismatched/out-of-range vectors, invalid learning/epsilon/bounds, known objective/gradient/step values, deterministic output, no filesystem/network/process/provider/QPU action, and no optimizer loop claim.
+- [x] Publish a Termux objective/gradient/step example, public contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
 
 ### M36 — Quantum Program Tooling and Interchange
 

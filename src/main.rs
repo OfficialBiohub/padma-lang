@@ -340,6 +340,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1086") => (format!("Local quantum sampling request is unsafe or invalid: `{detail}`"), Some("Use only explicit bounded whole-number shots and seed values; Padma returns local seeded counts, not provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1087") => (format!("local Pauli Hamiltonian নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded unique full-register I/X/Y/Z term ও finite real coefficient ব্যবহার করুন; Padma deterministic local energy দেবে, optimizer/provider/QPU/network/process execution নয়।".into())),
         (Locale::English, "P1087") => (format!("Local Pauli Hamiltonian is unsafe or invalid: `{detail}`"), Some("Use only bounded unique full-register I/X/Y/Z terms and finite real coefficients; Padma returns deterministic local energy, not optimizer/provider/QPU/network/process execution.".into())),
+        (Locale::Bangla, "P1088") => (format!("local optimisation request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded finite quadratic objective, epsilon, ও learning rate ব্যবহার করুন; Padma একবারের pure local calculation দেবে, loop/callback/provider/QPU/network/process execution নয়।".into())),
+        (Locale::English, "P1088") => (format!("Local optimisation request is unsafe or invalid: `{detail}`"), Some("Use only bounded finite quadratic objectives, epsilon, and learning rates; Padma returns one pure local calculation, not loop/callback/provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1731,6 +1733,10 @@ fn quantum_sampler_error(locale: Locale, position: Position, detail: &str) -> Pa
 
 fn quantum_hamiltonian_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1087", position, detail)
+}
+
+fn local_optimization_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1088", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4755,6 +4761,11 @@ const QUANTUM_SAMPLER_MAX_SHOTS: usize = 100_000;
 const QUANTUM_SAMPLER_MAX_SEED: u64 = 9_007_199_254_740_991;
 const QUANTUM_HAMILTONIAN_MAX_TERMS: usize = 64;
 const QUANTUM_HAMILTONIAN_MAX_COEFFICIENT: f64 = 1_000_000.0;
+const LOCAL_OPTIMIZATION_MAX_PARAMETERS: usize = 16;
+const LOCAL_OPTIMIZATION_MAX_ABS_VALUE: f64 = 1_000_000.0;
+const LOCAL_OPTIMIZATION_MIN_EPSILON: f64 = 0.000_001;
+const LOCAL_OPTIMIZATION_MAX_EPSILON: f64 = 1.0;
+const LOCAL_OPTIMIZATION_MAX_LEARNING_RATE: f64 = 1.0;
 
 #[derive(Clone, Debug)]
 struct QuantumOperation {
@@ -4791,6 +4802,21 @@ struct QuantumHamiltonianTerm {
 #[derive(Clone, Debug)]
 struct QuantumHamiltonian {
     terms: Vec<QuantumHamiltonianTerm>,
+}
+
+#[derive(Clone, Debug)]
+struct LocalQuadraticObjective {
+    parameters: Vec<f64>,
+    targets: Vec<f64>,
+    weights: Vec<f64>,
+    lower_bounds: Vec<f64>,
+    upper_bounds: Vec<f64>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LocalOptimizationStepSettings {
+    learning_rate: f64,
+    epsilon: f64,
 }
 
 fn quantum_index(
@@ -5837,6 +5863,390 @@ fn quantum_expectation_hamiltonian(
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ])))
+}
+
+fn local_optimization_vector(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<f64>, PadmaError> {
+    let Some(Value::List(values)) = value else {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation vector field must be a list",
+        ));
+    };
+    if values.is_empty() || values.len() > LOCAL_OPTIMIZATION_MAX_PARAMETERS {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation vector length is outside the local limit",
+        ));
+    }
+    let mut parsed = Vec::with_capacity(values.len());
+    for value in values {
+        let Value::Number(number) = value else {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local optimisation vector entries must be real numbers",
+            ));
+        };
+        if !number.is_finite() || number.abs() > LOCAL_OPTIMIZATION_MAX_ABS_VALUE {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local optimisation vector entry is outside the finite local range",
+            ));
+        }
+        parsed.push(*number);
+    }
+    if field.is_empty() {
+        unreachable!("local optimisation vector field names are non-empty")
+    }
+    Ok(parsed)
+}
+
+fn local_quadratic_objective_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<LocalQuadraticObjective, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local quadratic objective must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "parameters",
+        "targets",
+        "weights",
+        "lowerBounds",
+        "upperBounds",
+    ]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local quadratic objective contains missing or unsupported fields",
+        ));
+    }
+    let parameters =
+        local_optimization_vector(fields.get("parameters"), "parameters", locale, position)?;
+    let targets = local_optimization_vector(fields.get("targets"), "targets", locale, position)?;
+    let weights = local_optimization_vector(fields.get("weights"), "weights", locale, position)?;
+    let lower_bounds =
+        local_optimization_vector(fields.get("lowerBounds"), "lowerBounds", locale, position)?;
+    let upper_bounds =
+        local_optimization_vector(fields.get("upperBounds"), "upperBounds", locale, position)?;
+    let length = parameters.len();
+    if targets.len() != length
+        || weights.len() != length
+        || lower_bounds.len() != length
+        || upper_bounds.len() != length
+    {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local quadratic objective vectors must have equal length",
+        ));
+    }
+    for index in 0..length {
+        if weights[index] <= 0.0 {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local quadratic weights must be positive",
+            ));
+        }
+        if lower_bounds[index] >= upper_bounds[index] {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local quadratic lower bound must be less than upper bound",
+            ));
+        }
+        if parameters[index] < lower_bounds[index] || parameters[index] > upper_bounds[index] {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local quadratic parameter is outside its declared bounds",
+            ));
+        }
+    }
+    Ok(LocalQuadraticObjective {
+        parameters,
+        targets,
+        weights,
+        lower_bounds,
+        upper_bounds,
+    })
+}
+
+fn local_optimization_round(value: f64) -> f64 {
+    if value.abs() < 0.5e-9 {
+        0.0
+    } else {
+        (value * 1e9).round() / 1e9
+    }
+}
+
+fn local_quadratic_value_for(
+    objective: &LocalQuadraticObjective,
+    parameters: &[f64],
+    locale: Locale,
+    position: Position,
+) -> Result<f64, PadmaError> {
+    if parameters.len() != objective.parameters.len() {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local quadratic parameter vector length changed unexpectedly",
+        ));
+    }
+    let mut result = 0.0;
+    for index in 0..parameters.len() {
+        let parameter = parameters[index];
+        if !parameter.is_finite() || parameter.abs() > LOCAL_OPTIMIZATION_MAX_ABS_VALUE {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local quadratic evaluation parameter is outside the finite local range",
+            ));
+        }
+        let difference = parameter - objective.targets[index];
+        let contribution = objective.weights[index] * difference * difference;
+        if !contribution.is_finite() || contribution > LOCAL_OPTIMIZATION_MAX_ABS_VALUE {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local quadratic contribution is outside the finite local range",
+            ));
+        }
+        result += contribution;
+        if !result.is_finite() || result > LOCAL_OPTIMIZATION_MAX_ABS_VALUE {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "local quadratic objective value is outside the finite local range",
+            ));
+        }
+    }
+    Ok(result)
+}
+
+fn local_optimization_epsilon(
+    objective: &LocalQuadraticObjective,
+    epsilon: f64,
+    locale: Locale,
+    position: Position,
+) -> Result<(), PadmaError> {
+    if !epsilon.is_finite()
+        || !(LOCAL_OPTIMIZATION_MIN_EPSILON..=LOCAL_OPTIMIZATION_MAX_EPSILON).contains(&epsilon)
+    {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "finite-difference epsilon is outside the local range",
+        ));
+    }
+    for index in 0..objective.parameters.len() {
+        if objective.parameters[index] - objective.lower_bounds[index] <= epsilon
+            || objective.upper_bounds[index] - objective.parameters[index] <= epsilon
+        {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "parameters must remain epsilon-interior to their declared bounds",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn local_optimization_gradient(
+    objective: &LocalQuadraticObjective,
+    epsilon: f64,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<f64>, PadmaError> {
+    local_optimization_epsilon(objective, epsilon, locale, position)?;
+    let mut gradient = Vec::with_capacity(objective.parameters.len());
+    for index in 0..objective.parameters.len() {
+        let mut upper = objective.parameters.clone();
+        let mut lower = objective.parameters.clone();
+        upper[index] += epsilon;
+        lower[index] -= epsilon;
+        let upper_value = local_quadratic_value_for(objective, &upper, locale, position)?;
+        let lower_value = local_quadratic_value_for(objective, &lower, locale, position)?;
+        let value = (upper_value - lower_value) / (2.0 * epsilon);
+        if !value.is_finite() || value.abs() > LOCAL_OPTIMIZATION_MAX_ABS_VALUE {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "finite-difference gradient is outside the local range",
+            ));
+        }
+        gradient.push(value);
+    }
+    Ok(gradient)
+}
+
+fn local_optimization_step_settings_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<LocalOptimizationStepSettings, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation settings must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from(["learningRate", "epsilon"]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation settings contain missing or unsupported fields",
+        ));
+    }
+    let Some(Value::Number(learning_rate)) = fields.get("learningRate") else {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation learning rate must be a real number",
+        ));
+    };
+    if !learning_rate.is_finite()
+        || *learning_rate <= 0.0
+        || *learning_rate > LOCAL_OPTIMIZATION_MAX_LEARNING_RATE
+    {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation learning rate is outside the local range",
+        ));
+    }
+    let Some(Value::Number(epsilon)) = fields.get("epsilon") else {
+        return Err(local_optimization_error(
+            locale,
+            position,
+            "local optimisation epsilon must be a real number",
+        ));
+    };
+    Ok(LocalOptimizationStepSettings {
+        learning_rate: *learning_rate,
+        epsilon: *epsilon,
+    })
+}
+
+fn local_optimization_status(method: &str) -> BTreeMap<String, Value> {
+    BTreeMap::from([
+        ("method".into(), Value::String(method.into())),
+        ("iteration".into(), Value::String("not-run".into())),
+        ("execution".into(), Value::String("disabled".into())),
+        ("mutation".into(), Value::String("disabled".into())),
+        ("callback".into(), Value::String("disabled".into())),
+        ("provider".into(), Value::String("not-configured".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ])
+}
+
+fn local_optimization_values(values: &[f64]) -> Value {
+    Value::List(
+        values
+            .iter()
+            .map(|value| Value::Number(local_optimization_round(*value)))
+            .collect(),
+    )
+}
+
+fn local_optimization_quadratic_value(
+    objective: &LocalQuadraticObjective,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    Ok(Value::Number(local_optimization_round(
+        local_quadratic_value_for(objective, &objective.parameters, locale, position)?,
+    )))
+}
+
+fn local_optimization_finite_difference_gradient(
+    objective: &LocalQuadraticObjective,
+    epsilon: f64,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let gradient = local_optimization_gradient(objective, epsilon, locale, position)?;
+    let value = local_quadratic_value_for(objective, &objective.parameters, locale, position)?;
+    let mut result = local_optimization_status("local-centered-finite-difference-v1");
+    result.insert(
+        "objectiveValue".into(),
+        Value::Number(local_optimization_round(value)),
+    );
+    result.insert("gradient".into(), local_optimization_values(&gradient));
+    result.insert(
+        "epsilon".into(),
+        Value::Number(local_optimization_round(epsilon)),
+    );
+    Ok(Value::Map(result))
+}
+
+fn local_optimization_projected_gradient_step(
+    objective: &LocalQuadraticObjective,
+    settings: LocalOptimizationStepSettings,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let gradient = local_optimization_gradient(objective, settings.epsilon, locale, position)?;
+    let before = local_quadratic_value_for(objective, &objective.parameters, locale, position)?;
+    let mut proposed = Vec::with_capacity(objective.parameters.len());
+    for index in 0..objective.parameters.len() {
+        let value = (objective.parameters[index] - settings.learning_rate * gradient[index])
+            .clamp(objective.lower_bounds[index], objective.upper_bounds[index]);
+        if !value.is_finite() || value.abs() > LOCAL_OPTIMIZATION_MAX_ABS_VALUE {
+            return Err(local_optimization_error(
+                locale,
+                position,
+                "projected local optimisation parameter is outside the finite local range",
+            ));
+        }
+        proposed.push(value);
+    }
+    let after = local_quadratic_value_for(objective, &proposed, locale, position)?;
+    let mut result = local_optimization_status("local-projected-gradient-step-v1");
+    result.insert(
+        "objectiveBefore".into(),
+        Value::Number(local_optimization_round(before)),
+    );
+    result.insert("gradient".into(), local_optimization_values(&gradient));
+    result.insert(
+        "proposedParameters".into(),
+        local_optimization_values(&proposed),
+    );
+    result.insert(
+        "objectiveAfter".into(),
+        Value::Number(local_optimization_round(after)),
+    );
+    result.insert(
+        "learningRate".into(),
+        Value::Number(local_optimization_round(settings.learning_rate)),
+    );
+    result.insert(
+        "epsilon".into(),
+        Value::Number(local_optimization_round(settings.epsilon)),
+    );
+    result.insert("proposalOnly".into(), Value::Boolean(true));
+    Ok(Value::Map(result))
 }
 
 fn filesystem_productivity_regular_file(
@@ -8712,6 +9122,66 @@ impl Interpreter {
                         error_for(self.locale, "P1015", *position, "template output path")
                     })?;
                     return Ok(Value::Boolean(true));
+                }
+                if name == "optimize.quadratic_value" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let objective_value = self.evaluate(&arguments[0])?;
+                    let objective = local_quadratic_objective_from_value(
+                        &objective_value,
+                        self.locale,
+                        *position,
+                    )?;
+                    return local_optimization_quadratic_value(&objective, self.locale, *position);
+                }
+                if name == "optimize.finite_difference_gradient" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let objective_value = self.evaluate(&arguments[0])?;
+                    let epsilon_value = self.evaluate(&arguments[1])?;
+                    let objective = local_quadratic_objective_from_value(
+                        &objective_value,
+                        self.locale,
+                        *position,
+                    )?;
+                    let Value::Number(epsilon) = epsilon_value else {
+                        return Err(local_optimization_error(
+                            self.locale,
+                            *position,
+                            "finite-difference epsilon must be a real number",
+                        ));
+                    };
+                    return local_optimization_finite_difference_gradient(
+                        &objective,
+                        epsilon,
+                        self.locale,
+                        *position,
+                    );
+                }
+                if name == "optimize.projected_gradient_step" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let objective_value = self.evaluate(&arguments[0])?;
+                    let settings_value = self.evaluate(&arguments[1])?;
+                    let objective = local_quadratic_objective_from_value(
+                        &objective_value,
+                        self.locale,
+                        *position,
+                    )?;
+                    let settings = local_optimization_step_settings_from_value(
+                        &settings_value,
+                        self.locale,
+                        *position,
+                    )?;
+                    return local_optimization_projected_gradient_step(
+                        &objective,
+                        settings,
+                        self.locale,
+                        *position,
+                    );
                 }
                 if name == "quantum.simulate_probabilities" {
                     if arguments.len() != 1 {
@@ -15943,7 +16413,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.template_markdown"
         | "quantum.circuit_summary"
         | "quantum.openqasm3"
-        | "quantum.simulate_probabilities" => Some((1, 1)),
+        | "quantum.simulate_probabilities"
+        | "optimize.quadratic_value" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
@@ -15966,6 +16437,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "quantum.expectation_pauli" => Some((2, 2)),
         "quantum.expectation_hamiltonian" => Some((2, 2)),
         "quantum.sample_counts" => Some((2, 2)),
+        "optimize.finite_difference_gradient" => Some((2, 2)),
+        "optimize.projected_gradient_step" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -20281,6 +20754,148 @@ mod tests {
         assert_eq!(
             static_builtin_arity("quantum.expectation_hamiltonian"),
             Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn local_optimization_returns_deterministic_quadratic_value_gradient_and_proposal() {
+        let objective = "{\"parameters\": [2, -1], \"targets\": [1, 3], \"weights\": [2, 0.5], \"lowerBounds\": [-5, -5], \"upperBounds\": [5, 5]}";
+        let source = format!("let objective = {objective}\nlet value = optimize.quadratic_value(objective)\nlet gradient = optimize.finite_difference_gradient(objective, 0.001)\nlet first = optimize.projected_gradient_step(objective, {{\"learningRate\": 0.25, \"epsilon\": 0.001}})\nlet second = optimize.projected_gradient_step(objective, {{\"learningRate\": 0.25, \"epsilon\": 0.001}})\nprint value\nprint gradient[\"objectiveValue\"]\nprint gradient[\"gradient\"][0]\nprint gradient[\"gradient\"][1]\nprint gradient[\"method\"]\nprint gradient[\"iteration\"]\nprint gradient[\"execution\"]\nprint gradient[\"network\"]\nprint gradient[\"childProcess\"]\nprint first[\"objectiveBefore\"]\nprint first[\"proposedParameters\"][0]\nprint first[\"proposedParameters\"][1]\nprint first[\"objectiveAfter\"]\nprint first[\"proposalOnly\"]\nprint first[\"provider\"]\nprint first[\"qpu\"]\nprint json.stringify(first) == json.stringify(second)\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-optimization-primitives"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "10",
+                "10",
+                "4",
+                "-4",
+                "local-centered-finite-difference-v1",
+                "not-run",
+                "disabled",
+                "disabled",
+                "disabled",
+                "10",
+                "1",
+                "0",
+                "4.5",
+                "true",
+                "not-configured",
+                "disabled",
+                "true",
+            ]
+        );
+        let clamped = "{\"parameters\": [0.9], \"targets\": [-10], \"weights\": [1], \"lowerBounds\": [-1], \"upperBounds\": [1]}";
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-optimization-clamped-proposal"),
+                BTreeSet::new(),
+                &format!("let result = optimize.projected_gradient_step({clamped}, {{\"learningRate\": 1, \"epsilon\": 0.01}})\nprint result[\"proposedParameters\"][0]\nprint result[\"objectiveBefore\"]\nprint result[\"objectiveAfter\"]\n"),
+            )
+            .unwrap(),
+            vec!["-1", "118.81", "81"]
+        );
+        assert_eq!(
+            static_builtin_arity("optimize.quadratic_value"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("optimize.finite_difference_gradient"),
+            Some((2, 2))
+        );
+        assert_eq!(
+            static_builtin_arity("optimize.projected_gradient_step"),
+            Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn local_optimization_rejects_invalid_objectives_settings_and_external_markers() {
+        for objective in [
+            "{}",
+            "{\"parameters\": [], \"targets\": [], \"weights\": [], \"lowerBounds\": [], \"upperBounds\": []}",
+            "{\"parameters\": [0], \"targets\": [0, 1], \"weights\": [1], \"lowerBounds\": [-1], \"upperBounds\": [1]}",
+            "{\"parameters\": [0], \"targets\": [0], \"weights\": [0], \"lowerBounds\": [-1], \"upperBounds\": [1]}",
+            "{\"parameters\": [0], \"targets\": [0], \"weights\": [-1], \"lowerBounds\": [-1], \"upperBounds\": [1]}",
+            "{\"parameters\": [0], \"targets\": [0], \"weights\": [1], \"lowerBounds\": [1], \"upperBounds\": [1]}",
+            "{\"parameters\": [2], \"targets\": [0], \"weights\": [1], \"lowerBounds\": [-1], \"upperBounds\": [1]}",
+            "{\"parameters\": [0], \"targets\": [0], \"weights\": [\"one\"], \"lowerBounds\": [-1], \"upperBounds\": [1]}",
+            "{\"parameters\": [0], \"targets\": [0], \"weights\": [1], \"lowerBounds\": [-1], \"upperBounds\": [1], \"provider\": \"remote\"}",
+            "{\"parameters\": [0], \"targets\": [0], \"weights\": [1], \"lowerBounds\": [-1], \"upperBounds\": [1], \"callback\": \"code\"}",
+        ] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-optimization-invalid-objective"),
+                    BTreeSet::new(),
+                    &format!("print optimize.quadratic_value({objective})\n"),
+                )
+                .unwrap_err()
+                .code,
+                "P1088"
+            );
+        }
+        let valid = "{\"parameters\": [0], \"targets\": [0], \"weights\": [1], \"lowerBounds\": [-1], \"upperBounds\": [1]}";
+        for epsilon in ["0", "-0.1", "2", "\"small\""] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-optimization-invalid-epsilon"),
+                    BTreeSet::new(),
+                    &format!("print optimize.finite_difference_gradient({valid}, {epsilon})\n"),
+                )
+                .unwrap_err()
+                .code,
+                "P1088"
+            );
+        }
+        let boundary = "{\"parameters\": [0], \"targets\": [0], \"weights\": [1], \"lowerBounds\": [0], \"upperBounds\": [1]}";
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-optimization-boundary-epsilon"),
+                BTreeSet::new(),
+                &format!("print optimize.finite_difference_gradient({boundary}, 0.01)\n"),
+            )
+            .unwrap_err()
+            .code,
+            "P1088"
+        );
+        for settings in [
+            "{}",
+            "{\"learningRate\": 0, \"epsilon\": 0.01}",
+            "{\"learningRate\": 2, \"epsilon\": 0.01}",
+            "{\"learningRate\": \"fast\", \"epsilon\": 0.01}",
+            "{\"learningRate\": 0.1, \"epsilon\": \"small\"}",
+            "{\"learningRate\": 0.1, \"epsilon\": 0.01, \"qpu\": \"remote\"}",
+        ] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-optimization-invalid-settings"),
+                    BTreeSet::new(),
+                    &format!("print optimize.projected_gradient_step({valid}, {settings})\n"),
+                )
+                .unwrap_err()
+                .code,
+                "P1088"
+            );
+        }
+        let non_finite = Value::Map(BTreeMap::from([
+            (
+                "parameters".into(),
+                Value::List(vec![Value::Number(f64::NAN)]),
+            ),
+            ("targets".into(), Value::List(vec![Value::Number(0.0)])),
+            ("weights".into(), Value::List(vec![Value::Number(1.0)])),
+            ("lowerBounds".into(), Value::List(vec![Value::Number(-1.0)])),
+            ("upperBounds".into(), Value::List(vec![Value::Number(1.0)])),
+        ]));
+        assert_eq!(
+            local_quadratic_objective_from_value(&non_finite, Locale::English, Position::new(1, 1))
+                .unwrap_err()
+                .code,
+            "P1088"
         );
     }
 
