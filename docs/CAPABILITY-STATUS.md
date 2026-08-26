@@ -35,7 +35,7 @@ The following are **not complete** and must not be described as finished. They a
 |---|---|---|---|
 | P0 | Starter project templates | Implemented | `padma init` supports the backward-compatible `basic` default plus `--template data-report` and `--template web-response`; generated projects have minimum capabilities, README commands, and regression/CLI smoke coverage. |
 | P0 | Student/family/small-business records | Implemented first foundation | `record.validate` and redacted `record.summary` support strict attendance, expense, and inventory tables; local Markdown output reuses the separately capability-gated report toolkit. Study-note and other record schemas remain separate work. |
-| P0 | Freelancer client workflow expansion | Partial | Quote/invoice-draft, scope-of-work, and delivery-checklist are implemented foundations. Add separately bounded portfolio case-study, client-task, and reusable report schemas. |
+| P0 | Freelancer client workflow expansion | Partial | Quote/invoice-draft, scope-of-work, delivery-checklist, portfolio case-study, and visible handoff preparation are implemented foundations. Add separately bounded client-task/reconciliation and reusable report schemas. |
 | P1 | Client data delivery | Not implemented | Local CSV/JSON cleaning, reconciliation summaries, redacted validation, and reviewed export artifacts. |
 | P1 | Content/document preparation | Not implemented | Explicit-input Bangla-English brief/checklist/copy templates with safe Markdown rendering and human review. |
 | P1 | Developer delivery toolkit | Not implemented | Deterministic project task/test/lint/build descriptors and checksum manifests without arbitrary shell/background execution. |
@@ -51,7 +51,7 @@ Every selected backlog item must pass the same gate before its status changes to
 
 ## Next implementation order
 
-1. Expand **P0 freelancer workflows** with the next bounded document schema: portfolio case study.
+1. Build **P1 client-data delivery/reconciliation** as the next safe freelancer increment.
 2. Continue P1 and P2 items only after their dependencies and safety contracts are complete.
 
 For an overview of long-term work, see [`todo.md`](../todo.md). For the exact public API contract, see [`STANDARD-LIBRARY.md`](STANDARD-LIBRARY.md). For runnable examples, see [`PRACTICAL-PROJECT-EXAMPLES.md`](PRACTICAL-PROJECT-EXAMPLES.md).

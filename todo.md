@@ -356,3 +356,9 @@
 - [x] Implement a local visible-review handoff manifest that records user-reviewed message/attachment/destination labels and disables sending, upload/download, delivery submission, contract, payment, browser, account, network, and process action.
 - [x] Add Bangla-English P107x diagnostics and positive/negative tests for unknown/unsafe fields, raw markup/URL/contact injection, private-data fields, path escape/symlink/bad-extension/missing grant, and no external side effect.
 - [x] Publish a standalone Termux portfolio case-study example, guide, standard-library/diagnostic/roadmap entries, full repository verification, focused commit, and GitHub push before marking this increment complete.
+
+## M24 — Freelancer Capability Inventory and Remaining Safe Replacements
+
+- [ ] Maintain a public evidence table that separates runnable freelancer tools, bounded local-only tools, planned tools, and prohibited external-action automation without describing any item as income, job, or client-acceptance guarantee.
+- [ ] Add the next safe client-data delivery foundation: project-local CSV/JSON reconciliation, redacted validation summary, checksum manifest, and reviewed export artifact without client contact, upload, submission, payment, browser, account, network, or background authority.
+- [ ] Evaluate later user-mediated preparation gaps—attachment checksum review, destination review, copy-only message formatting, and visible browser handoff checklist—one bounded feature at a time; do not add automatic sending, posting, upload, delivery submission, payment, signing, marketplace login, browser session, or account control.
