@@ -444,7 +444,10 @@
 
 ### M36 — Quantum Program Tooling and Interchange
 
-- [ ] Add verified circuit introspection/validation output, QASM subset round-trip assessment, and stable local artifact metadata only after parser/runtime contracts are separately designed and tested.
+- [x] Define a strict bounded local OpenQASM 3 subset-inspection request/result schema over explicit in-memory text only; reject paths, URLs, provider/QPU, credentials, executable callbacks, and unsupported QASM constructs.
+- [x] Implement deterministic local circuit introspection/validation output, supported-subset assessment, and stable artifact metadata only; do not add a general QASM parser, circuit import/execution, filesystem read/write, network/process, or provider authority.
+- [x] Add a new bilingual diagnostic and regressions for valid emitted QASM, invalid/oversized/non-ASCII/source mismatch inputs, unsupported declarations/gates/comments/measurements, deterministic metadata, and no external side effects.
+- [x] Publish a standalone Termux inspection example, public contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
 
 ### M37 — Provider Integration Assessment
 

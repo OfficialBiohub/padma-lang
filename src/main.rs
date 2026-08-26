@@ -342,6 +342,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1087") => (format!("Local Pauli Hamiltonian is unsafe or invalid: `{detail}`"), Some("Use only bounded unique full-register I/X/Y/Z terms and finite real coefficients; Padma returns deterministic local energy, not optimizer/provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1088") => (format!("local optimisation request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded finite quadratic objective, epsilon, ও learning rate ব্যবহার করুন; Padma একবারের pure local calculation দেবে, loop/callback/provider/QPU/network/process execution নয়।".into())),
         (Locale::English, "P1088") => (format!("Local optimisation request is unsafe or invalid: `{detail}`"), Some("Use only bounded finite quadratic objectives, epsilon, and learning rates; Padma returns one pure local calculation, not loop/callback/provider/QPU/network/process execution.".into())),
+        (Locale::Bangla, "P1089") => (format!("local OpenQASM subset assessment নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু Padma-র bounded renderer থেকে পাওয়া exact ASCII OpenQASM 3.0 text দিন; এটি parser/import/execution/provider/QPU/network/process API নয়।".into())),
+        (Locale::English, "P1089") => (format!("Local OpenQASM subset assessment is unsafe or invalid: `{detail}`"), Some("Use only exact ASCII OpenQASM 3.0 text emitted by Padma's bounded renderer; this is not a parser/import/execution/provider/QPU/network/process API.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1737,6 +1739,10 @@ fn quantum_hamiltonian_error(locale: Locale, position: Position, detail: &str) -
 
 fn local_optimization_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1088", position, detail)
+}
+
+fn quantum_interchange_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1089", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -5161,6 +5167,78 @@ fn quantum_circuit_summary(circuit: &QuantumCircuitPlan) -> Value {
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ]))
+}
+
+fn quantum_rendered_gate_instruction_count(circuit: &QuantumCircuitPlan) -> usize {
+    circuit
+        .operations
+        .iter()
+        .map(|operation| match operation.gate.as_str() {
+            "superposition" => operation.targets.len(),
+            "entangle-linear" => operation.targets.len() - 1,
+            _ => 1,
+        })
+        .sum()
+}
+
+fn quantum_assess_openqasm3(
+    circuit: &QuantumCircuitPlan,
+    source: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    if source.is_empty() || source.len() > REPORT_MAX_BYTES || !source.is_ascii() {
+        return Err(quantum_interchange_error(
+            locale,
+            position,
+            "OpenQASM assessment source must be non-empty bounded ASCII text",
+        ));
+    }
+    let expected = quantum_openqasm3(circuit, locale, position)?;
+    if source != expected {
+        return Err(quantum_interchange_error(
+            locale,
+            position,
+            "OpenQASM source does not exactly match Padma's bounded renderer output",
+        ));
+    }
+    Ok(Value::Map(BTreeMap::from([
+        (
+            "method".into(),
+            Value::String("local-openqasm3-exact-subset-assessment-v1".into()),
+        ),
+        (
+            "format".into(),
+            Value::String("openqasm-3.0-padma-renderer-subset".into()),
+        ),
+        ("sourceMatchesRenderer".into(), Value::Boolean(true)),
+        ("sourceBytes".into(), Value::Number(source.len() as f64)),
+        (
+            "sourceSha256".into(),
+            Value::String(format!("sha256:{}", sha256_hex(source.as_bytes()))),
+        ),
+        ("qubitCount".into(), Value::Number(circuit.qubits as f64)),
+        (
+            "operationCount".into(),
+            Value::Number(circuit.operations.len() as f64),
+        ),
+        (
+            "renderedGateInstructionCount".into(),
+            Value::Number(quantum_rendered_gate_instruction_count(circuit) as f64),
+        ),
+        (
+            "measurementInstructionCount".into(),
+            Value::Number(circuit.measurements.len() as f64),
+        ),
+        ("parser".into(), Value::String("not-implemented".into())),
+        ("import".into(), Value::String("disabled".into())),
+        ("execution".into(), Value::String("disabled".into())),
+        ("provider".into(), Value::String("not-configured".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ])))
 }
 
 fn quantum_apply_single_qubit(
@@ -9239,6 +9317,23 @@ impl Interpreter {
                         self.locale,
                         *position,
                     );
+                }
+                if name == "quantum.assess_openqasm3" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let circuit_value = self.evaluate(&arguments[0])?;
+                    let source_value = self.evaluate(&arguments[1])?;
+                    let circuit =
+                        quantum_circuit_from_value(&circuit_value, self.locale, *position)?;
+                    let Value::String(source) = source_value else {
+                        return Err(quantum_interchange_error(
+                            self.locale,
+                            *position,
+                            "OpenQASM assessment source must be text",
+                        ));
+                    };
+                    return quantum_assess_openqasm3(&circuit, &source, self.locale, *position);
                 }
                 if name == "quantum.circuit_summary"
                     || name == "quantum.openqasm3"
@@ -16437,6 +16532,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "quantum.expectation_pauli" => Some((2, 2)),
         "quantum.expectation_hamiltonian" => Some((2, 2)),
         "quantum.sample_counts" => Some((2, 2)),
+        "quantum.assess_openqasm3" => Some((2, 2)),
         "optimize.finite_difference_gradient" => Some((2, 2)),
         "optimize.projected_gradient_step" => Some((2, 2)),
         "db.put" => Some((4, 4)),
@@ -20334,6 +20430,108 @@ mod tests {
         assert_eq!(
             static_builtin_arity("quantum.write_openqasm3"),
             Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn local_openqasm_interchange_assessment_returns_exact_renderer_metadata() {
+        let circuit = "{\"qubits\": 2, \"operations\": [{\"gate\": \"superposition\", \"targets\": [0, 1]}, {\"gate\": \"entangle-linear\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        let source = format!("let circuit = {circuit}\nlet qasm = quantum.openqasm3(circuit)\nlet first = quantum.assess_openqasm3(circuit, qasm)\nlet second = quantum.assess_openqasm3(circuit, qasm)\nprint first[\"sourceMatchesRenderer\"]\nprint first[\"sourceBytes\"] > 0\nprint text.contains(first[\"sourceSha256\"], \"sha256:\")\nprint first[\"qubitCount\"]\nprint first[\"operationCount\"]\nprint first[\"renderedGateInstructionCount\"]\nprint first[\"measurementInstructionCount\"]\nprint first[\"method\"]\nprint first[\"format\"]\nprint first[\"parser\"]\nprint first[\"import\"]\nprint first[\"execution\"]\nprint first[\"provider\"]\nprint first[\"qpu\"]\nprint first[\"network\"]\nprint first[\"childProcess\"]\nprint json.stringify(first) == json.stringify(second)\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-openqasm-interchange"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "true",
+                "true",
+                "true",
+                "2",
+                "2",
+                "3",
+                "2",
+                "local-openqasm3-exact-subset-assessment-v1",
+                "openqasm-3.0-padma-renderer-subset",
+                "not-implemented",
+                "disabled",
+                "disabled",
+                "not-configured",
+                "disabled",
+                "disabled",
+                "disabled",
+                "true",
+            ]
+        );
+        assert_eq!(
+            static_builtin_arity("quantum.assess_openqasm3"),
+            Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn local_openqasm_interchange_rejects_noncanonical_sources_and_preserves_local_only_boundary() {
+        let circuit = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        for replacement in [
+            "// local comment",
+            "qubit[3] q;",
+            "u(0, 0, 0) q[0];",
+            "c[0] = measure q[1];",
+        ] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-openqasm-interchange-invalid"),
+                    BTreeSet::new(),
+                    &format!("let circuit = {circuit}\nlet qasm = quantum.openqasm3(circuit)\nlet changed = text.replace(qasm, \"h q[0];\", \"{replacement}\")\nprint quantum.assess_openqasm3(circuit, changed)\n"),
+                )
+                .unwrap_err()
+                .code,
+                "P1089"
+            );
+        }
+        for source in ["\"\"", "\"বাংলা\"", "true", "\"OPENQASM 3.0;\""] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-openqasm-interchange-source-type"),
+                    BTreeSet::new(),
+                    &format!("print quantum.assess_openqasm3({circuit}, {source})\n"),
+                )
+                .unwrap_err()
+                .code,
+                "P1089"
+            );
+        }
+        let parsed = QuantumCircuitPlan {
+            qubits: 1,
+            operations: vec![QuantumOperation {
+                gate: "h".into(),
+                targets: vec![0],
+                angle: None,
+            }],
+            measurements: vec![QuantumMeasurement { qubit: 0, bit: 0 }],
+        };
+        assert_eq!(
+            quantum_assess_openqasm3(
+                &parsed,
+                &"A".repeat(REPORT_MAX_BYTES + 1),
+                Locale::English,
+                Position::new(1, 1),
+            )
+            .unwrap_err()
+            .code,
+            "P1089"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-openqasm-interchange-circuit-schema"),
+                BTreeSet::new(),
+                "print quantum.assess_openqasm3({\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}], \"provider\": \"remote\"}, \"OPENQASM 3.0;\")\n",
+            )
+            .unwrap_err()
+            .code,
+            "P1083"
         );
     }
 

@@ -1,0 +1,14 @@
+ধরি circuit = {"qubits": 2, "operations": [{"gate": "superposition", "targets": [0, 1]}, {"gate": "entangle-linear", "targets": [0, 1]}], "measurements": [{"qubit": 0, "bit": 0}, {"qubit": 1, "bit": 1}]}
+ধরি qasm = quantum.openqasm3(circuit)
+ধরি assessed = quantum.assess_openqasm3(circuit, qasm)
+
+দেখাও assessed["sourceMatchesRenderer"]
+দেখাও assessed["qubitCount"]
+দেখাও assessed["operationCount"]
+দেখাও assessed["renderedGateInstructionCount"]
+দেখাও assessed["measurementInstructionCount"]
+দেখাও assessed["method"]
+দেখাও assessed["parser"]
+দেখাও assessed["execution"]
+দেখাও assessed["provider"]
+দেখাও assessed["qpu"]
