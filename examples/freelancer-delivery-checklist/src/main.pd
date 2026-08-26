@@ -1,0 +1,9 @@
+ধরি checklist = {"projectTitle": "Mobile-friendly portfolio page", "deliverables": ["Responsive page", "Source-file handover"], "reviewItems": ["Mobile layout", "Link review"], "handoverItems": ["Project archive", "Readme note"], "reference": "DEL-2026-01", "notes": "Review every item before any manual delivery."}
+ধরি summary = client.delivery_summary(checklist)
+ধরি saved = client.write_delivery_checklist("out/delivery-checklist.md", checklist)
+
+দেখাও text.format("Deliverables: {deliverableCount}", summary)
+দেখাও text.format("Review items: {reviewItemCount}", summary)
+দেখাও text.format("Handover items: {handoverItemCount}", summary)
+দেখাও text.format("Saved: {saved}", {"saved": saved})
+দেখাও summary["upload"]

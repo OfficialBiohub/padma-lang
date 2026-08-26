@@ -341,3 +341,10 @@
 - [x] Implement deterministic escaped Markdown and redacted summary APIs plus a project-local non-symlink `.md` export requiring only `filesystem:write`, with user-review and disabled action markers.
 - [x] Add Bangla-English P107x diagnostics and positive/negative regressions for missing/unknown fields, type/content/length/duplicate violations, raw markup/URL injection, missing capability, traversal/shared-storage/symlink/bad-extension paths, and no client-contact/payment/network/process side effect.
 - [x] Publish a standalone Termux scope-of-work example, guide, standard-library/diagnostic/roadmap entries, full repository verification, focused commit, and GitHub push before marking this increment complete.
+
+## M22 — Local Delivery Checklist Foundation
+
+- [x] Define one strict bounded local delivery-checklist map for project label, deliverables, review items, handover items, and optional reference/notes; reject recipient/contact, payment, account, URL, authorization, platform, upload, delivery-submission, and contract-signing fields.
+- [x] Implement deterministic escaped Markdown and redacted summary APIs plus a project-local non-symlink `.md` export requiring only `filesystem:write`, with explicit user-review and disabled upload/contact/submission/payment action markers.
+- [x] Add Bangla-English P107x diagnostics and positive/negative regressions for missing/unknown fields, malformed/duplicate/oversized list items, raw markup/URL/contact injection, missing capability, traversal/shared-storage/symlink/bad-extension paths, and no upload/contact/payment/network/process side effect.
+- [x] Publish a standalone Termux delivery-checklist example, guide, standard-library/diagnostic/roadmap entries, full repository verification, focused commit, and GitHub push before marking this increment complete.

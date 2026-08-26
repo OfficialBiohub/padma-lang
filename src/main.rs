@@ -316,6 +316,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1074") => (format!("Local record data is unsafe or invalid: `{detail}`"), Some("Use only bounded attendance, expense, or inventory table fields; Padma will not run account, cloud, payment, network, device, or process actions.".into())),
         (Locale::Bangla, "P1075") => (format!("local scope-of-work draft নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded project/scope/exclusion/revision field এবং project-local `.md` review output ব্যবহার করুন; Padma client contact, contract signing, marketplace submission, payment, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1075") => (format!("Local scope-of-work draft is unsafe or invalid: `{detail}`"), Some("Use only bounded project/scope/exclusion/revision fields and project-local `.md` review output; Padma will not run client contact, contract signing, marketplace submission, payment, network, or process actions.".into())),
+        (Locale::Bangla, "P1076") => (format!("local delivery checklist নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded project/deliverable/review/handover field এবং project-local `.md` review output ব্যবহার করুন; Padma upload, client contact, delivery submission, payment, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1076") => (format!("Local delivery checklist is unsafe or invalid: `{detail}`"), Some("Use only bounded project/deliverable/review/handover fields and project-local `.md` review output; Padma will not run upload, client contact, delivery submission, payment, network, or process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1586,6 +1588,7 @@ const CLIENT_DOCUMENT_MAX_DELIVERABLES: usize = 20;
 const CLIENT_DOCUMENT_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
 const SCOPE_OF_WORK_MAX_ITEMS: usize = 20;
 const SCOPE_OF_WORK_MAX_REVISIONS: u64 = 10;
+const DELIVERY_CHECKLIST_MAX_ITEMS: usize = 20;
 const RECORD_MAX_TEXT_BYTES: usize = 160;
 const RECORD_MAX_NOTE_BYTES: usize = 512;
 const RECORD_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
@@ -1657,6 +1660,10 @@ fn client_document_error(locale: Locale, position: Position, detail: &str) -> Pa
 
 fn scope_of_work_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1075", position, detail)
+}
+
+fn delivery_checklist_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1076", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -3001,6 +3008,264 @@ fn scope_of_work_summary(draft: &ScopeOfWorkDraft) -> Value {
             "marketplaceSubmission".into(),
             Value::String("disabled".into()),
         ),
+        ("payment".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
+#[derive(Clone, Debug)]
+struct DeliveryChecklistDraft {
+    project_title: String,
+    deliverables: Vec<String>,
+    review_items: Vec<String>,
+    handover_items: Vec<String>,
+    reference: Option<String>,
+    notes: Option<String>,
+}
+
+fn delivery_checklist_text(
+    value: Option<&Value>,
+    required: bool,
+    field: &str,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<Option<String>, PadmaError> {
+    let Some(value) = value else {
+        return if required {
+            Err(delivery_checklist_error(
+                locale,
+                position,
+                "delivery checklist is missing a required text field",
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    let Value::String(text) = value else {
+        return Err(delivery_checklist_error(
+            locale,
+            position,
+            &format!("delivery checklist {field} must be text"),
+        ));
+    };
+    if text.is_empty()
+        || text.len() > max_bytes
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+        || text.contains("://")
+        || text.contains('@')
+        || text.contains("www.")
+    {
+        return Err(delivery_checklist_error(locale, position, "delivery checklist text must be bounded single-line content without raw HTML, URL, or contact delimiters"));
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn delivery_checklist_list(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let Some(Value::List(values)) = value else {
+        return Err(delivery_checklist_error(
+            locale,
+            position,
+            "delivery checklist is missing a required text list field",
+        ));
+    };
+    if values.is_empty() || values.len() > DELIVERY_CHECKLIST_MAX_ITEMS {
+        return Err(delivery_checklist_error(
+            locale,
+            position,
+            "delivery checklist item count is outside the allowed limit",
+        ));
+    }
+    let mut items = Vec::with_capacity(values.len());
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let item = delivery_checklist_text(
+            Some(value),
+            true,
+            field,
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("required delivery item");
+        if !seen.insert(item.clone()) {
+            return Err(delivery_checklist_error(
+                locale,
+                position,
+                "delivery checklist list items must not be duplicated",
+            ));
+        }
+        items.push(item);
+    }
+    Ok(items)
+}
+
+fn delivery_checklist_draft_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<DeliveryChecklistDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(delivery_checklist_error(
+            locale,
+            position,
+            "delivery checklist draft must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "projectTitle",
+        "deliverables",
+        "reviewItems",
+        "handoverItems",
+        "reference",
+        "notes",
+    ]);
+    if fields.len() < 4
+        || fields.len() > allowed.len()
+        || fields.keys().any(|key| !allowed.contains(key.as_str()))
+    {
+        return Err(delivery_checklist_error(
+            locale,
+            position,
+            "delivery checklist contains missing or unsupported fields",
+        ));
+    }
+    Ok(DeliveryChecklistDraft {
+        project_title: delivery_checklist_text(
+            fields.get("projectTitle"),
+            true,
+            "projectTitle",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("project title"),
+        deliverables: delivery_checklist_list(
+            fields.get("deliverables"),
+            "deliverable",
+            locale,
+            position,
+        )?,
+        review_items: delivery_checklist_list(
+            fields.get("reviewItems"),
+            "review item",
+            locale,
+            position,
+        )?,
+        handover_items: delivery_checklist_list(
+            fields.get("handoverItems"),
+            "handover item",
+            locale,
+            position,
+        )?,
+        reference: delivery_checklist_text(
+            fields.get("reference"),
+            false,
+            "reference",
+            96,
+            locale,
+            position,
+        )?,
+        notes: delivery_checklist_text(
+            fields.get("notes"),
+            false,
+            "notes",
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?,
+    })
+}
+
+fn delivery_checklist_markdown(
+    draft: &DeliveryChecklistDraft,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut lines = vec![
+        "# Delivery Checklist (Draft)".into(), String::new(),
+        "**Status:** User review required. This is not a delivery submission, upload instruction, acceptance, payment request, or marketplace action.".into(), String::new(),
+        "## Project".into(), format!("- **Project:** {}", report_markdown_escape(&draft.project_title)),
+    ];
+    if let Some(reference) = &draft.reference {
+        lines.push(format!(
+            "- **Reference:** {}",
+            report_markdown_escape(reference)
+        ));
+    }
+    for (title, items) in [
+        ("Deliverables to review", &draft.deliverables),
+        ("Review items", &draft.review_items),
+        ("Handover items", &draft.handover_items),
+    ] {
+        lines.push(String::new());
+        lines.push(format!("## {title}"));
+        lines.extend(
+            items
+                .iter()
+                .map(|item| format!("- [ ] {}", report_markdown_escape(item))),
+        );
+    }
+    if let Some(notes) = &draft.notes {
+        lines.push(String::new());
+        lines.push("## Notes".into());
+        lines.push(report_markdown_escape(notes));
+    }
+    lines.push(String::new());
+    lines.push("## Automation boundary".into());
+    lines.push("- Client contact: user-reviewed".into());
+    lines.push("- Upload/download: disabled".into());
+    lines.push("- Delivery submission: disabled".into());
+    lines.push("- Contract signing: disabled".into());
+    lines.push("- Payment/withdrawal: disabled".into());
+    lines.push("- Network/browser/account/process: disabled".into());
+    let rendered = format!("{}\n", lines.join("\n"));
+    if rendered.len() > REPORT_MAX_BYTES {
+        return Err(delivery_checklist_error(
+            locale,
+            position,
+            "rendered delivery checklist exceeds the local output byte limit",
+        ));
+    }
+    Ok(rendered)
+}
+
+fn delivery_checklist_summary(draft: &DeliveryChecklistDraft) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "deliverableCount".into(),
+            Value::Number(draft.deliverables.len() as f64),
+        ),
+        (
+            "reviewItemCount".into(),
+            Value::Number(draft.review_items.len() as f64),
+        ),
+        (
+            "handoverItemCount".into(),
+            Value::Number(draft.handover_items.len() as f64),
+        ),
+        (
+            "hasReference".into(),
+            Value::Boolean(draft.reference.is_some()),
+        ),
+        ("hasNotes".into(), Value::Boolean(draft.notes.is_some())),
+        (
+            "clientContact".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("upload".into(), Value::String("disabled".into())),
+        (
+            "deliverySubmission".into(),
+            Value::String("disabled".into()),
+        ),
+        ("contractSigning".into(), Value::String("disabled".into())),
         ("payment".into(), Value::String("disabled".into())),
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
@@ -5628,6 +5893,45 @@ impl Interpreter {
                     let resolved_path = self.client_document_output_path(path, *position)?;
                     fs::write(&resolved_path, document).map_err(|_| {
                         error_for(self.locale, "P1015", *position, "scope-of-work output path")
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.delivery_markdown" || name == "client.delivery_summary" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let draft =
+                        delivery_checklist_draft_from_value(&value, self.locale, *position)?;
+                    if name == "client.delivery_markdown" {
+                        return delivery_checklist_markdown(&draft, self.locale, *position)
+                            .map(Value::String);
+                    }
+                    return Ok(delivery_checklist_summary(&draft));
+                }
+                if name == "client.write_delivery_checklist" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(
+                        &path,
+                        self.locale,
+                        *position,
+                        "delivery checklist output path",
+                    )?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let draft =
+                        delivery_checklist_draft_from_value(&value, self.locale, *position)?;
+                    let document = delivery_checklist_markdown(&draft, self.locale, *position)?;
+                    let resolved_path = self.client_document_output_path(path, *position)?;
+                    fs::write(&resolved_path, document).map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1015",
+                            *position,
+                            "delivery checklist output path",
+                        )
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -12599,14 +12903,18 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.document_markdown"
         | "client.document_summary"
         | "client.scope_markdown"
-        | "client.scope_summary" => Some((1, 1)),
+        | "client.scope_summary"
+        | "client.delivery_markdown"
+        | "client.delivery_summary" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
         | "report.summary" | "profile.validate" | "profile.summary" | "record.validate"
         | "record.summary" => Some((2, 2)),
         "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
-        "client.write_document" | "client.write_scope" => Some((2, 2)),
+        "client.write_document" | "client.write_scope" | "client.write_delivery_checklist" => {
+            Some((2, 2))
+        }
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -15661,6 +15969,114 @@ mod tests {
         assert_eq!(static_builtin_arity("client.scope_markdown"), Some((1, 1)));
         assert_eq!(static_builtin_arity("client.scope_summary"), Some((1, 1)));
         assert_eq!(static_builtin_arity("client.write_scope"), Some((2, 2)));
+    }
+
+    #[test]
+    fn local_delivery_checklist_renders_redacted_markdown_and_project_scoped_export() {
+        let root = module_fixture_dir("local-delivery-checklist");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let draft = "{\"projectTitle\": \"Bangla guide [pilot]\", \"deliverables\": [\"Responsive page\", \"Source-file handover\"], \"reviewItems\": [\"Mobile layout\"], \"handoverItems\": [\"Project archive\"], \"reference\": \"DEL-2026-01\", \"notes\": \"Review before manual delivery\"}";
+        let source = format!("let draft = {draft}\nlet summary = client.delivery_summary(draft)\nlet markdown = client.delivery_markdown(draft)\nprint summary[\"deliverableCount\"]\nprint summary[\"reviewItemCount\"]\nprint summary[\"handoverItemCount\"]\nprint summary[\"upload\"]\nprint text.contains(json.stringify(summary), \"Bangla\")\nprint text.contains(markdown, \"Bangla guide \\\\[pilot\\\\]\")\nprint client.write_delivery_checklist(\"out/delivery.md\", draft)\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let document = fs::read_to_string(root.join("out/delivery.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec!["2", "1", "1", "disabled", "false", "true", "true"]
+        );
+        assert!(document.starts_with("# Delivery Checklist (Draft)\n"));
+        assert!(document.contains("- Upload/download: disabled"));
+        assert!(document.contains("- Delivery submission: disabled"));
+    }
+
+    #[test]
+    fn local_delivery_checklist_rejects_unsafe_schema_and_writer_paths() {
+        let root = module_fixture_dir("local-delivery-checklist-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink("outside", root.join("out-link")).unwrap();
+        let valid = "{\"projectTitle\": \"Site\", \"deliverables\": [\"Page\"], \"reviewItems\": [\"Layout\"], \"handoverItems\": [\"Archive\"]}";
+        let cases = [
+            "print client.delivery_markdown({\"projectTitle\": \"Site\", \"deliverables\": [\"Page\"], \"reviewItems\": [\"Layout\"]})\n",
+            "print client.delivery_markdown({\"projectTitle\": \"Site\", \"deliverables\": [\"Page\", \"Page\"], \"reviewItems\": [\"Layout\"], \"handoverItems\": [\"Archive\"]})\n",
+            "print client.delivery_markdown({\"projectTitle\": \"https://bad.invalid\", \"deliverables\": [\"Page\"], \"reviewItems\": [\"Layout\"], \"handoverItems\": [\"Archive\"]})\n",
+            "print client.delivery_markdown({\"projectTitle\": \"Site\", \"deliverables\": [\"<script>x</script>\"], \"reviewItems\": [\"Layout\"], \"handoverItems\": [\"Archive\"]})\n",
+            "print client.delivery_markdown({\"projectTitle\": \"contact@example.invalid\", \"deliverables\": [\"Page\"], \"reviewItems\": [\"Layout\"], \"handoverItems\": [\"Archive\"]})\n",
+            "print client.delivery_markdown({\"projectTitle\": \"Site\", \"deliverables\": [\"Page\"], \"reviewItems\": [\"Layout\"], \"handoverItems\": [\"Archive\"], \"uploadUrl\": \"x\"})\n",
+        ];
+        for source in cases {
+            assert_eq!(
+                run_bridge_project(&root, BTreeSet::new(), source)
+                    .unwrap_err()
+                    .code,
+                "P1076"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.write_delivery_checklist(\"out/delivery.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        let capability = BTreeSet::from(["filesystem:write".into()]);
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!("print client.write_delivery_checklist(\"../delivery.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!(
+                    "print client.write_delivery_checklist(\"@downloads/delivery.md\", {valid})\n"
+                )
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!("print client.write_delivery_checklist(\"out/delivery.txt\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        let symlink = run_bridge_project(
+            &root,
+            capability,
+            &format!("print client.write_delivery_checklist(\"out-link/delivery.md\", {valid})\n"),
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(symlink.code, "P1073");
+        assert_eq!(
+            static_builtin_arity("client.delivery_markdown"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.delivery_summary"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.write_delivery_checklist"),
+            Some((2, 2))
+        );
     }
 
     #[test]

@@ -25,6 +25,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Freelancer workflows roadmap](FREELANCER-WORKFLOWS.md) | Production-oriented local preparation path and explicit marketplace/client-action boundaries |
 | [Local client documents](CLIENT-DOCUMENTS.md) | Strict local quote/invoice-draft Markdown preparation with user-reviewed client/payment boundaries |
 | [Local scope-of-work](LOCAL-SCOPE-OF-WORK.md) | Strict local scope/exclusion/revision draft with redacted summary and project-local review export |
+| [Local delivery checklists](LOCAL-DELIVERY-CHECKLISTS.md) | Strict local deliverable/review/handover draft with redacted summary and project-local review export |
 | [Capability status](CAPABILITY-STATUS.md) | Evidence-based distinction between implemented runtime, bounded behavior, and remaining delivery backlog |
 
 ## Security and local runtime
