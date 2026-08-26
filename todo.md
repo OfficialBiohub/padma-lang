@@ -326,11 +326,11 @@
 - [x] Build a checked capability inventory that separates implemented runtime behavior, runnable examples, test-only coverage, incomplete work, and documentation/design-only plans without overstating any item.
 - [x] Reclassify the existing daily-use and freelancer roadmap into a dependency-aware P0/P1/P2 backlog, preserving explicit safety exclusions and showing the evidence required before an item can be marked complete.
 - [x] Select the first audited P0 capability and implement it end to end: parser/runtime or CLI path where needed, localized diagnostics, capability/path boundaries, positive and negative tests, standalone Termux example, public guide, full verification, focused commit, and push.
-- [ ] Repeat the same audited completion gate for each subsequent selected feature; do not mark a roadmap capability complete from documentation, a plan, or a partial example alone.
+- [x] Repeat the same audited completion gate for each subsequent selected feature; do not mark a roadmap capability complete from documentation, a plan, or a partial example alone.
 
 ## M20 — Local Record Schema Foundation
 
 - [x] Define strict, bounded, in-memory attendance, expense, and inventory record schemas that build on validated tables without account, cloud, payment, device, or background authority.
 - [x] Implement local record validation and deterministic redacted summaries with localized diagnostics; preserve project-root and explicit `filesystem` boundaries only for optional table/report input or output.
 - [x] Add positive and negative regressions for required/unknown fields, scalar types, dates, amounts, quantities, duplicate keys, oversized values, unsafe markup/URLs, denied capability, path escape, symlink, and no network/process/account/payment side effect.
-- [ ] Publish a standalone Termux household/business records example, exact output, capability explanation, public API guide, and full repository verification before marking the record foundation complete.
+- [x] Publish a standalone Termux household/business records example, exact output, capability explanation, public API guide, and full repository verification before marking the record foundation complete.
