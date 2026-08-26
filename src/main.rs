@@ -328,6 +328,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1080") => (format!("Local attachment-review manifest is unsafe or invalid: `{detail}`"), Some("Use only project-local regular files, bounded labels, checksum review, and a user-reviewed destination label; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1081") => (format!("local delivery package নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু project-local regular file, checksum review, এবং manual review step ব্যবহার করুন; Padma file copy, PDF render, send, upload, submit, payment, browser, account, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1081") => (format!("Local delivery package is unsafe or invalid: `{detail}`"), Some("Use only project-local regular files, checksum review, and manual review steps; Padma will not copy files, render PDF, send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
+        (Locale::Bangla, "P1082") => (format!("local proposal, brief, বা message-template নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু explicit bounded local content, user review, এবং project-local Markdown output ব্যবহার করুন; Padma send, upload, submit, payment, browser, account, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1082") => (format!("Local proposal, brief, or message-template is unsafe or invalid: `{detail}`"), Some("Use only explicit bounded local content, user review, and project-local Markdown output; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1695,6 +1697,10 @@ fn attachment_review_error(locale: Locale, position: Position, detail: &str) -> 
 
 fn delivery_package_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1081", position, detail)
+}
+
+fn client_template_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1082", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4365,6 +4371,349 @@ fn delivery_package_markdown(
         ));
     }
     Ok(output)
+}
+
+#[derive(Clone, Debug)]
+struct ClientTemplateDraft {
+    template_type: String,
+    title: String,
+    overview: String,
+    skills: Vec<String>,
+    requirements: Vec<String>,
+    deliverables: Vec<String>,
+    review_steps: Vec<String>,
+    call_to_action_label: Option<String>,
+    notes: Option<String>,
+}
+
+fn client_template_text(
+    value: Option<&Value>,
+    field: &str,
+    required: bool,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<Option<String>, PadmaError> {
+    let Some(value) = value else {
+        if required {
+            return Err(client_template_error(
+                locale,
+                position,
+                &format!("template is missing {field}"),
+            ));
+        }
+        return Ok(None);
+    };
+    let Value::String(text) = value else {
+        return Err(client_template_error(
+            locale,
+            position,
+            &format!("template {field} must be text"),
+        ));
+    };
+    let normalized = text.to_lowercase();
+    if text.is_empty()
+        || text.len() > max_bytes
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+        || text.contains("://")
+        || text.contains('@')
+        || text.contains("www.")
+        || [
+            "guaranteed income",
+            "guaranteed acceptance",
+            "job guarantee",
+            "100% guarantee",
+            "নিশ্চিত আয়",
+            "আয় নিশ্চিত",
+            "কাজ নিশ্চিত",
+        ]
+        .iter()
+        .any(|phrase| normalized.contains(phrase))
+    {
+        return Err(client_template_error(locale, position, "template text must be bounded explicit content without raw HTML, URL/contact delimiters, or income/acceptance guarantees"));
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn client_template_list(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let Some(Value::List(items)) = value else {
+        return Err(client_template_error(
+            locale,
+            position,
+            &format!("template {field} must be a non-empty text list"),
+        ));
+    };
+    if items.is_empty() || items.len() > DELIVERY_CHECKLIST_MAX_ITEMS {
+        return Err(client_template_error(
+            locale,
+            position,
+            &format!("template {field} count is outside the allowed limit"),
+        ));
+    }
+    let mut result = Vec::new();
+    let mut seen = BTreeSet::new();
+    for item in items {
+        let item = client_template_text(
+            Some(item),
+            field,
+            true,
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("required template list item");
+        if !seen.insert(item.clone()) {
+            return Err(client_template_error(
+                locale,
+                position,
+                &format!("template {field} entries must be unique"),
+            ));
+        }
+        result.push(item);
+    }
+    Ok(result)
+}
+
+fn client_template_draft_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<ClientTemplateDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(client_template_error(
+            locale,
+            position,
+            "template draft must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "templateType",
+        "title",
+        "overview",
+        "skills",
+        "requirements",
+        "deliverables",
+        "reviewSteps",
+        "callToActionLabel",
+        "notes",
+    ]);
+    if fields.len() < 7
+        || fields.len() > allowed.len()
+        || fields.keys().any(|key| !allowed.contains(key.as_str()))
+    {
+        return Err(client_template_error(
+            locale,
+            position,
+            "template contains missing or unsupported fields",
+        ));
+    }
+    let template_type = client_template_text(
+        fields.get("templateType"),
+        "templateType",
+        true,
+        32,
+        locale,
+        position,
+    )?
+    .expect("required template type");
+    if !matches!(
+        template_type.as_str(),
+        "proposal" | "brief" | "message-template"
+    ) {
+        return Err(client_template_error(
+            locale,
+            position,
+            "templateType must be proposal, brief, or message-template",
+        ));
+    }
+    Ok(ClientTemplateDraft {
+        template_type,
+        title: client_template_text(
+            fields.get("title"),
+            "title",
+            true,
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("required title"),
+        overview: client_template_text(
+            fields.get("overview"),
+            "overview",
+            true,
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?
+        .expect("required overview"),
+        skills: client_template_list(fields.get("skills"), "skills", locale, position)?,
+        requirements: client_template_list(
+            fields.get("requirements"),
+            "requirements",
+            locale,
+            position,
+        )?,
+        deliverables: client_template_list(
+            fields.get("deliverables"),
+            "deliverables",
+            locale,
+            position,
+        )?,
+        review_steps: client_template_list(
+            fields.get("reviewSteps"),
+            "reviewSteps",
+            locale,
+            position,
+        )?,
+        call_to_action_label: client_template_text(
+            fields.get("callToActionLabel"),
+            "callToActionLabel",
+            false,
+            160,
+            locale,
+            position,
+        )?,
+        notes: client_template_text(
+            fields.get("notes"),
+            "notes",
+            false,
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?,
+    })
+}
+
+fn client_template_markdown(
+    draft: &ClientTemplateDraft,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let heading = match draft.template_type.as_str() {
+        "proposal" => "Local Proposal (Copy-Only Draft)",
+        "brief" => "Local Project Brief (Draft)",
+        "message-template" => "Copy-Only Message Template (Draft)",
+        _ => unreachable!("validated template type"),
+    };
+    let overview_heading = if draft.template_type == "message-template" {
+        "## Copy-only message text"
+    } else {
+        "## Overview"
+    };
+    let mut lines = vec![
+        format!("# {heading}"),
+        String::new(),
+        "**Status:** Review and copy manually. This explicit-input draft cannot send, post, upload, submit, sign, or pay.".into(),
+        String::new(),
+        "## Topic".into(),
+        format!("- **Title:** {}", report_markdown_escape(&draft.title)),
+        String::new(),
+        overview_heading.into(),
+        report_markdown_escape(&draft.overview),
+        String::new(),
+        "## Declared skills".into(),
+    ];
+    lines.extend(
+        draft
+            .skills
+            .iter()
+            .map(|item| format!("- {}", report_markdown_escape(item))),
+    );
+    lines.push(String::new());
+    lines.push("## Requirements".into());
+    lines.extend(
+        draft
+            .requirements
+            .iter()
+            .map(|item| format!("- {}", report_markdown_escape(item))),
+    );
+    lines.push(String::new());
+    lines.push("## Deliverables".into());
+    lines.extend(
+        draft
+            .deliverables
+            .iter()
+            .map(|item| format!("- {}", report_markdown_escape(item))),
+    );
+    if let Some(label) = &draft.call_to_action_label {
+        lines.push(String::new());
+        lines.push("## Optional copy-only call-to-action label".into());
+        lines.push(report_markdown_escape(label));
+    }
+    if let Some(notes) = &draft.notes {
+        lines.push(String::new());
+        lines.push("## Notes".into());
+        lines.push(report_markdown_escape(notes));
+    }
+    lines.push(String::new());
+    lines.push("## Manual review steps".into());
+    for (index, step) in draft.review_steps.iter().enumerate() {
+        lines.push(format!(
+            "{}. [ ] {}",
+            index + 1,
+            report_markdown_escape(step)
+        ));
+    }
+    lines.push(String::new());
+    lines.push("## Disabled actions".into());
+    lines.push(
+        "- Send/post/upload/submission/payment/browser/account/network/process: disabled".into(),
+    );
+    let output = format!("{}\n", lines.join("\n"));
+    if output.len() > REPORT_MAX_BYTES {
+        return Err(client_template_error(
+            locale,
+            position,
+            "rendered template exceeds the local output byte limit",
+        ));
+    }
+    Ok(output)
+}
+
+fn client_template_summary(draft: &ClientTemplateDraft) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "templateType".into(),
+            Value::String(draft.template_type.clone()),
+        ),
+        (
+            "skillCount".into(),
+            Value::Number(draft.skills.len() as f64),
+        ),
+        (
+            "requirementCount".into(),
+            Value::Number(draft.requirements.len() as f64),
+        ),
+        (
+            "deliverableCount".into(),
+            Value::Number(draft.deliverables.len() as f64),
+        ),
+        (
+            "reviewStepCount".into(),
+            Value::Number(draft.review_steps.len() as f64),
+        ),
+        (
+            "hasCallToActionLabel".into(),
+            Value::Boolean(draft.call_to_action_label.is_some()),
+        ),
+        (
+            "copyOnly".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("send".into(), Value::String("disabled".into())),
+        ("upload".into(), Value::String("disabled".into())),
+        ("submission".into(), Value::String("disabled".into())),
+        ("payment".into(), Value::String("disabled".into())),
+        ("browser".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
 }
 
 fn filesystem_productivity_regular_file(
@@ -7151,6 +7500,42 @@ impl Interpreter {
                             *position,
                             "delivery package output path",
                         )
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.template_summary"
+                    || name == "client.template_markdown"
+                    || name == "client.write_template"
+                {
+                    let expected = if name == "client.write_template" {
+                        2
+                    } else {
+                        1
+                    };
+                    if arguments.len() != expected {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let (path_argument, draft_argument) = if expected == 2 {
+                        (Some(&arguments[0]), &arguments[1])
+                    } else {
+                        (None, &arguments[0])
+                    };
+                    let value = self.evaluate(draft_argument)?;
+                    let draft = client_template_draft_from_value(&value, self.locale, *position)?;
+                    if name == "client.template_summary" {
+                        return Ok(client_template_summary(&draft));
+                    }
+                    let markdown = client_template_markdown(&draft, self.locale, *position)?;
+                    if name == "client.template_markdown" {
+                        return Ok(Value::String(markdown));
+                    }
+                    self.require_project_capability("filesystem:write", name, *position)?;
+                    let path_value = self.evaluate(path_argument.expect("writer path"))?;
+                    let path =
+                        expect_string(&path_value, self.locale, *position, "template output path")?;
+                    let output = self.client_document_output_path(path, *position)?;
+                    fs::write(output, markdown).map_err(|_| {
+                        error_for(self.locale, "P1015", *position, "template output path")
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -14287,7 +14672,9 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.attachment_review_summary"
         | "client.attachment_review_markdown"
         | "client.delivery_package_summary"
-        | "client.delivery_package_markdown" => Some((1, 1)),
+        | "client.delivery_package_markdown"
+        | "client.template_summary"
+        | "client.template_markdown" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
@@ -14305,6 +14692,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "client.write_reconciliation" => Some((5, 5)),
         "client.write_attachment_review" => Some((2, 2)),
         "client.write_delivery_package" => Some((2, 2)),
+        "client.write_template" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -17969,6 +18357,124 @@ mod tests {
             static_builtin_arity("client.write_delivery_package"),
             Some((2, 2))
         );
+    }
+
+    #[test]
+    fn local_client_templates_render_proposal_brief_and_copy_only_message() {
+        let root = module_fixture_dir("local-client-templates");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let proposal = "{\"templateType\": \"proposal\", \"title\": \"বাংলা portfolio page\", \"overview\": \"আমি responsive layout এবং clear handover প্রস্তুত করব\", \"skills\": [\"HTML\", \"CSS\"], \"requirements\": [\"Mobile layout\"], \"deliverables\": [\"Responsive page\"], \"reviewSteps\": [\"Review scope\", \"Copy manually\"], \"callToActionLabel\": \"Reply after review\"}";
+        let brief = "{\"templateType\": \"brief\", \"title\": \"Landing page brief\", \"overview\": \"Explicit local project overview\", \"skills\": [\"Design\"], \"requirements\": [\"Clear sections\"], \"deliverables\": [\"Brief document\"], \"reviewSteps\": [\"Review before use\"]}";
+        let message = "{\"templateType\": \"message-template\", \"title\": \"Follow-up note\", \"overview\": \"Hello, I prepared the requested local draft for your review.\", \"skills\": [\"Communication\"], \"requirements\": [\"Manual copy\"], \"deliverables\": [\"Message text\"], \"reviewSteps\": [\"Check context\"]}";
+        let source = format!("let proposal = {proposal}\nlet brief = {brief}\nlet message = {message}\nlet summary = client.template_summary(proposal)\nlet proposalMarkdown = client.template_markdown(proposal)\nlet briefMarkdown = client.template_markdown(brief)\nlet messageMarkdown = client.template_markdown(message)\nprint summary[\"templateType\"]\nprint summary[\"skillCount\"]\nprint summary[\"copyOnly\"]\nprint text.contains(json.stringify(summary), \"portfolio\")\nprint text.contains(proposalMarkdown, \"Local Proposal\")\nprint text.contains(briefMarkdown, \"Local Project Brief\")\nprint text.contains(messageMarkdown, \"Copy-only message text\")\nprint text.contains(proposalMarkdown, \"Send/post/upload/submission/payment/browser/account/network/process: disabled\")\nprint client.write_template(\"out/proposal.md\", proposal)\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let document = fs::read_to_string(root.join("out/proposal.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "proposal",
+                "2",
+                "user-review-required",
+                "false",
+                "true",
+                "true",
+                "true",
+                "true",
+                "true"
+            ]
+        );
+        assert!(document.contains("# Local Proposal (Copy-Only Draft)"));
+        assert!(document.contains("বাংলা portfolio page"));
+        assert!(document.contains("Reply after review"));
+        assert!(document.contains("Review and copy manually"));
+        assert!(document.contains(
+            "Send/post/upload/submission/payment/browser/account/network/process: disabled"
+        ));
+    }
+
+    #[test]
+    fn local_client_templates_reject_unsafe_content_schema_and_writer_targets() {
+        let root = module_fixture_dir("local-client-templates-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        std::os::unix::fs::symlink("out", root.join("out-link")).unwrap();
+        let valid = "{\"templateType\": \"proposal\", \"title\": \"Website proposal\", \"overview\": \"Explicit overview\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}";
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.write_template(\"out/proposal.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        let write = BTreeSet::from(["filesystem:write".into()]);
+        let unsafe_cases = [
+            "{\"templateType\": \"contract\", \"title\": \"Title\", \"overview\": \"Overview\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"https://example.invalid\", \"overview\": \"Overview\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"Title\", \"overview\": \"review@example.invalid\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"<b>Title</b>\", \"overview\": \"Overview\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"Title\", \"overview\": \"Guaranteed income for every client\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"Title\", \"overview\": \"Overview\", \"skills\": [], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"Title\", \"overview\": \"Overview\", \"skills\": [\"HTML\", \"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"Title\", \"overview\": \"Overview\", \"skills\": \"HTML\", \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"]}",
+            "{\"templateType\": \"proposal\", \"title\": \"Title\", \"overview\": \"Overview\", \"skills\": [\"HTML\"], \"requirements\": [\"Responsive\"], \"deliverables\": [\"Page\"], \"reviewSteps\": [\"Review\"], \"sendNow\": true}",
+        ];
+        for draft in unsafe_cases {
+            assert_eq!(
+                run_bridge_project(
+                    &root,
+                    write.clone(),
+                    &format!("print client.template_summary({draft})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1082"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                write.clone(),
+                &format!("print client.write_template(\"../proposal.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                write.clone(),
+                &format!("print client.write_template(\"out/proposal.txt\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                write,
+                &format!("print client.write_template(\"out-link/proposal.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            static_builtin_arity("client.template_summary"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.template_markdown"),
+            Some((1, 1))
+        );
+        assert_eq!(static_builtin_arity("client.write_template"), Some((2, 2)));
     }
 
     #[test]

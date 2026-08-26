@@ -76,6 +76,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1079 | Local reconciliation safety | Two local tables lack a shared safe key, contain duplicate/unsafe key values, or reconciliation output exceeds local policy. The summary redacts row identifiers and disables contact/upload/submission/payment/network/process actions. |
 | P1080 | Local attachment-review safety | A local attachment-review map has missing/unknown/unsafe fields, duplicate labels or paths, URL/contact/raw-markup text, unsafe/non-regular/symlinked attachment source, or oversized output. It only computes local checksums and never sends, uploads, submits, signs, pays, opens a browser, accesses an account/network, or starts a process. |
 | P1081 | Local delivery-package safety | A local delivery-package map has missing/unknown/unsafe fields, duplicate labels/paths/review steps, URL/contact/raw-markup text, unsafe/non-regular/symlinked source, or oversized output. It only computes local checksums and renders a manual review artifact; file copy, PDF rendering, send/upload/submission/payment/browser/account/network/process action are unavailable. |
+| P1082 | Local template safety | A proposal, brief, or copy-only message-template map has a missing/unknown field, unsupported type, invalid/duplicate/empty list, raw-markup/URL/contact text, income/client-acceptance guarantee, or oversized output. It only renders explicit local draft content; send/post/upload/submission/payment/browser/account/network/process actions are unavailable. |
 
 ## Example
 

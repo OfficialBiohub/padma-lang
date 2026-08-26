@@ -1,0 +1,13 @@
+ধরি proposal = {"templateType": "proposal", "title": "বাংলা portfolio page", "overview": "আমি responsive layout এবং clear handover প্রস্তুত করব", "skills": ["HTML", "CSS"], "requirements": ["Mobile layout"], "deliverables": ["Responsive page", "Source-file handover"], "reviewSteps": ["Review every statement", "Confirm scope before manual use"], "callToActionLabel": "Reply after review"}
+
+ধরি brief = {"templateType": "brief", "title": "Portfolio page brief", "overview": "This local brief records the explicit scope for manual review", "skills": ["Design"], "requirements": ["Clear sections"], "deliverables": ["Reviewed brief"], "reviewSteps": ["Review before manual sharing"]}
+
+ধরি message = {"templateType": "message-template", "title": "Follow-up note", "overview": "Hello, I prepared the requested local draft for your review.", "skills": ["Communication"], "requirements": ["Manual copy"], "deliverables": ["Message text"], "reviewSteps": ["Check the visible destination yourself"]}
+
+ধরি summary = client.template_summary(proposal)
+দেখাও text.format("Template: {templateType}", summary)
+দেখাও text.format("Skills: {skillCount}", summary)
+দেখাও text.format("Copy only: {copyOnly}", summary)
+দেখাও text.contains(client.template_markdown(brief), "Local Project Brief")
+দেখাও text.contains(client.template_markdown(message), "Copy-only message text")
+দেখাও client.write_template("out/proposal.md", proposal)

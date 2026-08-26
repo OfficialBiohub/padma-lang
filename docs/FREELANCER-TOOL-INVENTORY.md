@@ -18,6 +18,7 @@ This inventory states only what the current Padma release binary executes, docum
 | 10 | Project templates | Creates basic, data-report, and local response projects with minimum grants. | `padma init`; CLI smoke tests |
 | 11 | Attachment-review manifest | Reads declared project-local attachments for checksum/byte-count review and writes a local Markdown manifest. | `client.attachment_review_*`; `examples/freelancer-attachment-review` |
 | 12 | Verifiable delivery package | Reads declared project-local files for integrity metadata and writes a manual folder/review package manifest. | `client.delivery_package_*`; `examples/freelancer-delivery-package` |
+| 13 | Proposal, brief, and copy-only message templates | Renders explicit Bangla-English local preparation drafts with review checklists. | `client.template_*`; `examples/freelancer-client-templates` |
 
 All client-document writers require only `filesystem = ["write"]` and write a project-local non-symlink `.md` file. The APIs return redacted summaries and disabled-action markers rather than performing external actions.
 
@@ -25,7 +26,7 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 
 | Requested action | Automatic action added? | Implemented safe replacement | Still missing |
 |---|---:|---|---|
-| Client message | No | Copy-only `visible_handoff` message draft and review steps | Rich message-template library by work type |
+| Client message | No | Copy-only `visible_handoff` review plus bounded proposal/brief/message-template Markdown drafts | Manual recipient/context selection and final copy/send remain the user's visible action by design |
 | Upload / attachment delivery | No | Attachment labels, ownership review steps, and a single local checksum/byte-count attachment-review manifest | Manual file selection and upload remain the user's visible action by design |
 | Delivery submission | No | Delivery checklist, visible destination-label review, and local checksum/byte-count delivery package | Manual client-side file selection/upload/submission remains the user's visible action by design |
 | Payment / withdrawal | No | Quote/invoice-draft review labels; payment disabled marker | No payment replacement beyond manual review by design |
@@ -41,7 +42,7 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 | Priority | Capability | Current state |
 |---|---|---|
 | P1 | Client-data delivery/reconciliation | Implemented foundations: local table comparison with redacted counts/checksums plus a separate project-local attachment checksum/ownership review manifest. CSV/JSON cleaning remains separate work. |
-| P1 | Content/document preparation | Not made: explicit-input Bangla-English proposal, brief, and copy template toolkit. |
+| P1 | Content/document preparation | Implemented first foundation: explicit-input Bangla-English proposal, brief, and copy-only message-template Markdown with local review/export. Recipient, platform, and sending remain separate by design. |
 | P1 | Developer delivery toolkit | Not made: deterministic task/test/lint/build manifest and combined checksum manifest. |
 | P1 | API integration templates | Not made: reusable request descriptors, extraction rules, retry/timeout policy, and secret-name references. |
 | P2 | Study-note and extra local record schemas | Not made beyond attendance, expense, and inventory. |

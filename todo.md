@@ -368,7 +368,7 @@
 - [ ] Publish a verified completion matrix for every M18 freelancer subtool and every M24 safe replacement, recording runtime, tests, standalone example, documentation, release verification, and push evidence or the exact missing dependency.
 - [x] Complete client-data delivery/reconciliation first: bounded local CSV/JSON comparison, deterministic mismatch/duplicate/missing-field summary, redacted checksum manifest, and reviewed project-local Markdown export.
 - [x] Complete the combined attachment-review safe replacement after reconciliation: local file labels, checksum verification, ownership/review labels, destination label, and copy-only handoff artifact without any send/upload/submission action.
-- [ ] Complete explicit-input Bangla-English proposal/brief/message-template preparation only after the data/review foundations, with Markdown-safe rendering and no recipient/contact/account/platform action.
+- [x] Complete explicit-input Bangla-English proposal/brief/message-template preparation only after the data/review foundations, with Markdown-safe rendering and no recipient/contact/account/platform action.
 - [ ] Complete deterministic developer delivery task/checksum manifest preparation after the prior local data features, without arbitrary shell, background, deployment, or remote authority.
 - [ ] Keep every remaining plan-only capability unmarked until its runtime, tests, Termux example, documentation, repository verification, focused commit, and GitHub push are complete.
 
@@ -385,3 +385,10 @@
 - [x] Add a local Markdown manifest and redacted summary with explicit disabled send/upload/submission/payment/browser/account/network/process markers; do not create a PDF renderer until a separately audited local document-rendering contract, fonts, limits, and artifact policy exist.
 - [x] Preserve existing `browser inspect|plan|confirm|handoff` as the safe visible-browser alternative; do not add CDP connection, cookie/session access, browser event hooks, CAPTCHA/2FA detection, credential handling, browser control, or automatic workflow resume.
 - [x] Add diagnostics, positive/negative tests, a Termux example, public documentation, full repository verification, focused commit, and GitHub push before marking complete.
+
+## M28 — Local Proposal, Brief, and Message Templates
+
+- [x] Define one strict explicit-input draft family for `proposal`, `brief`, and `message-template`, with a bounded topic/title, declared skills/requirements/deliverables, optional call-to-action label, and manual review steps; reject recipient/contact/account/platform/authorization/payment/upload/send fields and income/acceptance guarantees.
+- [x] Implement deterministic escaped Markdown, a redacted summary, and project-local `.md` export requiring only `filesystem:write`; make every external action marker fixed as disabled and treat message text as copy-only.
+- [x] Add a bilingual diagnostic plus positive/negative tests for wrong draft type, unknown/unsafe fields, raw markup/URL/contact injection, duplicate/empty lists, bad writer path/symlink/extension/missing grant, and no browser/network/process/send/upload/submission/payment action.
+- [x] Publish a standalone Bangla-English Termux example, public guide, standard-library/diagnostic/inventory updates, full repository verification, focused commit, and GitHub push before marking complete.

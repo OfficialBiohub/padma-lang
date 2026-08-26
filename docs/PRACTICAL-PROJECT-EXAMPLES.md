@@ -28,6 +28,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Freelancer portfolio and handoff | `examples/freelancer-portfolio-handoff` | Public case-study Markdown and user-mediated message/attachment review preparation | It cannot send, post, upload/download, submit delivery, sign, pay, log in, use a browser/network/account, or write shared storage. |
 | Freelancer attachment review | `examples/freelancer-attachment-review` | Local checksum/byte-count attachment-review manifest with destination and ownership labels | It cannot send, upload/download, submit delivery, sign, pay, log in, use a browser/network/account, or write shared storage. |
 | Freelancer delivery package | `examples/freelancer-delivery-package` | Local checksum/byte-count integrity manifest with manual folder and review checklist | It cannot copy files, render a PDF, send, upload/download, submit delivery, sign, pay, log in, use a browser/network/account, or write shared storage. |
+| Freelancer client templates | `examples/freelancer-client-templates` | Bangla-English local proposal, brief, and copy-only message-template preparation | It cannot find recipients, send/post, upload/download, submit delivery, sign, pay, log in, use a browser/network/account, or write shared storage. |
 | Local household records | `examples/local-records-household` | Attendance, expense, and inventory CSV validation plus a local Markdown expense report | It cannot cloud-sync, contact a school/shop, make a payment, start a process, or take stock/account action. |
 
 ## 1. Authorized media download
