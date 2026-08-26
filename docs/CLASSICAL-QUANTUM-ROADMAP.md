@@ -17,6 +17,7 @@ The local circuit surface follows a deliberately small OpenQASM 3-compatible sub
 | Local simulation | Implemented bounded subset | Exact state-vector probabilities for at most 12 qubits, all-zero initial state, no sampling or noise. |
 | Observable analysis | Implemented bounded subset | One full-register coefficient-`1` `I`/`X`/`Y`/`Z` Pauli-product expectation. |
 | QPU/provider execution | Not implemented | No provider account, credential, network request, job, polling, result retrieval, cost, quota, or cancellation action exists. |
+| Local backend response routing | Implemented bounded foundation | `server.route_response` validates explicit method/path route maps, returns deterministic JSON response envelopes, and stays in memory. Existing `padma serve .` remains only a capability-gated loopback health server; custom routes, database/auth/payment/deployment are not connected. |
 
 ## Sequential production milestones
 
@@ -28,6 +29,7 @@ The local circuit surface follows a deliberately small OpenQASM 3-compatible sub
 | M35: bounded classical optimisation primitives | Implemented bounded foundation | `optimize.quadratic_value`, `optimize.finite_difference_gradient`, and `optimize.projected_gradient_step` handle only an explicit finite separable quadratic and a one-step local projected proposal. They do not accept a Hamiltonian/circuit/callback, mutate state, loop to convergence, train a model, or implement VQE/QAOA/QML. |
 | M36: program tooling/interchange | Implemented bounded foundation | `quantum.assess_openqasm3` proves only byte-exact equality with Padma’s existing bounded renderer and returns stable local artifact metadata. A general parser, QASM round-trip import, compiler, execution path, or provider compatibility claim remains unimplemented. |
 | M37: provider integration assessment | Implemented bounded assessment foundation | `quantum.provider_readiness` validates only provider labels, reviewed artifact fingerprints, and redacted public policy notes, then returns required-control markers. A cloud adapter still needs explicit capability grants, secret management, user-confirmed cost/job actions, cancellation, provenance, provider-specific transport, and security regressions. |
+| M39: local backend route responses | Implemented bounded foundation | `server.route_response` provides exact method/path matching and finite JSON response envelopes for practice and local application logic. It is not a socket router, backend framework, authentication service, database ORM, payment system, or public deployment. |
 
 ## Non-negotiable production boundaries
 

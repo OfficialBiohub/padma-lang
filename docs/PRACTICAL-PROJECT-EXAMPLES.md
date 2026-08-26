@@ -15,6 +15,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Authorized media download | `examples/authorized-media-download` | Interactive `media.download` with `yt-dlp` | Only content you own or are authorized to download; no platform bypass or shared-storage write in project mode. |
 | Static website builder | `examples/static-website-builder` | Writing an HTML file safely inside a project | It creates a website file; Padma does not publish it or operate a public host. |
 | Backend response pipeline | `examples/backend-response-pipeline` | Producing a validated JSON HTTP response envelope | It does not open a public server or receive requests. |
+| Local backend routes | `examples/local-backend-routes` | Matching explicit education/e-commerce-style method/path requests to deterministic JSON response maps | It does not open a custom socket server, read a database, authenticate users, process payments, or deploy a public website. |
 | Student SQLite records | `examples/student-records-sqlite` | Local structured persistence without raw SQL | It is not an ORM, remote database, or arbitrary SQL console. |
 | Defensive URL inspector | `examples/defensive-url-inspector` | Input validation and manual-review report | It checks syntax only; it does not scan, attack, or prove a site is safe. |
 | Local password check | `examples/local-password-check` | Local password hash and verification boundary | It is not a hosted login, user database, password reset, or authentication server. |

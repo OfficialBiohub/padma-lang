@@ -462,3 +462,10 @@
 - [x] Implement deterministic release helper validation and tests for safe prefix/path handling, existing installation replacement/rollback behavior, missing prerequisites, release version verification, REPL launch, and `.pd` script execution without changing the public `padma` CLI contract.
 - [x] Add clear Bangla-English Termux guidance, a no-side-effect smoke-test project, troubleshooting for `padma: command not found`, and strict statement of what the installer does and does not do.
 - [x] Run full repository verification, focused commit, and GitHub push before marking complete.
+
+## M39 — Local Backend Route Responses
+
+- [x] Define a strict local backend route-response request and route schema with exact method/path/status/body fields; reject callbacks, URLs, credentials, database, provider, payment, deployment, and arbitrary action fields.
+- [x] Implement deterministic in-memory route matching and JSON response envelopes with bounded paths/routes/bodies, 404 fallback, no socket/network/process side effect, bilingual P1091, and positive/negative regression tests.
+- [x] Publish beginner-facing documentation and an education/e-commerce-style Termux example.
+- [x] Run the full repository verification, focused commit, and GitHub push before marking M39 complete.

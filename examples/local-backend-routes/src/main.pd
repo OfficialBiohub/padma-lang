@@ -1,0 +1,12 @@
+ধরি routes = [{"method": "GET", "path": "/students", "status": 200, "body": {"ok": true, "items": ["Rafi", "Mitu"]}}, {"method": "GET", "path": "/products", "status": 200, "body": {"ok": true, "items": [{"name": "খাতা", "price": 50}]}}]
+
+ধরি studentRequest = {"method": "GET", "path": "/students"}
+ধরি studentResponse = server.route_response(studentRequest, routes)
+দেখাও studentResponse["status"]
+দেখাও studentResponse["body"]
+
+ধরি unknownRequest = {"method": "GET", "path": "/missing"}
+ধরি unknownResponse = server.route_response(unknownRequest, routes)
+দেখাও unknownResponse["status"]
+দেখাও unknownResponse["matched"]
+দেখাও unknownResponse["network"]

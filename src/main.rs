@@ -346,6 +346,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1089") => (format!("Local OpenQASM subset assessment is unsafe or invalid: `{detail}"), Some("Use only exact ASCII OpenQASM 3.0 text emitted by Padma's bounded renderer; this is not a parser/import/execution/provider/QPU/network/process API.".into())),
         (Locale::Bangla, "P1090") => (format!("quantum provider readiness assessment নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded provider label, reviewed artifact metadata, এবং public policy note ব্যবহার করুন; Padma token/credential/account/job/endpoint পড়বে না বা provider/QPU/network/process action চালাবে না।".into())),
         (Locale::English, "P1090") => (format!("Quantum provider readiness assessment is unsafe or invalid: `{detail}"), Some("Use only a bounded provider label, reviewed artifact metadata, and public policy note; Padma will not read tokens/credentials/accounts/jobs/endpoints or run provider/QPU/network/process actions.".into())),
+        (Locale::Bangla, "P1091") => (format!("local backend route request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded method, path, status, এবং JSON body ব্যবহার করুন; কোনো callback, shell, network, file, credential, বা remote deployment action নেই।".into())),
+        (Locale::English, "P1091") => (format!("Local backend route request is unsafe or invalid: `{detail}"), Some("Use only bounded method, path, status, and JSON body values; callbacks, shell, network, file, credential, and remote deployment actions are unavailable.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1753,6 +1755,10 @@ fn quantum_provider_assessment_error(
     detail: &str,
 ) -> PadmaError {
     error_for(locale, "P1090", position, detail)
+}
+
+fn local_backend_route_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1091", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -9819,6 +9825,14 @@ impl Interpreter {
                     }
                     return record_summary_value(kind, &table, self.locale, *position);
                 }
+                if name == "server.route_response" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let request = self.evaluate(&arguments[0])?;
+                    let routes = self.evaluate(&arguments[1])?;
+                    return local_backend_route_response(&request, &routes, self.locale, *position);
+                }
                 if name == "http.get" {
                     if arguments.len() != 1 {
                         return Err(error_for(self.locale, "P1009", *position, name));
@@ -16778,11 +16792,27 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "quantum.simulate_probabilities"
         | "optimize.quadratic_value"
         | "quantum.provider_readiness" => Some((1, 1)),
-        "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
-        | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
-        | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
-        | "report.summary" | "profile.validate" | "profile.summary" | "record.validate"
-        | "record.summary" => Some((2, 2)),
+        "file.write"
+        | "text.contains"
+        | "text.split"
+        | "text.join"
+        | "text.format"
+        | "random.int"
+        | "table.read"
+        | "table.select"
+        | "table.count_by"
+        | "table.write_csv"
+        | "fs.list"
+        | "fs.copy_plan"
+        | "fs.move_plan"
+        | "fs.archive_plan"
+        | "report.markdown"
+        | "report.summary"
+        | "profile.validate"
+        | "profile.summary"
+        | "record.validate"
+        | "record.summary"
+        | "server.route_response" => Some((2, 2)),
         "text.replace"
         | "fs.search_text"
         | "report.write_markdown"
@@ -17312,6 +17342,273 @@ fn usage(locale: Locale) -> String {
     };
     format!("{text}{starter_help}")
 }
+const LOCAL_BACKEND_ROUTE_MAX_COUNT: usize = 64;
+const LOCAL_BACKEND_ROUTE_MAX_PATH_BYTES: usize = 128;
+const LOCAL_BACKEND_ROUTE_MAX_BODY_BYTES: usize = 256 * 1024;
+
+fn local_backend_route_response(
+    request: &Value,
+    routes: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let Value::Map(request) = request else {
+        return Err(local_backend_route_error(
+            locale,
+            position,
+            "request must be a map",
+        ));
+    };
+    let request_allowed = BTreeSet::from(["method", "path"]);
+    if request
+        .keys()
+        .any(|key| !request_allowed.contains(key.as_str()))
+        || request.len() != request_allowed.len()
+    {
+        return Err(local_backend_route_error(
+            locale,
+            position,
+            "request must contain exactly method and path",
+        ));
+    }
+    let method = request
+        .get("method")
+        .ok_or_else(|| local_backend_route_error(locale, position, "missing method"))?;
+    let method = expect_string(method, locale, position, "backend method")?;
+    if !matches!(method, "GET" | "POST" | "PUT" | "PATCH" | "DELETE") {
+        return Err(local_backend_route_error(
+            locale,
+            position,
+            "method must be GET, POST, PUT, PATCH, or DELETE",
+        ));
+    }
+    let path = request
+        .get("path")
+        .ok_or_else(|| local_backend_route_error(locale, position, "missing path"))?;
+    let path = expect_string(path, locale, position, "backend path")?;
+    if path.is_empty()
+        || path.len() > LOCAL_BACKEND_ROUTE_MAX_PATH_BYTES
+        || !path.is_ascii()
+        || !path.starts_with('/')
+        || path.contains(' ')
+        || path.contains('\t')
+        || path.contains('\r')
+        || path.contains('\n')
+        || path.contains("..")
+        || path.contains('?')
+        || path.contains('#')
+    {
+        return Err(local_backend_route_error(
+            locale,
+            position,
+            "path must be an ASCII absolute route without query, fragment, whitespace, or traversal",
+        ));
+    }
+
+    let Value::List(routes) = routes else {
+        return Err(local_backend_route_error(
+            locale,
+            position,
+            "routes must be a list",
+        ));
+    };
+    if routes.is_empty() || routes.len() > LOCAL_BACKEND_ROUTE_MAX_COUNT {
+        return Err(local_backend_route_error(
+            locale,
+            position,
+            "routes must contain 1..64 entries",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for route in routes {
+        let Value::Map(route) = route else {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "each route must be a map",
+            ));
+        };
+        let allowed = BTreeSet::from(["method", "path", "status", "body"]);
+        if route.keys().any(|key| !allowed.contains(key.as_str())) || route.len() != allowed.len() {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "each route must contain exactly method, path, status, and body",
+            ));
+        }
+        let route_method = expect_string(
+            route.get("method").ok_or_else(|| {
+                local_backend_route_error(locale, position, "missing route method")
+            })?,
+            locale,
+            position,
+            "route method",
+        )?;
+        if !matches!(route_method, "GET" | "POST" | "PUT" | "PATCH" | "DELETE") {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "route method must be GET, POST, PUT, PATCH, or DELETE",
+            ));
+        }
+        let route_path = expect_string(
+            route
+                .get("path")
+                .ok_or_else(|| local_backend_route_error(locale, position, "missing route path"))?,
+            locale,
+            position,
+            "route path",
+        )?;
+        if route_path.is_empty()
+            || route_path.len() > LOCAL_BACKEND_ROUTE_MAX_PATH_BYTES
+            || !route_path.is_ascii()
+            || !route_path.starts_with('/')
+            || route_path.contains(' ')
+            || route_path.contains('\t')
+            || route_path.contains('\r')
+            || route_path.contains('\n')
+            || route_path.contains("..")
+            || route_path.contains('?')
+            || route_path.contains('#')
+        {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "route path is outside the bounded local route policy",
+            ));
+        }
+        let identity = format!("{route_method} {route_path}");
+        if !seen.insert(identity) {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "duplicate method/path route",
+            ));
+        }
+        let status = expect_number(
+            route.get("status").ok_or_else(|| {
+                local_backend_route_error(locale, position, "missing route status")
+            })?,
+            locale,
+            position,
+            "route status",
+        )?;
+        if status.fract() != 0.0 || !(100.0..=599.0).contains(&status) {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "route status must be an integer from 100 through 599",
+            ));
+        }
+        let body = route
+            .get("body")
+            .ok_or_else(|| local_backend_route_error(locale, position, "missing route body"))?;
+        let body_json = value_to_json(body).map_err(|_| {
+            local_backend_route_error(
+                locale,
+                position,
+                "route body must contain finite JSON values",
+            )
+        })?;
+        let body_text = serde_json::to_string(&body_json).map_err(|_| {
+            local_backend_route_error(
+                locale,
+                position,
+                "route body could not be serialized as JSON",
+            )
+        })?;
+        if body_text.len() > LOCAL_BACKEND_ROUTE_MAX_BODY_BYTES {
+            return Err(local_backend_route_error(
+                locale,
+                position,
+                "route body exceeds the local JSON byte limit",
+            ));
+        }
+    }
+
+    for route in routes {
+        let Value::Map(route) = route else {
+            unreachable!()
+        };
+        let route_method = match route.get("method") {
+            Some(Value::String(value)) => value,
+            _ => unreachable!(),
+        };
+        let route_path = match route.get("path") {
+            Some(Value::String(value)) => value,
+            _ => unreachable!(),
+        };
+        if route_method != method || route_path != path {
+            continue;
+        }
+        let status = match route.get("status") {
+            Some(Value::Number(value)) => *value,
+            _ => unreachable!(),
+        };
+        let body_json = value_to_json(route.get("body").expect("validated route body"))
+            .expect("validated JSON body");
+        let body_text = serde_json::to_string(&body_json).expect("validated JSON serialization");
+        return Ok(Value::Map(BTreeMap::from([
+            ("status".into(), Value::Number(status)),
+            (
+                "statusText".into(),
+                Value::String(local_backend_status_text(status).into()),
+            ),
+            (
+                "headers".into(),
+                Value::Map(BTreeMap::from([(
+                    "content-type".into(),
+                    Value::String("application/json; charset=utf-8".into()),
+                )])),
+            ),
+            ("body".into(), Value::String(body_text)),
+            ("matched".into(), Value::Boolean(true)),
+            ("routeCount".into(), Value::Number(routes.len() as f64)),
+            ("network".into(), Value::String("disabled".into())),
+        ])));
+    }
+
+    Ok(Value::Map(BTreeMap::from([
+        ("status".into(), Value::Number(404.0)),
+        ("statusText".into(), Value::String("Not Found".into())),
+        (
+            "headers".into(),
+            Value::Map(BTreeMap::from([(
+                "content-type".into(),
+                Value::String("application/json; charset=utf-8".into()),
+            )])),
+        ),
+        (
+            "body".into(),
+            Value::String("{\"error\":\"not_found\"}".into()),
+        ),
+        ("matched".into(), Value::Boolean(false)),
+        ("routeCount".into(), Value::Number(routes.len() as f64)),
+        ("network".into(), Value::String("disabled".into())),
+    ])))
+}
+
+fn local_backend_status_text(status: f64) -> &'static str {
+    match status as u16 {
+        200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No Content",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        422 => "Unprocessable Entity",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        503 => "Service Unavailable",
+        _ => "Custom Status",
+    }
+}
+
 fn write_local_server_response(stream: &mut TcpStream, status: &str, body: &str) -> io::Result<()> {
     write!(
         stream,
@@ -18567,6 +18864,126 @@ mod tests {
         .unwrap();
         assert!(approved.capabilities.contains("network:ai"));
         assert!(approved.capabilities.contains("server:local"));
+    }
+
+    #[test]
+    fn local_backend_route_response_is_deterministic_and_bounded() {
+        let request = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/students".into())),
+        ]));
+        let routes = Value::List(vec![Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/students".into())),
+            ("status".into(), Value::Number(200.0)),
+            (
+                "body".into(),
+                Value::Map(BTreeMap::from([
+                    ("ok".into(), Value::Boolean(true)),
+                    ("count".into(), Value::Number(2.0)),
+                ])),
+            ),
+        ]))]);
+        let first =
+            local_backend_route_response(&request, &routes, Locale::English, Position::new(1, 1))
+                .unwrap();
+        let second =
+            local_backend_route_response(&request, &routes, Locale::English, Position::new(1, 1))
+                .unwrap();
+        assert_eq!(first, second);
+        let Value::Map(result) = first else {
+            panic!("expected response map")
+        };
+        assert_eq!(result.get("status"), Some(&Value::Number(200.0)));
+        assert_eq!(result.get("matched"), Some(&Value::Boolean(true)));
+        assert_eq!(
+            result.get("body"),
+            Some(&Value::String("{\"count\":2.0,\"ok\":true}".into()))
+        );
+        assert_eq!(
+            result.get("network"),
+            Some(&Value::String("disabled".into()))
+        );
+
+        let missing_request = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/missing".into())),
+        ]));
+        let Value::Map(missing) = local_backend_route_response(
+            &missing_request,
+            &routes,
+            Locale::English,
+            Position::new(1, 1),
+        )
+        .unwrap() else {
+            panic!("expected fallback response map")
+        };
+        assert_eq!(missing.get("status"), Some(&Value::Number(404.0)));
+        assert_eq!(missing.get("matched"), Some(&Value::Boolean(false)));
+
+        let duplicate_routes = Value::List(vec![
+            match &routes {
+                Value::List(items) => items[0].clone(),
+                _ => unreachable!(),
+            },
+            match &routes {
+                Value::List(items) => items[0].clone(),
+                _ => unreachable!(),
+            },
+        ]);
+        assert_eq!(
+            local_backend_route_response(
+                &request,
+                &duplicate_routes,
+                Locale::English,
+                Position::new(1, 1),
+            )
+            .unwrap_err()
+            .code,
+            "P1091"
+        );
+        assert_eq!(static_builtin_arity("server.route_response"), Some((2, 2)));
+    }
+
+    #[test]
+    fn local_backend_route_response_rejects_unsafe_schema_and_external_fields() {
+        let unsafe_request = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/../secret".into())),
+        ]));
+        let routes = Value::List(vec![Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/".into())),
+            ("status".into(), Value::Number(200.0)),
+            ("body".into(), Value::String("ok".into())),
+        ]))]);
+        assert_eq!(
+            local_backend_route_response(
+                &unsafe_request,
+                &routes,
+                Locale::English,
+                Position::new(1, 1),
+            )
+            .unwrap_err()
+            .code,
+            "P1091"
+        );
+        let external_request = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/".into())),
+            ("url".into(), Value::String("https://example.com".into())),
+        ]));
+        assert_eq!(
+            local_backend_route_response(
+                &external_request,
+                &routes,
+                Locale::Bangla,
+                Position::new(1, 1),
+            )
+            .unwrap_err()
+            .code,
+            "P1091"
+        );
     }
 
     #[test]

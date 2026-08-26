@@ -207,6 +207,16 @@ The strict map accepts only a `1..20` qubit count, supported gate maps (`h`, `x`
 
 The only v1 objective has equal-length `parameters`, `targets`, positive `weights`, `lowerBounds`, and `upperBounds` vectors, each from one through sixteen finite values in the local numeric range. `epsilon` is `0.000001..1` and must retain every parameter strictly inside its bounds; `learningRate` is finite in `(0, 1]`. A step result explicitly states `proposalOnly = true`, `iteration = "not-run"`, `execution = "disabled"`, and no mutation/callback/provider/QPU/credential/network/child-process authority. This is not a callback runner, convergence loop, automatic optimiser, model-training API, or VQE/QAOA/QML/Grover framework. The optimisation APIs do not accept a quantum circuit or Hamiltonian and do not automatically connect to `quantum.*`. See [`LOCAL-OPTIMIZATION.md`](LOCAL-OPTIMIZATION.md) for the formula, precision policy, limits, and Termux example.
 
+## Local backend route responses
+
+| API | Result and boundary |
+|---|---|
+| `server.route_response(request, routes)` | Matches one explicit `{method, path}` request against up to 64 unique route maps and returns a deterministic JSON response envelope. No capability, network, file, process, callback, or database action is used. |
+
+The request method is one of `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`; the ASCII path starts with `/`, is at most 128 bytes, and has no query, fragment, whitespace, or `..` traversal. Every route has exactly `method`, `path`, `status`, and `body`; status is an integer from `100` through `599`, and the finite JSON body is at most 256 KiB. Duplicate method/path routes and unknown fields are rejected with `P1091`. A missing route returns a deterministic 404 envelope. See [`LOCAL-BACKEND-ROUTES.md`](LOCAL-BACKEND-ROUTES.md).
+
+This helper is a response-routing foundation, not a custom socket server or a full backend framework. Existing `padma serve .` remains a separate loopback health server requiring `server:local`; it does not automatically attach these routes. Authentication, database transactions, request-body parsing, rate limits, audit logging, public deployment, payment, and e-commerce checkout are separate future capabilities.
+
 ## Interoperability bridge
 
 | API | Result and boundary |
