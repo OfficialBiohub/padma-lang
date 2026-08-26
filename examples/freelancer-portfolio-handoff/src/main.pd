@@ -1,0 +1,11 @@
+ধরি caseStudy = {"projectTitle": "Mobile-friendly portfolio page", "challenge": "Readers needed a small mobile guide", "solution": "Built a responsive public reference page", "outcomes": ["Mobile layout reviewed", "Source structure documented"], "publicLinks": ["https://portfolio.example/work"], "notes": "Verify permission before sharing."}
+ধরি handoff = {"destinationLabel": "Platform compose screen", "messageDraft": "Please review the attached work summary.", "attachmentLabels": ["Case-study Markdown"], "reviewSteps": ["Confirm destination manually", "Confirm attachment ownership"]}
+ধরি portfolioSummary = client.case_study_summary(caseStudy)
+ধরি handoffSummary = client.visible_handoff_summary(handoff)
+ধরি saved = client.write_case_study("out/case-study.md", caseStudy)
+
+দেখাও text.format("Outcomes: {outcomeCount}", portfolioSummary)
+দেখাও text.format("Public links: {publicLinkCount}", portfolioSummary)
+দেখাও text.format("Attachments: {attachmentCount}", handoffSummary)
+দেখাও handoffSummary["send"]
+দেখাও text.format("Saved: {saved}", {"saved": saved})

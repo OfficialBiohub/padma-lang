@@ -26,6 +26,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Local client documents](CLIENT-DOCUMENTS.md) | Strict local quote/invoice-draft Markdown preparation with user-reviewed client/payment boundaries |
 | [Local scope-of-work](LOCAL-SCOPE-OF-WORK.md) | Strict local scope/exclusion/revision draft with redacted summary and project-local review export |
 | [Local delivery checklists](LOCAL-DELIVERY-CHECKLISTS.md) | Strict local deliverable/review/handover draft with redacted summary and project-local review export |
+| [Local portfolio and visible handoff](LOCAL-PORTFOLIO-HANDOFF.md) | Strict public case-study draft plus no-send/no-upload manual review preparation |
 | [Capability status](CAPABILITY-STATUS.md) | Evidence-based distinction between implemented runtime, bounded behavior, and remaining delivery backlog |
 
 ## Security and local runtime

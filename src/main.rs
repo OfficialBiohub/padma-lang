@@ -318,6 +318,10 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1075") => (format!("Local scope-of-work draft is unsafe or invalid: `{detail}`"), Some("Use only bounded project/scope/exclusion/revision fields and project-local `.md` review output; Padma will not run client contact, contract signing, marketplace submission, payment, network, or process actions.".into())),
         (Locale::Bangla, "P1076") => (format!("local delivery checklist নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded project/deliverable/review/handover field এবং project-local `.md` review output ব্যবহার করুন; Padma upload, client contact, delivery submission, payment, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1076") => (format!("Local delivery checklist is unsafe or invalid: `{detail}`"), Some("Use only bounded project/deliverable/review/handover fields and project-local `.md` review output; Padma will not run upload, client contact, delivery submission, payment, network, or process actions.".into())),
+        (Locale::Bangla, "P1077") => (format!("local portfolio case-study নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded public project/challenge/solution/outcome field ব্যবহার করুন; Padma private client data, contact, payment, marketplace, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1077") => (format!("Local portfolio case study is unsafe or invalid: `{detail}`"), Some("Use only bounded public project/challenge/solution/outcome fields; Padma will not handle private client data, contact, payment, marketplace, network, or process actions.".into())),
+        (Locale::Bangla, "P1078") => (format!("visible handoff manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded review label, message draft, এবং attachment label ব্যবহার করুন; Padma send, upload, submit, payment, browser, account, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1078") => (format!("Visible handoff manifest is unsafe or invalid: `{detail}`"), Some("Use only bounded review labels, message drafts, and attachment labels; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1589,6 +1593,7 @@ const CLIENT_DOCUMENT_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
 const SCOPE_OF_WORK_MAX_ITEMS: usize = 20;
 const SCOPE_OF_WORK_MAX_REVISIONS: u64 = 10;
 const DELIVERY_CHECKLIST_MAX_ITEMS: usize = 20;
+const PORTFOLIO_MAX_LINKS: usize = 5;
 const RECORD_MAX_TEXT_BYTES: usize = 160;
 const RECORD_MAX_NOTE_BYTES: usize = 512;
 const RECORD_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
@@ -1664,6 +1669,14 @@ fn scope_of_work_error(locale: Locale, position: Position, detail: &str) -> Padm
 
 fn delivery_checklist_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1076", position, detail)
+}
+
+fn portfolio_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1077", position, detail)
+}
+
+fn visible_handoff_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1078", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -3267,6 +3280,490 @@ fn delivery_checklist_summary(draft: &DeliveryChecklistDraft) -> Value {
         ),
         ("contractSigning".into(), Value::String("disabled".into())),
         ("payment".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
+#[derive(Clone, Debug)]
+struct PortfolioCaseStudyDraft {
+    project_title: String,
+    challenge: String,
+    solution: String,
+    outcomes: Vec<String>,
+    public_links: Vec<String>,
+    notes: Option<String>,
+}
+
+fn portfolio_text(
+    value: Option<&Value>,
+    required: bool,
+    field: &str,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<Option<String>, PadmaError> {
+    let Some(value) = value else {
+        return if required {
+            Err(portfolio_error(
+                locale,
+                position,
+                "portfolio case-study is missing a required text field",
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    let Value::String(text) = value else {
+        return Err(portfolio_error(
+            locale,
+            position,
+            &format!("portfolio case-study {field} must be text"),
+        ));
+    };
+    let lowered = text.to_ascii_lowercase();
+    if text.is_empty()
+        || text.len() > max_bytes
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+        || text.contains("://")
+        || text.contains('@')
+        || text.contains("www.")
+        || lowered.contains("income")
+        || lowered.contains("guarantee")
+        || lowered.contains("guaranteed")
+        || text.contains('$')
+        || text.contains('৳')
+    {
+        return Err(portfolio_error(locale, position, "portfolio text must be bounded public content without raw HTML, URL/contact delimiters, or unverified income/guarantee claims"));
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn portfolio_text_list(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let Some(Value::List(values)) = value else {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "portfolio case-study is missing a required text list field",
+        ));
+    };
+    if values.is_empty() || values.len() > DELIVERY_CHECKLIST_MAX_ITEMS {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "portfolio item count is outside the allowed limit",
+        ));
+    }
+    let mut items = Vec::with_capacity(values.len());
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let item = portfolio_text(
+            Some(value),
+            true,
+            field,
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("required portfolio item");
+        if !seen.insert(item.clone()) {
+            return Err(portfolio_error(
+                locale,
+                position,
+                "portfolio list items must not be duplicated",
+            ));
+        }
+        items.push(item);
+    }
+    Ok(items)
+}
+
+fn portfolio_public_links(
+    value: Option<&Value>,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Value::List(values) = value else {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "publicLinks must be a list of safe https URLs",
+        ));
+    };
+    if values.len() > PORTFOLIO_MAX_LINKS {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "public link count is outside the allowed limit",
+        ));
+    }
+    let mut links = Vec::with_capacity(values.len());
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let Value::String(link) = value else {
+            return Err(portfolio_error(
+                locale,
+                position,
+                "publicLinks must contain text URLs",
+            ));
+        };
+        let lowered = link.to_ascii_lowercase();
+        if link.len() > 512
+            || link.chars().any(char::is_control)
+            || !link.starts_with("https://")
+            || link.contains(['@', '?', '#', ' '])
+            || lowered.contains("localhost")
+            || lowered.contains(".local")
+            || lowered.contains("127.")
+            || lowered.contains("192.168.")
+            || lowered.contains("10.")
+            || lowered.contains('[')
+            || !seen.insert(link.clone())
+        {
+            return Err(portfolio_error(locale, position, "publicLinks must be unique public https URLs without credentials, query, fragment, or private host indicators"));
+        }
+        links.push(link.clone());
+    }
+    Ok(links)
+}
+
+fn portfolio_case_study_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<PortfolioCaseStudyDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "portfolio case-study draft must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "projectTitle",
+        "challenge",
+        "solution",
+        "outcomes",
+        "publicLinks",
+        "notes",
+    ]);
+    if fields.len() < 4
+        || fields.len() > allowed.len()
+        || fields.keys().any(|key| !allowed.contains(key.as_str()))
+    {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "portfolio case-study contains missing or unsupported fields",
+        ));
+    }
+    Ok(PortfolioCaseStudyDraft {
+        project_title: portfolio_text(
+            fields.get("projectTitle"),
+            true,
+            "projectTitle",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("project title"),
+        challenge: portfolio_text(
+            fields.get("challenge"),
+            true,
+            "challenge",
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?
+        .expect("challenge"),
+        solution: portfolio_text(
+            fields.get("solution"),
+            true,
+            "solution",
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?
+        .expect("solution"),
+        outcomes: portfolio_text_list(fields.get("outcomes"), "outcome", locale, position)?,
+        public_links: portfolio_public_links(fields.get("publicLinks"), locale, position)?,
+        notes: portfolio_text(
+            fields.get("notes"),
+            false,
+            "notes",
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?,
+    })
+}
+
+fn portfolio_case_study_markdown(
+    draft: &PortfolioCaseStudyDraft,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut lines = vec!["# Portfolio Case Study (Draft)".into(), String::new(), "**Status:** User review required. Public claims, links, ownership, and permission must be checked manually before sharing.".into(), String::new(), "## Project".into(), format!("- **Title:** {}", report_markdown_escape(&draft.project_title)), String::new(), "## Challenge".into(), report_markdown_escape(&draft.challenge), String::new(), "## Solution".into(), report_markdown_escape(&draft.solution), String::new(), "## Self-reported outcomes".into()];
+    lines.extend(
+        draft
+            .outcomes
+            .iter()
+            .map(|item| format!("- {}", report_markdown_escape(item))),
+    );
+    if !draft.public_links.is_empty() {
+        lines.push(String::new());
+        lines.push("## Public links (review ownership before sharing)".into());
+        lines.extend(
+            draft
+                .public_links
+                .iter()
+                .map(|link| format!("- <{}>", link)),
+        );
+    }
+    if let Some(notes) = &draft.notes {
+        lines.push(String::new());
+        lines.push("## Notes".into());
+        lines.push(report_markdown_escape(notes));
+    }
+    lines.push(String::new());
+    lines.push("## Sharing boundary".into());
+    lines.push("- Client contact: user-reviewed".into());
+    lines.push("- Upload/post/message: disabled".into());
+    lines.push("- Marketplace/account/browser/network/process: disabled".into());
+    lines.push("- Contract/payment: disabled".into());
+    let rendered = format!("{}\n", lines.join("\n"));
+    if rendered.len() > REPORT_MAX_BYTES {
+        return Err(portfolio_error(
+            locale,
+            position,
+            "rendered portfolio case-study exceeds the local output byte limit",
+        ));
+    }
+    Ok(rendered)
+}
+
+fn portfolio_case_study_summary(draft: &PortfolioCaseStudyDraft) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "outcomeCount".into(),
+            Value::Number(draft.outcomes.len() as f64),
+        ),
+        (
+            "publicLinkCount".into(),
+            Value::Number(draft.public_links.len() as f64),
+        ),
+        ("hasNotes".into(), Value::Boolean(draft.notes.is_some())),
+        (
+            "clientContact".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("upload".into(), Value::String("disabled".into())),
+        ("posting".into(), Value::String("disabled".into())),
+        ("marketplace".into(), Value::String("disabled".into())),
+        ("payment".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
+#[derive(Clone, Debug)]
+struct VisibleHandoffDraft {
+    destination_label: String,
+    message_draft: String,
+    attachment_labels: Vec<String>,
+    review_steps: Vec<String>,
+}
+
+fn handoff_text(
+    value: Option<&Value>,
+    field: &str,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let Some(Value::String(text)) = value else {
+        return Err(visible_handoff_error(
+            locale,
+            position,
+            &format!("visible handoff {field} must be text"),
+        ));
+    };
+    if text.is_empty()
+        || text.len() > max_bytes
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+        || text.contains("://")
+        || text.contains('@')
+        || text.contains("www.")
+    {
+        return Err(visible_handoff_error(locale, position, "visible handoff text must be bounded content without raw HTML, URL, or contact delimiters"));
+    }
+    Ok(text.to_string())
+}
+
+fn handoff_list(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let Some(Value::List(values)) = value else {
+        return Err(visible_handoff_error(
+            locale,
+            position,
+            "visible handoff is missing a required text list field",
+        ));
+    };
+    if values.is_empty() || values.len() > DELIVERY_CHECKLIST_MAX_ITEMS {
+        return Err(visible_handoff_error(
+            locale,
+            position,
+            "visible handoff item count is outside the allowed limit",
+        ));
+    }
+    let mut result = Vec::new();
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let item = handoff_text(
+            Some(value),
+            field,
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?;
+        if !seen.insert(item.clone()) {
+            return Err(visible_handoff_error(
+                locale,
+                position,
+                "visible handoff list items must not be duplicated",
+            ));
+        }
+        result.push(item);
+    }
+    Ok(result)
+}
+
+fn visible_handoff_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<VisibleHandoffDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(visible_handoff_error(
+            locale,
+            position,
+            "visible handoff manifest must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "destinationLabel",
+        "messageDraft",
+        "attachmentLabels",
+        "reviewSteps",
+    ]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(visible_handoff_error(
+            locale,
+            position,
+            "visible handoff contains missing or unsupported fields",
+        ));
+    }
+    Ok(VisibleHandoffDraft {
+        destination_label: handoff_text(
+            fields.get("destinationLabel"),
+            "destinationLabel",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?,
+        message_draft: handoff_text(
+            fields.get("messageDraft"),
+            "messageDraft",
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?,
+        attachment_labels: handoff_list(
+            fields.get("attachmentLabels"),
+            "attachment label",
+            locale,
+            position,
+        )?,
+        review_steps: handoff_list(fields.get("reviewSteps"), "review step", locale, position)?,
+    })
+}
+
+fn visible_handoff_markdown(
+    draft: &VisibleHandoffDraft,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut lines = vec!["# Visible Handoff Review (Draft)".into(), String::new(), "**Status:** Stop and review manually. This document cannot send, upload, submit, sign, or pay.".into(), String::new(), "## Destination label".into(), format!("- {}", report_markdown_escape(&draft.destination_label)), String::new(), "## Message draft (copy only after review)".into(), report_markdown_escape(&draft.message_draft), String::new(), "## Attachment labels".into()];
+    lines.extend(
+        draft
+            .attachment_labels
+            .iter()
+            .map(|item| format!("- [ ] {}", report_markdown_escape(item))),
+    );
+    lines.push(String::new());
+    lines.push("## Review steps".into());
+    lines.extend(
+        draft
+            .review_steps
+            .iter()
+            .map(|item| format!("- [ ] {}", report_markdown_escape(item))),
+    );
+    lines.push(String::new());
+    lines.push("## Disabled actions".into());
+    lines.push("- Send/message/post: disabled".into());
+    lines.push("- Upload/download/delivery submission: disabled".into());
+    lines.push("- Contract/payment/account/browser/network/process: disabled".into());
+    let rendered = format!("{}\n", lines.join("\n"));
+    if rendered.len() > REPORT_MAX_BYTES {
+        return Err(visible_handoff_error(
+            locale,
+            position,
+            "rendered visible handoff exceeds the local output byte limit",
+        ));
+    }
+    Ok(rendered)
+}
+
+fn visible_handoff_summary(draft: &VisibleHandoffDraft) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "attachmentCount".into(),
+            Value::Number(draft.attachment_labels.len() as f64),
+        ),
+        (
+            "reviewStepCount".into(),
+            Value::Number(draft.review_steps.len() as f64),
+        ),
+        (
+            "hasMessageDraft".into(),
+            Value::Boolean(!draft.message_draft.is_empty()),
+        ),
+        (
+            "status".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("send".into(), Value::String("disabled".into())),
+        ("upload".into(), Value::String("disabled".into())),
+        (
+            "deliverySubmission".into(),
+            Value::String("disabled".into()),
+        ),
+        ("payment".into(), Value::String("disabled".into())),
+        ("browser".into(), Value::String("disabled".into())),
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ]))
@@ -5934,6 +6431,57 @@ impl Interpreter {
                         )
                     })?;
                     return Ok(Value::Boolean(true));
+                }
+                if name == "client.case_study_markdown" || name == "client.case_study_summary" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let draft = portfolio_case_study_from_value(&value, self.locale, *position)?;
+                    if name == "client.case_study_markdown" {
+                        return portfolio_case_study_markdown(&draft, self.locale, *position)
+                            .map(Value::String);
+                    }
+                    return Ok(portfolio_case_study_summary(&draft));
+                }
+                if name == "client.write_case_study" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path = expect_string(
+                        &path,
+                        self.locale,
+                        *position,
+                        "portfolio case-study output path",
+                    )?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let draft = portfolio_case_study_from_value(&value, self.locale, *position)?;
+                    let document = portfolio_case_study_markdown(&draft, self.locale, *position)?;
+                    let resolved_path = self.client_document_output_path(path, *position)?;
+                    fs::write(&resolved_path, document).map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1015",
+                            *position,
+                            "portfolio case-study output path",
+                        )
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.visible_handoff_markdown"
+                    || name == "client.visible_handoff_summary"
+                {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let draft = visible_handoff_from_value(&value, self.locale, *position)?;
+                    if name == "client.visible_handoff_markdown" {
+                        return visible_handoff_markdown(&draft, self.locale, *position)
+                            .map(Value::String);
+                    }
+                    return Ok(visible_handoff_summary(&draft));
                 }
                 if name == "profile.validate" || name == "profile.summary" {
                     if arguments.len() != 2 {
@@ -12905,16 +13453,21 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.scope_markdown"
         | "client.scope_summary"
         | "client.delivery_markdown"
-        | "client.delivery_summary" => Some((1, 1)),
+        | "client.delivery_summary"
+        | "client.case_study_markdown"
+        | "client.case_study_summary"
+        | "client.visible_handoff_markdown"
+        | "client.visible_handoff_summary" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
         | "report.summary" | "profile.validate" | "profile.summary" | "record.validate"
         | "record.summary" => Some((2, 2)),
         "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
-        "client.write_document" | "client.write_scope" | "client.write_delivery_checklist" => {
-            Some((2, 2))
-        }
+        "client.write_document"
+        | "client.write_scope"
+        | "client.write_delivery_checklist"
+        | "client.write_case_study" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -16149,6 +16702,112 @@ mod tests {
         .unwrap_err();
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(symlink.code, "P1073");
+    }
+
+    #[test]
+    fn local_portfolio_case_study_and_visible_handoff_are_redacted_local_only_preparation() {
+        let root = module_fixture_dir("local-portfolio-case-study");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let case_study = "{\"projectTitle\": \"Bangla guide [pilot]\", \"challenge\": \"Readers needed a small mobile guide\", \"solution\": \"Built a responsive public reference page\", \"outcomes\": [\"Mobile layout reviewed\", \"Source structure documented\"], \"publicLinks\": [\"https://portfolio.example/work\"], \"notes\": \"Verify permission before sharing\"}";
+        let handoff = "{\"destinationLabel\": \"Platform compose screen\", \"messageDraft\": \"Please review the attached work summary.\", \"attachmentLabels\": [\"Case-study Markdown\"], \"reviewSteps\": [\"Confirm destination manually\", \"Confirm attachment ownership\"]}";
+        let source = format!("let caseStudy = {case_study}\nlet portfolioSummary = client.case_study_summary(caseStudy)\nlet portfolioMarkdown = client.case_study_markdown(caseStudy)\nlet handoff = {handoff}\nlet handoffSummary = client.visible_handoff_summary(handoff)\nlet handoffMarkdown = client.visible_handoff_markdown(handoff)\nprint portfolioSummary[\"outcomeCount\"]\nprint portfolioSummary[\"publicLinkCount\"]\nprint text.contains(json.stringify(portfolioSummary), \"Bangla\")\nprint text.contains(portfolioMarkdown, \"https://portfolio.example/work\")\nprint handoffSummary[\"send\"]\nprint handoffSummary[\"upload\"]\nprint text.contains(handoffMarkdown, \"Send/message/post: disabled\")\nprint client.write_case_study(\"out/case-study.md\", caseStudy)\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let document = fs::read_to_string(root.join("out/case-study.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec!["2", "1", "false", "true", "disabled", "disabled", "true", "true"]
+        );
+        assert!(document.starts_with("# Portfolio Case Study (Draft)\n"));
+        assert!(document.contains("- Upload/post/message: disabled"));
+    }
+
+    #[test]
+    fn local_portfolio_and_visible_handoff_reject_private_or_action_oriented_data() {
+        let root = module_fixture_dir("local-portfolio-handoff-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let valid = "{\"projectTitle\": \"Site\", \"challenge\": \"Need\", \"solution\": \"Built\", \"outcomes\": [\"Reviewed\"]}";
+        let portfolio_cases = [
+            "print client.case_study_markdown({\"projectTitle\": \"Site\", \"challenge\": \"Need\", \"solution\": \"Built\", \"outcomes\": [\"Reviewed\"], \"clientEmail\": \"x@example.invalid\"})\n",
+            "print client.case_study_markdown({\"projectTitle\": \"Site\", \"challenge\": \"Need\", \"solution\": \"Built\", \"outcomes\": [\"Income guaranteed\"]})\n",
+            "print client.case_study_markdown({\"projectTitle\": \"Site\", \"challenge\": \"Need\", \"solution\": \"Built\", \"outcomes\": [\"Reviewed\"], \"publicLinks\": [\"https://private.example/path?token=x\"]})\n",
+            "print client.case_study_markdown({\"projectTitle\": \"<script>x</script>\", \"challenge\": \"Need\", \"solution\": \"Built\", \"outcomes\": [\"Reviewed\"]})\n",
+        ];
+        for source in portfolio_cases {
+            assert_eq!(
+                run_bridge_project(&root, BTreeSet::new(), source)
+                    .unwrap_err()
+                    .code,
+                "P1077"
+            );
+        }
+        let handoff_cases = [
+            "print client.visible_handoff_summary({\"destinationLabel\": \"https://platform.invalid\", \"messageDraft\": \"Review\", \"attachmentLabels\": [\"File\"], \"reviewSteps\": [\"Confirm\"]})\n",
+            "print client.visible_handoff_summary({\"destinationLabel\": \"Compose screen\", \"messageDraft\": \"Review\", \"attachmentLabels\": [\"File\", \"File\"], \"reviewSteps\": [\"Confirm\"]})\n",
+            "print client.visible_handoff_summary({\"destinationLabel\": \"Compose screen\", \"messageDraft\": \"Review\", \"attachmentLabels\": [\"File\"], \"reviewSteps\": [\"Confirm\"], \"sendNow\": true})\n",
+        ];
+        for source in handoff_cases {
+            assert_eq!(
+                run_bridge_project(&root, BTreeSet::new(), source)
+                    .unwrap_err()
+                    .code,
+                "P1078"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.write_case_study(\"out/case.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        let capability = BTreeSet::from(["filesystem:write".into()]);
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!("print client.write_case_study(\"../case.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability,
+                &format!("print client.write_case_study(\"out/case.txt\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            static_builtin_arity("client.case_study_markdown"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.case_study_summary"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.write_case_study"),
+            Some((2, 2))
+        );
+        assert_eq!(
+            static_builtin_arity("client.visible_handoff_markdown"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.visible_handoff_summary"),
+            Some((1, 1))
+        );
     }
 
     #[test]

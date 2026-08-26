@@ -71,6 +71,8 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1074 | Local record safety | An attendance, expense, or inventory table has an invalid kind/exact header/required text/date/status/currency/amount/quantity/duplicate identity/raw markup or record-specific bound. Record values and paths outside the project root are not echoed. |
 | P1075 | Local scope-of-work safety | A scope-of-work map has missing/unknown fields, invalid text/list/revision bound, duplicate item, raw markup, URL/contact delimiter, oversized output, or unsafe local Markdown export path. Draft values and paths outside the project root are not echoed. |
 | P1076 | Local delivery-checklist safety | A delivery-checklist map has missing/unknown fields, invalid text/list bound, duplicate item, raw markup, URL/contact delimiter, oversized output, or unsafe local Markdown export path. Draft values and paths outside the project root are not echoed. |
+| P1077 | Local portfolio case-study safety | A case-study map has missing/unknown/private-data fields, invalid text/link/list, raw markup, URL/contact injection, duplicate/unsafe public link, unverified income/guarantee claim, oversized output, or unsafe export path. Draft values are not echoed. |
+| P1078 | Visible handoff safety | A manual handoff map has missing/unknown fields, invalid message/destination/attachment/review text, duplicate item, raw markup, URL/contact injection, or action-oriented field. It never sends, uploads, submits, signs, pays, or opens a browser. |
 
 ## Example
 

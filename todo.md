@@ -348,3 +348,11 @@
 - [x] Implement deterministic escaped Markdown and redacted summary APIs plus a project-local non-symlink `.md` export requiring only `filesystem:write`, with explicit user-review and disabled upload/contact/submission/payment action markers.
 - [x] Add Bangla-English P107x diagnostics and positive/negative regressions for missing/unknown fields, malformed/duplicate/oversized list items, raw markup/URL/contact injection, missing capability, traversal/shared-storage/symlink/bad-extension paths, and no upload/contact/payment/network/process side effect.
 - [x] Publish a standalone Termux delivery-checklist example, guide, standard-library/diagnostic/roadmap entries, full repository verification, focused commit, and GitHub push before marking this increment complete.
+
+## M23 — Local Portfolio Case Study and Visible Handoff Preparation
+
+- [x] Define one strict bounded local portfolio case-study map for project title, challenge, solution, outcomes, allowed public links, and optional notes; reject private client data, recipient/contact, payment, account, authorization, platform, contract, or unverified performance/income claims.
+- [x] Implement deterministic escaped Markdown and redacted summary APIs plus a project-local non-symlink `.md` export requiring only `filesystem:write`.
+- [x] Implement a local visible-review handoff manifest that records user-reviewed message/attachment/destination labels and disables sending, upload/download, delivery submission, contract, payment, browser, account, network, and process action.
+- [x] Add Bangla-English P107x diagnostics and positive/negative tests for unknown/unsafe fields, raw markup/URL/contact injection, private-data fields, path escape/symlink/bad-extension/missing grant, and no external side effect.
+- [x] Publish a standalone Termux portfolio case-study example, guide, standard-library/diagnostic/roadmap entries, full repository verification, focused commit, and GitHub push before marking this increment complete.

@@ -129,6 +129,16 @@ Required fields are client/project labels, unique scope/exclusion lists, a `0`â€
 
 Required fields are project title plus unique deliverable, review, and handover lists. URL/contact/raw-HTML delimiters and unknown recipient, payment, account, authorization, platform, upload, delivery-submission, or contract fields are rejected. The APIs cannot contact, upload/download, submit delivery, sign, pay, use a marketplace/network/browser/account, or start a process. See [`LOCAL-DELIVERY-CHECKLISTS.md`](LOCAL-DELIVERY-CHECKLISTS.md).
 
+## Local portfolio case studies and visible handoff
+
+| API | Result and boundary |
+|---|---|
+| `client.case_study_markdown(draft)` / `client.case_study_summary(draft)` | Escaped local public case-study Markdown or redacted counts. No capability is required. |
+| `client.write_case_study(path, draft)` | Writes one bounded project-local non-symlink `.md` draft. Requires `filesystem:write`. |
+| `client.visible_handoff_markdown(draft)` / `client.visible_handoff_summary(draft)` | Produces a user-mediated message/attachment/destination review artifact and redacted disabled-action summary. No capability is required. |
+
+Portfolio drafts reject private client/contact/account/payment fields, unsafe links, raw markup, and income/guarantee claims. Visible handoff drafts accept only a destination label, a message draft, attachment labels, and review steps; they cannot send, post, upload/download, submit, sign, pay, open a browser, access an account, or use a network/process. See [`LOCAL-PORTFOLIO-HANDOFF.md`](LOCAL-PORTFOLIO-HANDOFF.md).
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -157,4 +167,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`; unsafe portfolio case-study data uses `P1077`; unsafe visible handoff data uses `P1078`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

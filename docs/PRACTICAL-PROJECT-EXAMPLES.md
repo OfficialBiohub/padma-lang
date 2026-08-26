@@ -25,6 +25,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Freelancer quote draft | `examples/freelancer-quote-draft` | Local escaped quote Markdown with redacted review summary | It cannot contact a client, submit to a marketplace, sign a contract, make a payment, use a browser/network, or write shared storage. |
 | Freelancer scope-of-work | `examples/freelancer-scope-of-work` | Reviewed local scope/exclusion Markdown draft | It cannot contact a client, sign/accept, submit, pay, use a marketplace/network/browser, or write shared storage. |
 | Freelancer delivery checklist | `examples/freelancer-delivery-checklist` | Reviewed local deliverable/review/handover Markdown draft | It cannot contact, upload/download, submit delivery, sign/accept, pay, use a marketplace/network/browser, or write shared storage. |
+| Freelancer portfolio and handoff | `examples/freelancer-portfolio-handoff` | Public case-study Markdown and user-mediated message/attachment review preparation | It cannot send, post, upload/download, submit delivery, sign, pay, log in, use a browser/network/account, or write shared storage. |
 | Local household records | `examples/local-records-household` | Attendance, expense, and inventory CSV validation plus a local Markdown expense report | It cannot cloud-sync, contact a school/shop, make a payment, start a process, or take stock/account action. |
 
 ## 1. Authorized media download
