@@ -347,7 +347,9 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::Bangla, "P1090") => (format!("quantum provider readiness assessment নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded provider label, reviewed artifact metadata, এবং public policy note ব্যবহার করুন; Padma token/credential/account/job/endpoint পড়বে না বা provider/QPU/network/process action চালাবে না।".into())),
         (Locale::English, "P1090") => (format!("Quantum provider readiness assessment is unsafe or invalid: `{detail}"), Some("Use only a bounded provider label, reviewed artifact metadata, and public policy note; Padma will not read tokens/credentials/accounts/jobs/endpoints or run provider/QPU/network/process actions.".into())),
         (Locale::Bangla, "P1091") => (format!("local backend route request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded method, path, status, এবং JSON body ব্যবহার করুন; কোনো callback, shell, network, file, credential, বা remote deployment action নেই।".into())),
-        (Locale::English, "P1091") => (format!("Local backend route request is unsafe or invalid: `{detail}"), Some("Use only bounded method, path, status, and JSON body values; callbacks, shell, network, file, credential, and remote deployment actions are unavailable.".into())),
+        (Locale::English, "P1091") => (format!("Local backend route request is unsafe or invalid: `{detail}`"), Some("Use only bounded method, path, status, and JSON body values; callbacks, shell, network, file, credential, and remote deployment actions are unavailable.".into())),
+        (Locale::Bangla, "P1092") => (format!("typed local data record নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু নির্দিষ্ট student/product schema, পাঁচটি field, finite value, এবং project-local SQLite ব্যবহার করুন; SQL, URL, credential, payment বা network action নেই।".into())),
+        (Locale::English, "P1092") => (format!("Typed local data record is unsafe or invalid: `{detail}`"), Some("Use only the fixed student/product schema, five fields, finite values, and project-local SQLite; SQL, URLs, credentials, payments, and network actions are unavailable.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1667,6 +1669,159 @@ fn value_to_json(value: &Value) -> Result<JsonValue, String> {
             .collect::<Result<serde_json::Map<_, _>, _>>()
             .map(JsonValue::Object),
     }
+}
+
+const TYPED_DATA_MAX_RECORD_BYTES: usize = 8_192;
+
+fn typed_data_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1092", position, detail)
+}
+
+fn typed_record_value(
+    schema: &str,
+    record: &BTreeMap<String, Value>,
+    locale: Locale,
+    position: Position,
+) -> Result<BTreeMap<String, Value>, PadmaError> {
+    let fields: &[(&str, &str)] = match schema {
+        "student" => &[
+            ("name", "নাম"),
+            ("class", "ক্লাস"),
+            ("school", "স্কুল"),
+            ("guardian", "অভিভাবক"),
+            ("active", "সক্রিয়"),
+        ],
+        "product" => &[
+            ("name", "নাম"),
+            ("price", "দাম"),
+            ("currency", "মুদ্রা"),
+            ("stock", "স্টক"),
+            ("category", "শ্রেণি"),
+        ],
+        _ => return Err(typed_data_error(locale, position, "unknown schema")),
+    };
+    if record.len() != fields.len() {
+        return Err(typed_data_error(
+            locale,
+            position,
+            "exactly five fields are required",
+        ));
+    }
+    let mut canonical = BTreeMap::new();
+    for (english, bangla) in fields {
+        let english_value = record.get(*english);
+        let bangla_value = record.get(*bangla);
+        if english_value.is_some() && bangla_value.is_some() {
+            return Err(typed_data_error(
+                locale,
+                position,
+                "duplicate bilingual field",
+            ));
+        }
+        let value = english_value.or(bangla_value).ok_or_else(|| {
+            typed_data_error(locale, position, &format!("missing field `{english}`"))
+        })?;
+        canonical.insert((*english).to_string(), value.clone());
+    }
+    if record.keys().any(|key| {
+        !fields
+            .iter()
+            .any(|(english, bangla)| key == english || key == bangla)
+    }) {
+        return Err(typed_data_error(locale, position, "unknown field"));
+    }
+    for field in ["name", "school", "guardian", "currency", "category"] {
+        if let Some(value) = canonical.get(field) {
+            let Value::String(text) = value else {
+                return Err(typed_data_error(locale, position, field));
+            };
+            if text.is_empty() || text.len() > RECORD_MAX_TEXT_BYTES {
+                return Err(typed_data_error(locale, position, field));
+            }
+        }
+    }
+    if schema == "student" {
+        let class = canonical.get("class").and_then(|value| match value {
+            Value::Number(number) => Some(*number),
+            _ => None,
+        });
+        if !class.is_some_and(|value| (1.0..=12.0).contains(&value) && value.fract() == 0.0)
+            || !matches!(canonical.get("active"), Some(Value::Boolean(_)))
+        {
+            return Err(typed_data_error(locale, position, "class or active"));
+        }
+    } else {
+        let price = canonical.get("price").and_then(|value| match value {
+            Value::Number(number) => Some(*number),
+            _ => None,
+        });
+        let stock = canonical.get("stock").and_then(|value| match value {
+            Value::Number(number) => Some(*number),
+            _ => None,
+        });
+        if !price.is_some_and(|value| (0.0..=RECORD_MAX_AMOUNT).contains(&value))
+            || !stock.is_some_and(|value| {
+                (0.0..=RECORD_MAX_QUANTITY as f64).contains(&value) && value.fract() == 0.0
+            })
+        {
+            return Err(typed_data_error(locale, position, "price or stock"));
+        }
+        if !matches!(canonical.get("currency"), Some(Value::String(value)) if value.len() == 3 && value.chars().all(|character| character.is_ascii_uppercase()))
+        {
+            return Err(typed_data_error(locale, position, "currency"));
+        }
+    }
+    let json = value_to_json(&Value::Map(canonical.clone()))
+        .map_err(|_| typed_data_error(locale, position, "record value"))?;
+    if serde_json::to_vec(&json)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX)
+        > TYPED_DATA_MAX_RECORD_BYTES
+    {
+        return Err(typed_data_error(locale, position, "record size"));
+    }
+    Ok(canonical)
+}
+
+fn typed_sqlite_list(
+    output: Vec<u8>,
+    schema: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    if output.iter().all(u8::is_ascii_whitespace) {
+        return Ok(Value::List(Vec::new()));
+    }
+    let rows: JsonValue =
+        serde_json::from_slice(&output).map_err(|_| typed_data_error(locale, position, "list"))?;
+    let rows = rows
+        .as_array()
+        .ok_or_else(|| typed_data_error(locale, position, "list"))?;
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        let key = row
+            .get("key")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| typed_data_error(locale, position, "record key"))?;
+        let value_json = row
+            .get("value_json")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| typed_data_error(locale, position, "record value"))?;
+        let value = value_from_json(
+            serde_json::from_str(value_json)
+                .map_err(|_| typed_data_error(locale, position, "record value"))?,
+        )
+        .map_err(|_| typed_data_error(locale, position, "record value"))?;
+        let Value::Map(record) = value else {
+            return Err(typed_data_error(locale, position, schema));
+        };
+        let record = typed_record_value(schema, &record, locale, position)?;
+        let mut item = BTreeMap::new();
+        item.insert("key".into(), Value::String(key.to_string()));
+        item.insert("value".into(), Value::Map(record));
+        result.push(Value::Map(item));
+    }
+    Ok(Value::List(result))
 }
 
 fn table_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -10220,6 +10375,109 @@ impl Interpreter {
                     self.sqlite_execute(database, &parameters, &statement, false, *position)?;
                     return Ok(Value::Boolean(true));
                 }
+                if matches!(
+                    name.as_str(),
+                    "db.student_save"
+                        | "db.student_get"
+                        | "db.student_list"
+                        | "db.product_save"
+                        | "db.product_get"
+                        | "db.product_list"
+                ) {
+                    let is_student = name.starts_with("db.student_");
+                    let schema = if is_student { "student" } else { "product" };
+                    let operation = name.rsplit('_').next().unwrap_or("");
+                    let expected_arity = if operation == "save" { 3 } else { 2 };
+                    if arguments.len() != expected_arity {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("database:sqlite", name, *position)?;
+                    let database = self.evaluate(&arguments[0])?;
+                    let database =
+                        expect_string(&database, self.locale, *position, "database path")?;
+                    let namespace = format!("padma:{schema}");
+                    if operation == "list" {
+                        let limit = self.evaluate(&arguments[1])?;
+                        let limit = expect_number(&limit, self.locale, *position, "limit")?;
+                        if !(1.0..=100.0).contains(&limit) || limit.fract() != 0.0 {
+                            return Err(typed_data_error(self.locale, *position, "limit"));
+                        }
+                        let output = self.sqlite_execute(
+                            database,
+                            &[
+                                sqlite_hex_parameter(":namespace", namespace.as_bytes()),
+                                sqlite_number_parameter(":limit", limit as usize),
+                            ],
+                            "SELECT record_key AS key, value_json FROM padma_records WHERE namespace = CAST(:namespace AS TEXT) ORDER BY record_key LIMIT :limit;",
+                            true,
+                            *position,
+                        )?;
+                        return typed_sqlite_list(output, schema, self.locale, *position);
+                    }
+                    let key = self.evaluate(&arguments[1])?;
+                    let key = expect_string(&key, self.locale, *position, "record key")?;
+                    if key.is_empty()
+                        || key.len() > TYPED_DATA_MAX_RECORD_BYTES
+                        || key.len() > 128
+                        || key.contains(['\r', '\n'])
+                    {
+                        return Err(typed_data_error(self.locale, *position, "record key"));
+                    }
+                    if operation == "save" {
+                        let record = self.evaluate(&arguments[2])?;
+                        let Value::Map(record) = record else {
+                            return Err(typed_data_error(self.locale, *position, "record map"));
+                        };
+                        let record = typed_record_value(schema, &record, self.locale, *position)?;
+                        let value_json = serde_json::to_string(
+                            &value_to_json(&Value::Map(record)).map_err(|_| {
+                                typed_data_error(self.locale, *position, "record value")
+                            })?,
+                        )
+                        .map_err(|_| typed_data_error(self.locale, *position, "record value"))?;
+                        self.sqlite_execute(
+                            database,
+                            &[
+                                sqlite_hex_parameter(":namespace", namespace.as_bytes()),
+                                sqlite_hex_parameter(":key", key.as_bytes()),
+                                sqlite_hex_parameter(":value", value_json.as_bytes()),
+                            ],
+                            "INSERT INTO padma_records(namespace, record_key, value_json, updated_at) VALUES(CAST(:namespace AS TEXT), CAST(:key AS TEXT), CAST(:value AS TEXT), CAST(strftime('%s', 'now') AS INTEGER)) ON CONFLICT(namespace, record_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at;",
+                            false,
+                            *position,
+                        )?;
+                        return Ok(Value::Boolean(true));
+                    }
+                    let output = self.sqlite_execute(
+                        database,
+                        &[
+                            sqlite_hex_parameter(":namespace", namespace.as_bytes()),
+                            sqlite_hex_parameter(":key", key.as_bytes()),
+                        ],
+                        "SELECT value_json FROM padma_records WHERE namespace = CAST(:namespace AS TEXT) AND record_key = CAST(:key AS TEXT) LIMIT 1;",
+                        true,
+                        *position,
+                    )?;
+                    if output.iter().all(u8::is_ascii_whitespace) {
+                        return Ok(Value::Null);
+                    }
+                    let rows: JsonValue = serde_json::from_slice(&output)
+                        .map_err(|_| typed_data_error(self.locale, *position, "get"))?;
+                    let value_json = rows
+                        .as_array()
+                        .and_then(|rows| rows.first())
+                        .and_then(|row| row.get("value_json"))
+                        .and_then(JsonValue::as_str);
+                    let Some(value_json) = value_json else {
+                        return Ok(Value::Null);
+                    };
+                    return value_from_json(
+                        serde_json::from_str(value_json).map_err(|_| {
+                            typed_data_error(self.locale, *position, "record value")
+                        })?,
+                    )
+                    .map_err(|_| typed_data_error(self.locale, *position, "record value"));
+                }
                 if matches!(name.as_str(), "db.put" | "db.get" | "db.delete" | "db.list") {
                     let values = arguments
                         .iter()
@@ -16834,6 +17092,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "optimize.finite_difference_gradient" => Some((2, 2)),
         "optimize.projected_gradient_step" => Some((2, 2)),
         "db.put" => Some((4, 4)),
+        "db.student_save" | "db.product_save" => Some((3, 3)),
+        "db.student_get" | "db.student_list" | "db.product_get" | "db.product_list" => Some((2, 2)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
         "time.now" | "auth.csrf_token" => Some((0, 0)),
@@ -19564,6 +19824,93 @@ mod tests {
         assert_eq!(static_builtin_arity("db.list"), Some((3, 3)));
     }
 
+    #[test]
+    fn typed_local_data_round_trip_is_schema_validated_and_deterministic() {
+        if process::Command::new("sqlite3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = module_fixture_dir("typed-local-data");
+        fs::create_dir(root.join("data")).unwrap();
+        let source = "print db.student_save(\"data/app.sqlite\", \"s-001\", {\"name\": \"Rima\", \"class\": 6, \"school\": \"Padma School\", \"guardian\": \"Nila\", \"active\": true})\nprint db.student_get(\"data/app.sqlite\", \"s-001\")\nprint db.student_list(\"data/app.sqlite\", 10)\nprint db.product_save(\"data/app.sqlite\", \"p-001\", {\"name\": \"খাতা\", \"price\": 55, \"currency\": \"BDT\", \"stock\": 20, \"category\": \"শিক্ষা\"})\nprint db.product_list(\"data/app.sqlite\", 10)\n";
+        let (program, locale) = compile(source).unwrap();
+        let mut interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::from(["database:sqlite".into()]),
+        );
+        interpreter.run(&program).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            interpreter.output,
+            vec![
+                "true",
+                "{\"active\": true, \"class\": 6, \"guardian\": Nila, \"name\": Rima, \"school\": Padma School}",
+                "[{\"key\": s-001, \"value\": {\"active\": true, \"class\": 6, \"guardian\": Nila, \"name\": Rima, \"school\": Padma School}}]",
+                "true",
+                "[{\"key\": p-001, \"value\": {\"category\": শিক্ষা, \"currency\": BDT, \"name\": খাতা, \"price\": 55, \"stock\": 20}}]",
+            ]
+        );
+    }
+    #[test]
+    fn typed_local_data_rejects_invalid_schema_and_missing_grant() {
+        let invalid = "print db.product_save(\"data/app.sqlite\", \"p-001\", {\"name\": \"x\", \"price\": -1, \"currency\": \"bdt\", \"stock\": 1, \"category\": \"x\"})\n";
+        let (program, locale) = compile(invalid).unwrap();
+        let root = module_fixture_dir("typed-local-data-invalid");
+        fs::create_dir(root.join("data")).unwrap();
+        let mut denied = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::new(),
+        );
+        let denied_error = denied.run(&program).unwrap_err();
+        assert_eq!(denied_error.code, "P1034");
+        let mut invalid_interpreter = Interpreter::with_project_capabilities(
+            locale,
+            root.join("main.pd"),
+            root.clone(),
+            BTreeSet::from(["database:sqlite".into()]),
+        );
+        let invalid_error = invalid_interpreter.run(&program).unwrap_err();
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(invalid_error.code, "P1092");
+        assert!(invalid_error.message.contains("price"));
+    }
+    #[test]
+    fn typed_local_data_rejects_duplicate_unknown_and_non_finite_fields() {
+        let mut duplicate = BTreeMap::new();
+        duplicate.insert("name".into(), Value::String("Rima".into()));
+        duplicate.insert("নাম".into(), Value::String("রিমা".into()));
+        duplicate.insert("class".into(), Value::Number(6.0));
+        duplicate.insert("school".into(), Value::String("School".into()));
+        duplicate.insert("guardian".into(), Value::String("Nila".into()));
+        duplicate.insert("active".into(), Value::Boolean(true));
+        let error = typed_record_value("student", &duplicate, Locale::English, Position::new(1, 1))
+            .unwrap_err();
+        assert_eq!(error.code, "P1092");
+
+        let mut unknown = duplicate.clone();
+        unknown.remove("নাম");
+        unknown.insert("role".into(), Value::String("admin".into()));
+        let error = typed_record_value("student", &unknown, Locale::English, Position::new(1, 1))
+            .unwrap_err();
+        assert_eq!(error.code, "P1092");
+
+        let mut product = BTreeMap::new();
+        product.insert("name".into(), Value::String("Book".into()));
+        product.insert("price".into(), Value::Number(f64::NAN));
+        product.insert("currency".into(), Value::String("BDT".into()));
+        product.insert("stock".into(), Value::Number(2.0));
+        product.insert("category".into(), Value::String("Education".into()));
+        let error = typed_record_value("product", &product, Locale::English, Position::new(1, 1))
+            .unwrap_err();
+        assert_eq!(error.code, "P1092");
+    }
     #[test]
     fn sqlite_persistence_round_trip_when_cli_is_available() {
         if process::Command::new("sqlite3")

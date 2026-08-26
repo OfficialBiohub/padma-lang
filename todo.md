@@ -476,3 +476,11 @@
 - [x] Implement custom route dispatch over `server.route_response`, bounded HTTP parsing/response writing, request rejection, fixed port policy, and graceful shutdown without callbacks, arbitrary processes, database access, authentication, payment, or cloud actions.
 - [x] Add integration and negative security tests for loopback binding, malformed/oversized requests, unknown routes, unsafe route files, missing capability, deterministic JSON responses, shutdown, and no external side effects; add a Termux smoke workflow.
 - [x] Publish beginner backend documentation and education/government/e-commerce boundaries, then run full repository verification, focused commit, and GitHub push before marking M40 complete.
+
+## M41 — Local Persistence and Beginner API Data Model
+
+- [x] Define strict project-local SQLite schemas for one bounded education/student record set and one bounded product catalog set; reject arbitrary SQL, credentials, URLs, payments, account fields, and unbounded data.
+- [x] Implement safe bounded record/catalog read-write operations with parameter binding, deterministic JSON outputs, capability checks, transaction/rollback behavior, and bilingual diagnostics; preserve the existing local route server boundary.
+- [x] Add positive and negative tests for schema validation, duplicate keys, malformed/non-finite values, size limits, path/symlink/grant checks, rollback, deterministic outputs, and no network/process/provider/payment action.
+- [x] Publish a Termux example for local education and e-commerce catalog persistence beside the existing loopback route example, with the separation documented honestly; update public documentation/status/changelog, then run full verification, focused commit, and GitHub push before marking M41 complete.
+- [x] Verification follow-up: make the canonical Rust test gate robust on the sandbox's default test-thread stack; the existing OpenQASM regression requires a bounded larger `RUST_MIN_STACK` value and must be reverified without changing runtime semantics.

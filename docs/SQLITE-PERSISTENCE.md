@@ -138,3 +138,48 @@ This M9 foundation deliberately does **not** claim an ORM, user-defined schema, 
 
 [1]: https://sqlite.org/cli.html "SQLite Command Line Shell"
 [2]: https://sqlite.org/lang_transaction.html "SQLite Transaction documentation"
+
+## M41 fixed beginner data models
+
+M41-এ generic key-value storage-এর উপর দুটি typed helper যোগ হয়েছে। এগুলো ORM নয় এবং user-defined SQL schema নয়; নতুন ব্যবহারকারী যেন নিরাপদে স্কুল record বা ছোট catalog তৈরি করতে পারে, সেই জন্য field set runtime-এ fixed রাখা হয়েছে। সব operation-এ `database:sqlite` grant, project-root relative `.sqlite` path, SQLite CLI, এবং existing 5-second/256 KiB safety boundary বহাল থাকে।
+
+| Helper | Arguments | Fixed fields | Return |
+|---|---|---|---|
+| `db.student_save` | `database_path, key, record` | `name`, `class`, `school`, `guardian`, `active` | `true` after insert or replacement |
+| `db.student_get` | `database_path, key` | same student schema | record or `none` |
+| `db.student_list` | `database_path, limit` | same student schema | ordered `{ "key": text, "value": record }` list |
+| `db.product_save` | `database_path, key, record` | `name`, `price`, `currency`, `stock`, `category` | `true` after insert or replacement |
+| `db.product_get` | `database_path, key` | same product schema | record or `none` |
+| `db.product_list` | `database_path, limit` | same product schema | ordered `{ "key": text, "value": record }` list |
+
+Bangla aliases are accepted for the field names: `নাম`, `ক্লাস`, `স্কুল`, `অভিভাবক`, `সক্রিয়`, `দাম`, `মুদ্রা`, `স্টক`, and `শ্রেণি`। একটি record-এ একই field-এর English ও Bangla key একসঙ্গে, unknown field, missing field, empty text, non-finite number, class outside 1–12, negative price/stock, non-integer stock, বা non-uppercase three-letter currency ব্যবহার করা যাবে না। Record size is capped at 8 KiB, key size at 128 bytes, and list limit at 100.
+
+### M41 student and catalog example
+
+```padma
+দেখাও db.student_save("data/app.sqlite", "s-001", {
+  "নাম": "রিমা",
+  "ক্লাস": 6,
+  "স্কুল": "Padma School",
+  "অভিভাবক": "নিলা",
+  "সক্রিয়": সত্য
+})
+দেখাও db.student_list("data/app.sqlite", 10)
+
+db.product_save("data/app.sqlite", "p-001", {
+  "নাম": "খাতা",
+  "দাম": 55,
+  "মুদ্রা": "BDT",
+  "স্টক": 20,
+  "শ্রেণি": "শিক্ষা"
+})
+দেখাও db.product_get("data/app.sqlite", "p-001")
+```
+
+এই API local loopback route server-এর সঙ্গে data layer হিসেবে ব্যবহার করা যায়, কিন্তু route configuration নিজে এখনও static `server-routes.json` response map। M41-এর typed database records automatically public HTTP endpoint, authentication, authorization, search/filter language, pagination, payment, cloud database, backup, migration, or remote deployment তৈরি করে না। এগুলোর জন্য আলাদা versioned contracts প্রয়োজন।
+
+## M41 diagnostics
+
+| Code | Meaning |
+|---|---|
+| `P1092` | Fixed student/product typed record missing, duplicated, unknown, malformed, non-finite, oversized, or out-of-range field/value |

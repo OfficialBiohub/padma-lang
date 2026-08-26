@@ -246,3 +246,15 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 ## Errors
 
 Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`; unsafe portfolio case-study data uses `P1077`; unsafe visible handoff data uses `P1078`; unsafe local reconciliation data uses `P1079`; unsafe local attachment-review data uses `P1080`; unsafe local delivery-package data uses `P1081`; unsafe local template data uses `P1082`; unsafe local quantum-circuit data uses `P1083`; unsafe local quantum simulator limits or state invariants use `P1084`; unsafe local Pauli observable data or invariants use `P1085`; unsafe local optimisation maps/settings/invariants use `P1088`; unsafe local OpenQASM subset assessment uses `P1089`; unsafe quantum provider readiness assessment uses `P1090`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+
+
+## Typed local data models (M41)
+
+| API | Result and boundary |
+|---|---|
+| `db.student_save(database_path, key, record)` | Saves a fixed five-field student record under the managed `padma:student` namespace; requires `database:sqlite`. |
+| `db.student_get(database_path, key)` / `db.student_list(database_path, limit)` | Reads one student or up to 100 ordered student records; returns `none` for a missing key. |
+| `db.product_save(database_path, key, record)` | Saves a fixed five-field product record under the managed `padma:product` namespace; requires `database:sqlite`. |
+| `db.product_get(database_path, key)` / `db.product_list(database_path, limit)` | Reads one product or up to 100 ordered product records; returns `none` for a missing key. |
+
+Student fields are `name`, `class`, `school`, `guardian`, and `active`; product fields are `name`, `price`, `currency`, `stock`, and `category`. Bangla field aliases are accepted. The runtime rejects missing/duplicate/unknown fields, empty or oversized text, class outside 1–12, negative or non-finite numeric values, fractional stock, and currency other than three uppercase ASCII letters. Values are stored as JSON through existing parameter-bound managed SQLite statements. This is a local data model, not an ORM, arbitrary SQL interface, public API, authentication service, payment system, cloud database, or automatic route publisher. See [`SQLITE-PERSISTENCE.md`](SQLITE-PERSISTENCE.md).

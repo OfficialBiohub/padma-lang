@@ -1,0 +1,8 @@
+[padma]
+name = "local-data-api"
+version = "0.1.0"
+entry = "src/main.pd"
+locale = "bn"
+
+[capabilities]
+database = ["sqlite"]

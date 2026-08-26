@@ -4,6 +4,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+# A bounded larger test-thread stack keeps the deep, non-recursive-looking
+# parser/renderer regression fixtures reproducible across Termux and CI hosts.
+export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+
 bash scripts/verify-repository-hygiene.sh
 bash scripts/verify-doc-links.sh
 bash scripts/verify-termux-contract.sh

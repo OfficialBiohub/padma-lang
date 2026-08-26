@@ -1,0 +1,6 @@
+ধরি studentSaved = db.student_save("data/app.sqlite", "s-001", {"নাম": "রিমা", "ক্লাস": 6, "স্কুল": "Padma School", "অভিভাবক": "নিলা", "সক্রিয়": সত্য})
+দেখাও studentSaved
+দেখাও db.student_get("data/app.sqlite", "s-001")
+ধরি productSaved = db.product_save("data/app.sqlite", "p-001", {"নাম": "খাতা", "দাম": 55, "মুদ্রা": "BDT", "স্টক": 20, "শ্রেণি": "শিক্ষা"})
+দেখাও productSaved
+দেখাও db.product_list("data/app.sqlite", 10)
