@@ -17,6 +17,7 @@ This inventory states only what the current Padma release binary executes, docum
 | 9 | Local file/checksum base | Lists/checksums/searches bounded project-local content. | `fs.*`; filesystem toolkit example |
 | 10 | Project templates | Creates basic, data-report, and local response projects with minimum grants. | `padma init`; CLI smoke tests |
 | 11 | Attachment-review manifest | Reads declared project-local attachments for checksum/byte-count review and writes a local Markdown manifest. | `client.attachment_review_*`; `examples/freelancer-attachment-review` |
+| 12 | Verifiable delivery package | Reads declared project-local files for integrity metadata and writes a manual folder/review package manifest. | `client.delivery_package_*`; `examples/freelancer-delivery-package` |
 
 All client-document writers require only `filesystem = ["write"]` and write a project-local non-symlink `.md` file. The APIs return redacted summaries and disabled-action markers rather than performing external actions.
 
@@ -26,7 +27,7 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 |---|---:|---|---|
 | Client message | No | Copy-only `visible_handoff` message draft and review steps | Rich message-template library by work type |
 | Upload / attachment delivery | No | Attachment labels, ownership review steps, and a single local checksum/byte-count attachment-review manifest | Manual file selection and upload remain the user's visible action by design |
-| Delivery submission | No | Delivery checklist plus visible destination-label review | User-facing destination revalidation checklist that links delivery checklist and handoff artifact |
+| Delivery submission | No | Delivery checklist, visible destination-label review, and local checksum/byte-count delivery package | Manual client-side file selection/upload/submission remains the user's visible action by design |
 | Payment / withdrawal | No | Quote/invoice-draft review labels; payment disabled marker | No payment replacement beyond manual review by design |
 | Contract / e-signature | No | Scope-of-work review draft; contract disabled marker | No contract automation replacement beyond manual review by design |
 | Marketplace work | No | Portfolio, quote, scope, delivery, and handoff preparation | No login, scraping, proposal posting, account, or submission system by design |

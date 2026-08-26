@@ -1,0 +1,2 @@
+Design note sample for local integrity verification.
+Manual review and manual file choice are required outside Padma.

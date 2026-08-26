@@ -378,3 +378,10 @@
 - [x] Implement checksum verification and deterministic redacted manifest/Markdown rendering with `filesystem:read`; write one project-local reviewed `.md` artifact only with `filesystem:write`.
 - [x] Add localized diagnostics and regressions for missing/unknown fields, duplicate labels/paths, unsafe URL/contact fields, traversal/absolute/shared-storage/symlink paths, missing grants, and no send/upload/submission/payment/browser/account/network/process side effect.
 - [x] Publish a standalone Termux example, public guide, standard-library/diagnostic/inventory updates, full verification, focused commit, and GitHub push before marking complete.
+
+## M27 — Verifiable Local Delivery Package
+
+- [x] Implement a strict local delivery-package draft that creates deterministic SHA-256/byte-count integrity metadata and a manually reviewable delivery-folder checklist from declared project-local regular files.
+- [x] Add a local Markdown manifest and redacted summary with explicit disabled send/upload/submission/payment/browser/account/network/process markers; do not create a PDF renderer until a separately audited local document-rendering contract, fonts, limits, and artifact policy exist.
+- [x] Preserve existing `browser inspect|plan|confirm|handoff` as the safe visible-browser alternative; do not add CDP connection, cookie/session access, browser event hooks, CAPTCHA/2FA detection, credential handling, browser control, or automatic workflow resume.
+- [x] Add diagnostics, positive/negative tests, a Termux example, public documentation, full repository verification, focused commit, and GitHub push before marking complete.

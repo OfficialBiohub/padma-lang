@@ -75,6 +75,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1078 | Visible handoff safety | A manual handoff map has missing/unknown fields, invalid message/destination/attachment/review text, duplicate item, raw markup, URL/contact injection, or action-oriented field. It never sends, uploads, submits, signs, pays, or opens a browser. |
 | P1079 | Local reconciliation safety | Two local tables lack a shared safe key, contain duplicate/unsafe key values, or reconciliation output exceeds local policy. The summary redacts row identifiers and disables contact/upload/submission/payment/network/process actions. |
 | P1080 | Local attachment-review safety | A local attachment-review map has missing/unknown/unsafe fields, duplicate labels or paths, URL/contact/raw-markup text, unsafe/non-regular/symlinked attachment source, or oversized output. It only computes local checksums and never sends, uploads, submits, signs, pays, opens a browser, accesses an account/network, or starts a process. |
+| P1081 | Local delivery-package safety | A local delivery-package map has missing/unknown/unsafe fields, duplicate labels/paths/review steps, URL/contact/raw-markup text, unsafe/non-regular/symlinked source, or oversized output. It only computes local checksums and renders a manual review artifact; file copy, PDF rendering, send/upload/submission/payment/browser/account/network/process action are unavailable. |
 
 ## Example
 

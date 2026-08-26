@@ -1,0 +1,10 @@
+ধরি package = {"packageLabel": "Website delivery", "destinationLabel": "Client compose screen", "ownershipLabel": "I confirm authority to share", "files": [{"path": "data/project-brief.txt", "label": "Project brief"}, {"path": "data/design-note.txt", "label": "Design note"}], "reviewSteps": ["Compare each checksum", "Confirm destination and ownership", "Manually choose only reviewed files"]}
+
+ধরি summary = client.delivery_package_summary(package)
+ধরি saved = client.write_delivery_package("out/delivery-package.md", package)
+
+দেখাও text.format("Files: {fileCount}", summary)
+দেখাও text.format("Review steps: {reviewStepCount}", summary)
+দেখাও text.format("PDF: {pdf}", summary)
+দেখাও text.format("Upload: {upload}", summary)
+দেখাও text.format("Saved: {saved}", {"saved": saved})

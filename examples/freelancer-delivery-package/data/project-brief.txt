@@ -1,0 +1,2 @@
+Project brief sample for local integrity verification.
+This file remains in the project and is never copied or uploaded by Padma.
