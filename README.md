@@ -31,15 +31,19 @@ install -m755 target/release/padma "$PREFIX/bin/padma"
 padma --version
 ```
 
-The repository also provides `install-termux.sh` for the supported source-installer workflow. Review the script before running any remote installer command:
+The repository also provides `install-termux.sh` for the supported source-installer workflow. Obtain an inspectable source checkout first, inspect/check the installer, then run its explicit install action:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh -o install-termux.sh
-less install-termux.sh
+pkg install -y git
+git clone https://github.com/OfficialBiohub/padma-lang.git "$HOME/padma-lang"
+cd "$HOME/padma-lang"
+sed -n '1,240p' install-termux.sh
+bash install-termux.sh --check
 bash install-termux.sh
+padma --version
 ```
 
-For a phone-only Bangla tutorial covering `nano`, project setup, permissions, checking, formatting, and Android storage boundaries, read [the Termux-first guide](docs/TERMUX-FIRST-GUIDE-BN.md).
+The installer builds a locked local release and installs only `$PREFIX/bin/padma`; it does not edit shell profiles, install optional `yt-dlp`, read secrets, or take browser/device/provider actions. Use `bash install-termux.sh uninstall` to remove only that command. For a phone-only Bangla tutorial covering install, upgrade, recovery, `nano`, project setup, checking, formatting, and Android storage boundaries, read [the Termux-first guide](docs/TERMUX-FIRST-GUIDE-BN.md) and [the release-hardening contract](docs/TERMUX-RELEASE-HARDENING.md).
 
 ## First program
 

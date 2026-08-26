@@ -4,14 +4,18 @@
 
 ## ১. একবার Padma install করুন
 
-Termux খুলে শুধু এই command দুটি চালান:
+Termux খুলে নিচের commandগুলো একবার চালান। আগে repository clone করলে installer code নিজে দেখে চালাতে পারবেন:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh | bash
+pkg install -y git
+git clone https://github.com/OfficialBiohub/padma-lang.git "$HOME/padma-lang"
+cd "$HOME/padma-lang"
+bash install-termux.sh --check
+bash install-termux.sh
 padma --version
 ```
 
-দ্বিতীয় command-এ `Padma 0.1.0` দেখালে install হয়েছে। `pkg install padma -y` এখনো কাজ করবে না, কারণ Termux upstream personal GitHub project package করে না।
+শেষ command-এ `Padma 0.1.0` দেখালে install হয়েছে। `pkg install padma -y` এখনো কাজ করবে না, কারণ Termux upstream personal GitHub project package করে না। Installer শুধুমাত্র official source checkout update/build করে `$PREFIX/bin/padma`-এ একটি release binary বসায়। এটি `yt-dlp` install, shell profile change, browser/device/cloud/provider action, credential read, বা Android permission request করে না।
 
 ## ২. প্রথম file লিখুন ও চালান
 
@@ -63,16 +67,30 @@ Python-এর `>>> 1 + 1`-এর মতো Padma-তেও এক লাইন�
 
 ### `padma> 1+1` result না দেখালে update করুন
 
-এই behavior না পেলে সাধারণত Termux-এর `$PREFIX/bin/padma`-এ আগের binary রয়ে গেছে। একই version text দেখালেও পুরোনো compiled executable থাকতে পারে, তাই GitHub `main` থেকে installer আবার চালান:
+এই behavior না পেলে সাধারণত Termux-এর `$PREFIX/bin/padma`-এ আগের binary রয়ে গেছে। একই version text দেখালেও পুরোনো compiled executable থাকতে পারে, তাই clean official checkout থেকে installer আবার চালান:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OfficialBiohub/padma-lang/main/install-termux.sh | bash
+cd "$HOME/padma-lang"
+bash install-termux.sh --check
+bash install-termux.sh
 hash -r
 command -v padma
 printf '1+1\n২ + ৩\nexit()\n' | padma
 ```
 
 শেষ command-এ `2` এবং `5` দেখাতে হবে। তারপর normal interactive shell-এর জন্য আবার `padma` লিখুন। যদি output না আসে, `command -v padma` এবং `padma --version`-এর সম্পূর্ণ output issue report-এ দিন; একই নামে অন্য file PATH-এ আগে থাকতে পারে।
+
+### `padma: command not found` দেখালে
+
+আগে নিচের command চালান:
+
+```bash
+export PATH="$PREFIX/bin:$PATH"
+hash -r
+"$PREFIX/bin/padma" --version
+```
+
+শেষ command কাজ করলে নতুন Termux shell খুলুন, তারপর আবার `padma --version` চালান। `$PREFIX/bin/padma` file-ই না থাকলে `$HOME/padma-lang`-এ clean official checkout থেকে `bash install-termux.sh` চালান। Installer local Git change বা অন্য `origin` URL থাকলে থেমে যাবে—নিজের source change হারানো ঠেকানোর জন্য এটি ইচ্ছাকৃত। Uninstall করতে চাইলে একই checkout থেকে `bash install-termux.sh uninstall` চালান; এতে শুধু Padma command মুছবে, আপনার projects বা source checkout নয়।
 
 ## ৪. Run করার আগে ভুল ধরুন
 

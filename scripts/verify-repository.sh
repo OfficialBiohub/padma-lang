@@ -16,6 +16,17 @@ cargo build --release --locked
 binary="$root/target/release/padma"
 "$binary" examples/hello-bn.pd
 "$binary" examples/hello-en.pd
+termux_smoke_dir="$(mktemp -d)"
+cleanup_termux_smoke() {
+  rm -rf "$termux_smoke_dir"
+}
+trap cleanup_termux_smoke EXIT
+cp -R examples/termux-cli-smoke/. "$termux_smoke_dir"
+termux_smoke_output="$(cd "$termux_smoke_dir" && "$binary" .)"
+if ! grep -Fq 'Padma Termux CLI ready' <<<"$termux_smoke_output" || ! grep -Fq '5' <<<"$termux_smoke_output"; then
+  echo "release Termux project smoke test failed" >&2
+  exit 1
+fi
 repl_output="$(printf '1+1\n২ + ৩\nexit()\n' | "$binary")"
 if ! grep -Fq 'padma> 2' <<<"$repl_output" || ! grep -Fq 'padma> 5' <<<"$repl_output"; then
   echo "release REPL bare-expression smoke test failed" >&2

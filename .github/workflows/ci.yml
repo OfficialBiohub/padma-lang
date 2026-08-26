@@ -25,9 +25,9 @@ jobs:
       - name: Build optimized compiler
         run: cargo build --release --locked
       - name: Run Bengali example
-        run: ./target/release/padma run examples/hello-bn.pd
+        run: ./target/release/padma examples/hello-bn.pd
       - name: Run English example
-        run: ./target/release/padma run examples/hello-en.pd
+        run: ./target/release/padma examples/hello-en.pd
       - name: Verify repository hygiene
         run: bash scripts/verify-repository-hygiene.sh
       - name: Verify local documentation links

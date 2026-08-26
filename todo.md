@@ -455,3 +455,10 @@
 - [x] Implement deterministic local provider readiness/required-controls output with fixed disabled transport/submission/polling/cancellation markers; do not add authentication, network, QPU selection, pricing retrieval, job creation, provider SDK, or secret access.
 - [x] Add a bilingual diagnostic and regressions for malformed/unknown/provider/action/credential fields, bounded provider notes, deterministic output, redaction/no-secret output, and no filesystem/network/process/provider side effects.
 - [x] Publish a standalone Termux assessment example, public provider-boundary contract with source citations, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
+
+### M38 — Termux Release Hardening
+
+- [x] Inspect and define one bounded supported Termux install/upgrade/uninstall workflow that builds or installs only the reviewed local Padma release binary; do not add package-repository publishing, background service, root action, or hidden network execution.
+- [x] Implement deterministic release helper validation and tests for safe prefix/path handling, existing installation replacement/rollback behavior, missing prerequisites, release version verification, REPL launch, and `.pd` script execution without changing the public `padma` CLI contract.
+- [x] Add clear Bangla-English Termux guidance, a no-side-effect smoke-test project, troubleshooting for `padma: command not found`, and strict statement of what the installer does and does not do.
+- [x] Run full repository verification, focused commit, and GitHub push before marking complete.

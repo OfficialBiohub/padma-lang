@@ -16,6 +16,7 @@ This page is the **truth table** for the current repository. A capability is lab
 | SQLite and identity primitives | Bounded | Provides fixed local SQLite record operations and local password/session/CSRF helpers. | It is not a hosted authentication server, ORM, remote database, or account provider. |
 | HTTP, AI, and approved bridges | Bounded | Supports explicit HTTP helpers, one bounded provider-neutral AI workflow envelope, and fixed Python/Node bridge paths. | Requires an explicit capability and valid local configuration; no autonomous agent/tool loop or generated-output execution. |
 | Authorized media helper | Bounded | Can invoke the fixed `yt-dlp` integration for content the user owns or is authorized to download. | Requires the external tool and explicit grants; no platform bypass or unauthorized use. |
+| Termux source installer | Implemented bounded release workflow | Validates standard Termux prefix and a clean official checkout, builds `--release --locked`, verifies, and atomically replaces only `$PREFIX/bin/padma`; explicit `--check` and `uninstall` modes are available. | It does not publish a Termux package, edit shell profiles, install optional tools, read secrets, start services, request Android permissions, or access browser/device/provider/cloud actions. |
 
 ## Intentionally bounded or planning-only areas
 
