@@ -399,3 +399,10 @@
 - [x] Implement deterministic OpenQASM 3 generation and redacted circuit metadata only; do not claim quantum speed-up, QAOA/QML/Grover correctness, noise mitigation, automatic fallback simulation, cloud QPU execution, provider selection, REST/gRPC transport, or credential handling until separately implemented and verified.
 - [x] Add localized diagnostics and regression tests for unsupported gate/device/provider fields, invalid qubit/measurement values, duplicate/unsafe operations, malformed map/list types, no network/process/provider access, and deterministic output.
 - [x] Publish a standalone Termux planning example, public contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
+
+## M30 — Bounded Local Quantum State-Vector Simulator
+
+- [x] Define a strict simulator contract over the existing validated quantum circuit map, with a deliberately small qubit limit, exact supported gate semantics, deterministic probability output, and no sampling randomness by default.
+- [x] Implement local state-vector evolution for the v1 gate subset and full-register computational-basis probability distribution; reject unsupported partial-measurement/collapse semantics until separately modelled.
+- [x] Add localized diagnostics and regression tests for resource limits, unsupported/invalid operations, numeric normalization, Bell-style entanglement probability, deterministic ordering, no provider/QPU/network/process/credential access, and no external side effect.
+- [x] Publish an updated Termux example, simulator contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.

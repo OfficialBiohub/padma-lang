@@ -332,6 +332,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1082") => (format!("Local proposal, brief, or message-template is unsafe or invalid: `{detail}`"), Some("Use only explicit bounded local content, user review, and project-local Markdown output; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1083") => (format!("local quantum circuit plan নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু supported gate ও bounded local qubit/measurement map ব্যবহার করুন; Padma provider, QPU, simulator, credential, network, বা process চালাবে না।".into())),
         (Locale::English, "P1083") => (format!("Local quantum circuit plan is unsafe or invalid: `{detail}`"), Some("Use only supported gates and bounded local qubit/measurement maps; Padma will not run a provider, QPU, simulator, credential, network, or process.".into())),
+        (Locale::Bangla, "P1084") => (format!("local quantum simulator সীমা বা state invariant অতিক্রম করেছে: `{detail}`"), Some("ছোট bounded circuit ব্যবহার করুন; এটি শুধু deterministic local probability calculation, provider/QPU/network/process execution নয়।".into())),
+        (Locale::English, "P1084") => (format!("Local quantum simulator limit or state invariant failed: `{detail}`"), Some("Use a small bounded circuit; this is deterministic local probability calculation only, not provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1707,6 +1709,10 @@ fn client_template_error(locale: Locale, position: Position, detail: &str) -> Pa
 
 fn quantum_plan_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1083", position, detail)
+}
+
+fn quantum_simulator_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1084", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4724,6 +4730,8 @@ fn client_template_summary(draft: &ClientTemplateDraft) -> Value {
 
 const QUANTUM_MAX_QUBITS: usize = 20;
 const QUANTUM_MAX_OPERATIONS: usize = 256;
+const QUANTUM_SIMULATOR_MAX_QUBITS: usize = 12;
+const QUANTUM_SIMULATOR_EPSILON: f64 = 1e-10;
 
 #[derive(Clone, Debug)]
 struct QuantumOperation {
@@ -5038,11 +5046,196 @@ fn quantum_circuit_summary(circuit: &QuantumCircuitPlan) -> Value {
         ("openQasmVersion".into(), Value::String("3.0".into())),
         ("provider".into(), Value::String("not-configured".into())),
         ("qpu".into(), Value::String("disabled".into())),
-        ("simulator".into(), Value::String("not-provided".into())),
+        (
+            "simulator".into(),
+            Value::String("local-state-vector-available".into()),
+        ),
         ("credential".into(), Value::String("not-read".into())),
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ]))
+}
+
+fn quantum_apply_single_qubit(
+    state: &mut [(f64, f64)],
+    target: usize,
+    matrix: ((f64, f64), (f64, f64), (f64, f64), (f64, f64)),
+) {
+    let bit = 1usize << target;
+    for basis in 0..state.len() {
+        if basis & bit != 0 {
+            continue;
+        }
+        let paired = basis | bit;
+        let zero = state[basis];
+        let one = state[paired];
+        state[basis] = (
+            matrix.0 .0 * zero.0 - matrix.0 .1 * zero.1 + matrix.1 .0 * one.0 - matrix.1 .1 * one.1,
+            matrix.0 .0 * zero.1 + matrix.0 .1 * zero.0 + matrix.1 .0 * one.1 + matrix.1 .1 * one.0,
+        );
+        state[paired] = (
+            matrix.2 .0 * zero.0 - matrix.2 .1 * zero.1 + matrix.3 .0 * one.0 - matrix.3 .1 * one.1,
+            matrix.2 .0 * zero.1 + matrix.2 .1 * zero.0 + matrix.3 .0 * one.1 + matrix.3 .1 * one.0,
+        );
+    }
+}
+
+fn quantum_apply_cx(state: &mut [(f64, f64)], control: usize, target: usize) {
+    let control_bit = 1usize << control;
+    let target_bit = 1usize << target;
+    for basis in 0..state.len() {
+        if basis & control_bit == 0 || basis & target_bit != 0 {
+            continue;
+        }
+        let paired = basis | target_bit;
+        state.swap(basis, paired);
+    }
+}
+
+fn quantum_simulation_probability_map(
+    circuit: &QuantumCircuitPlan,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    if circuit.qubits > QUANTUM_SIMULATOR_MAX_QUBITS {
+        return Err(quantum_simulator_error(
+            locale,
+            position,
+            "qubit count exceeds the local state-vector simulation limit",
+        ));
+    }
+    let basis_count = 1usize << circuit.qubits;
+    let mut state = vec![(0.0, 0.0); basis_count];
+    state[0] = (1.0, 0.0);
+    let inverse_sqrt_two = 1.0 / 2.0_f64.sqrt();
+    for operation in &circuit.operations {
+        let mut apply_gate = |gate: &str, target: usize| match gate {
+            "h" => quantum_apply_single_qubit(
+                &mut state,
+                target,
+                (
+                    (inverse_sqrt_two, 0.0),
+                    (inverse_sqrt_two, 0.0),
+                    (inverse_sqrt_two, 0.0),
+                    (-inverse_sqrt_two, 0.0),
+                ),
+            ),
+            "x" => quantum_apply_single_qubit(
+                &mut state,
+                target,
+                ((0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (0.0, 0.0)),
+            ),
+            "z" => quantum_apply_single_qubit(
+                &mut state,
+                target,
+                ((1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (-1.0, 0.0)),
+            ),
+            "s" => quantum_apply_single_qubit(
+                &mut state,
+                target,
+                ((1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 1.0)),
+            ),
+            "t" => quantum_apply_single_qubit(
+                &mut state,
+                target,
+                (
+                    (1.0, 0.0),
+                    (0.0, 0.0),
+                    (0.0, 0.0),
+                    (inverse_sqrt_two, inverse_sqrt_two),
+                ),
+            ),
+            _ => unreachable!("validated single-qubit quantum gate"),
+        };
+        match operation.gate.as_str() {
+            "h" | "x" | "z" | "s" | "t" => apply_gate(&operation.gate, operation.targets[0]),
+            "cx" => quantum_apply_cx(&mut state, operation.targets[0], operation.targets[1]),
+            "superposition" => {
+                for target in &operation.targets {
+                    apply_gate("h", *target);
+                }
+            }
+            "entangle-linear" => {
+                for pair in operation.targets.windows(2) {
+                    quantum_apply_cx(&mut state, pair[0], pair[1]);
+                }
+            }
+            _ => unreachable!("validated quantum gate"),
+        }
+    }
+    let raw_total: f64 = state
+        .iter()
+        .map(|(real, imaginary)| real * real + imaginary * imaginary)
+        .sum();
+    if !raw_total.is_finite() || (raw_total - 1.0).abs() > QUANTUM_SIMULATOR_EPSILON {
+        return Err(quantum_simulator_error(
+            locale,
+            position,
+            "state-vector normalization is outside the local simulator tolerance",
+        ));
+    }
+    let mut probabilities: Vec<(String, f64)> = state
+        .iter()
+        .enumerate()
+        .map(|(basis, (real, imaginary))| {
+            let probability = (real * real + imaginary * imaginary) / raw_total;
+            let mut classical_bits = vec!['0'; circuit.qubits];
+            for measurement in &circuit.measurements {
+                if basis & (1usize << measurement.qubit) != 0 {
+                    classical_bits[circuit.qubits - 1 - measurement.bit] = '1';
+                }
+            }
+            (
+                classical_bits.into_iter().collect(),
+                if probability.abs() < 0.5e-12 {
+                    0.0
+                } else {
+                    (probability * 1e12).round() / 1e12
+                },
+            )
+        })
+        .collect();
+    let rounded_total: f64 = probabilities
+        .iter()
+        .map(|(_, probability)| probability)
+        .sum();
+    let correction = 1.0 - rounded_total;
+    let correction_index = probabilities
+        .iter()
+        .enumerate()
+        .max_by(|left, right| left.1 .1.total_cmp(&right.1 .1))
+        .map(|(index, _)| index)
+        .ok_or_else(|| quantum_simulator_error(locale, position, "empty state-vector"))?;
+    probabilities[correction_index].1 += correction;
+    if probabilities.iter().any(|(_, probability)| {
+        !probability.is_finite() || *probability < -QUANTUM_SIMULATOR_EPSILON
+    }) {
+        return Err(quantum_simulator_error(
+            locale,
+            position,
+            "probability normalization produced an invalid value",
+        ));
+    }
+    let probability_map = probabilities
+        .into_iter()
+        .map(|(basis, probability)| (basis, Value::Number(probability.max(0.0))))
+        .collect();
+    Ok(Value::Map(BTreeMap::from([
+        ("qubitCount".into(), Value::Number(circuit.qubits as f64)),
+        ("basisStateCount".into(), Value::Number(basis_count as f64)),
+        ("probabilities".into(), Value::Map(probability_map)),
+        ("probabilitySum".into(), Value::Number(1.0)),
+        (
+            "method".into(),
+            Value::String("local-state-vector-exact-probabilities".into()),
+        ),
+        ("sampling".into(), Value::String("disabled".into())),
+        ("provider".into(), Value::String("not-configured".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ])))
 }
 
 fn filesystem_productivity_regular_file(
@@ -7918,6 +8111,14 @@ impl Interpreter {
                         error_for(self.locale, "P1015", *position, "template output path")
                     })?;
                     return Ok(Value::Boolean(true));
+                }
+                if name == "quantum.simulate_probabilities" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let circuit = quantum_circuit_from_value(&value, self.locale, *position)?;
+                    return quantum_simulation_probability_map(&circuit, self.locale, *position);
                 }
                 if name == "quantum.circuit_summary"
                     || name == "quantum.openqasm3"
@@ -15091,7 +15292,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.template_summary"
         | "client.template_markdown"
         | "quantum.circuit_summary"
-        | "quantum.openqasm3" => Some((1, 1)),
+        | "quantum.openqasm3"
+        | "quantum.simulate_probabilities" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
@@ -18915,7 +19117,7 @@ mod tests {
                 "3.0",
                 "not-configured",
                 "disabled",
-                "not-provided",
+                "local-state-vector-available",
                 "disabled",
                 "false",
                 "true",
@@ -19006,6 +19208,85 @@ mod tests {
         assert_eq!(
             static_builtin_arity("quantum.write_openqasm3"),
             Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn local_quantum_simulator_returns_deterministic_bell_probabilities() {
+        let circuit = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"cx\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        let source = format!("let circuit = {circuit}\nlet first = quantum.simulate_probabilities(circuit)\nlet second = quantum.simulate_probabilities(circuit)\nprint first[\"qubitCount\"]\nprint first[\"basisStateCount\"]\nprint first[\"probabilities\"][\"00\"]\nprint first[\"probabilities\"][\"01\"]\nprint first[\"probabilities\"][\"10\"]\nprint first[\"probabilities\"][\"11\"]\nprint first[\"probabilitySum\"]\nprint first[\"method\"]\nprint first[\"sampling\"]\nprint first[\"provider\"]\nprint first[\"qpu\"]\nprint first[\"network\"]\nprint first[\"childProcess\"]\nprint json.stringify(first) == json.stringify(second)\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-simulator"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "2",
+                "4",
+                "0.5",
+                "0",
+                "0",
+                "0.5",
+                "1",
+                "local-state-vector-exact-probabilities",
+                "disabled",
+                "not-configured",
+                "disabled",
+                "disabled",
+                "disabled",
+                "true"
+            ]
+        );
+    }
+
+    #[test]
+    fn local_quantum_simulator_preserves_phase_and_declared_measurement_bit_placement() {
+        let phase = "{\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"s\", \"targets\": [0]}, {\"gate\": \"t\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        let mapped = "{\"qubits\": 2, \"operations\": [{\"gate\": \"x\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 1}, {\"qubit\": 1, \"bit\": 0}]}";
+        let source = format!("let phase = {phase}\nlet mapped = {mapped}\nlet phaseResult = quantum.simulate_probabilities(phase)\nlet mappedResult = quantum.simulate_probabilities(mapped)\nprint phaseResult[\"probabilities\"][\"0\"]\nprint phaseResult[\"probabilities\"][\"1\"]\nprint mappedResult[\"probabilities\"][\"00\"]\nprint mappedResult[\"probabilities\"][\"01\"]\nprint mappedResult[\"probabilities\"][\"10\"]\nprint mappedResult[\"probabilities\"][\"11\"]\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-simulator-phase"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(output, vec!["0.5", "0.5", "0", "0", "1", "0"]);
+    }
+
+    #[test]
+    fn local_quantum_simulator_rejects_resource_excess_and_preserves_local_only_boundary() {
+        let thirteen_measurements = (0..13)
+            .map(|index| format!("{{\"qubit\": {index}, \"bit\": {index}}}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let oversized = format!("{{\"qubits\": 13, \"operations\": [{{\"gate\": \"h\", \"targets\": [0]}}], \"measurements\": [{thirteen_measurements}]}}");
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-simulator-limit"),
+                BTreeSet::new(),
+                &format!("print quantum.simulate_probabilities({oversized})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1084"
+        );
+        let provider_field = "{\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}], \"provider\": \"remote\"}";
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-simulator-provider"),
+                BTreeSet::new(),
+                &format!("print quantum.simulate_probabilities({provider_field})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1083"
+        );
+        assert_eq!(
+            static_builtin_arity("quantum.simulate_probabilities"),
+            Some((1, 1))
         );
     }
 

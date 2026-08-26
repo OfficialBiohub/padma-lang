@@ -2,7 +2,7 @@
 
 ## Purpose and execution boundary
 
-Padma Quantum Planning v1 turns an explicit, bounded local circuit map into deterministic **OpenQASM 3.0 text**. It is a circuit-description feature, not a simulator, algorithm library, or quantum-cloud client.
+Padma Quantum Planning v1 turns an explicit, bounded local circuit map into deterministic **OpenQASM 3.0 text**. Its companion local state-vector feature can calculate bounded exact probability data; neither feature is a quantum-cloud client, algorithm library, or real-device executor.
 
 > OpenQASM describes gates with a fixed number of quantum arguments and describes static qubit/bit registers; this v1 emits a deliberately small compatible subset. [1] [2]
 
@@ -37,13 +37,13 @@ The writer follows the existing project-root policy: target parent must already 
 | Not provided | Reason |
 |---|---|
 | `quantum { ... }` parser block or QIR | The v1 surface is a runtime map API. A new grammar/AST/QIR compiler requires a separately scoped language evolution. |
-| State-vector simulator, result counts, auto-fallback | This release does not implement state evolution or bit-count sampling, so no measurement result or algorithm correctness is claimed. |
+| Sampled result counts, auto-fallback, advanced simulation | The companion simulator returns deterministic exact probabilities only. It does not perform random sampling/counts, collapse, noise simulation, fallback simulation, or produce real-device outcomes. |
 | QAOA, QML, Grover, optimisation, noise mitigation | These are algorithms/techniques, not implied by emitting a circuit text format. Their correctness and suitability need separate implementation and verification. |
 | IBM Quantum / Amazon Braket / REST / gRPC / provider choice | IBM non-local service access requires an API token, while Braket submission creates remote asynchronous tasks and retrieves results from cloud storage. These are credentialed external actions outside this local-only feature. [4] [5] |
 
 ## Safety and diagnostics
 
-`P1083` reports malformed or unsafe circuit data, unsupported gates, invalid indices/mapping, unsupported provider/device/simulator fields, or oversized QASM. The summary and QASM output fixedly report no provider, network, credential, QPU, simulator, or process execution.
+`P1083` reports malformed or unsafe circuit data, unsupported gates, invalid indices/mapping, unsupported provider/device/simulator fields, or oversized QASM. The circuit summary declares bounded local simulator availability, while the planning/QASM feature itself never accesses a provider, network, credential, QPU, or process. `P1084` covers local state-vector resource and numeric invariants.
 
 ## References
 
