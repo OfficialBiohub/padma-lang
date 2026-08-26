@@ -1,0 +1,2 @@
+Project brief attachment sample.
+This local file is used only for checksum and byte-count review.

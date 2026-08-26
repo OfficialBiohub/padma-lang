@@ -324,6 +324,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1078") => (format!("Visible handoff manifest is unsafe or invalid: `{detail}`"), Some("Use only bounded review labels, message drafts, and attachment labels; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1079") => (format!("local client-data reconciliation নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded local table, unique match key, redacted summary, এবং project-local review output ব্যবহার করুন; Padma client contact, upload, submission, payment, browser, account, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1079") => (format!("Local client-data reconciliation is unsafe or invalid: `{detail}`"), Some("Use only bounded local tables, a unique match key, redacted summary, and project-local review output; Padma will not run client contact, upload, submission, payment, browser, account, network, or process actions.".into())),
+        (Locale::Bangla, "P1080") => (format!("local attachment-review manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু project-local regular file, bounded label, checksum review, এবং user-reviewed destination label ব্যবহার করুন; Padma send, upload, submit, payment, browser, account, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1080") => (format!("Local attachment-review manifest is unsafe or invalid: `{detail}`"), Some("Use only project-local regular files, bounded labels, checksum review, and a user-reviewed destination label; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1683,6 +1685,10 @@ fn visible_handoff_error(locale: Locale, position: Position, detail: &str) -> Pa
 
 fn reconciliation_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1079", position, detail)
+}
+
+fn attachment_review_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1080", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -3924,6 +3930,191 @@ fn reconciliation_markdown(
             locale,
             position,
             "rendered reconciliation output exceeds the local byte limit",
+        ));
+    }
+    Ok(output)
+}
+
+#[derive(Clone, Debug)]
+struct AttachmentReviewEntry {
+    path: String,
+    label: String,
+}
+#[derive(Clone, Debug)]
+struct AttachmentReviewDraft {
+    destination_label: String,
+    ownership_label: String,
+    attachments: Vec<AttachmentReviewEntry>,
+}
+#[derive(Clone, Debug)]
+struct ReviewedAttachment {
+    label: String,
+    checksum: String,
+    size: u64,
+}
+
+fn attachment_review_text(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let Some(Value::String(text)) = value else {
+        return Err(attachment_review_error(
+            locale,
+            position,
+            &format!("attachment review {field} must be text"),
+        ));
+    };
+    if text.is_empty()
+        || text.len() > CLIENT_DOCUMENT_MAX_TEXT_BYTES
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+        || text.contains("://")
+        || text.contains('@')
+        || text.contains("www.")
+    {
+        return Err(attachment_review_error(locale, position, "attachment review labels must be bounded text without raw HTML, URL, or contact delimiters"));
+    }
+    Ok(text.to_string())
+}
+
+fn attachment_review_draft_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<AttachmentReviewDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(attachment_review_error(
+            locale,
+            position,
+            "attachment review manifest must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from(["destinationLabel", "ownershipLabel", "attachments"]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(attachment_review_error(
+            locale,
+            position,
+            "attachment review contains missing or unsupported fields",
+        ));
+    }
+    let Some(Value::List(values)) = fields.get("attachments") else {
+        return Err(attachment_review_error(
+            locale,
+            position,
+            "attachments must be a non-empty list",
+        ));
+    };
+    if values.is_empty() || values.len() > DELIVERY_CHECKLIST_MAX_ITEMS {
+        return Err(attachment_review_error(
+            locale,
+            position,
+            "attachment count is outside the allowed limit",
+        ));
+    }
+    let mut attachments = Vec::new();
+    let mut paths = BTreeSet::new();
+    let mut labels = BTreeSet::new();
+    for value in values {
+        let Value::Map(entry) = value else {
+            return Err(attachment_review_error(
+                locale,
+                position,
+                "each attachment must be a map",
+            ));
+        };
+        if entry.len() != 2
+            || entry
+                .keys()
+                .any(|key| !matches!(key.as_str(), "path" | "label"))
+        {
+            return Err(attachment_review_error(
+                locale,
+                position,
+                "attachment contains unsupported fields",
+            ));
+        }
+        let path = attachment_review_text(entry.get("path"), "path", locale, position)?;
+        let label = attachment_review_text(entry.get("label"), "label", locale, position)?;
+        if !paths.insert(path.clone()) || !labels.insert(label.clone()) {
+            return Err(attachment_review_error(
+                locale,
+                position,
+                "attachment paths and labels must be unique",
+            ));
+        }
+        attachments.push(AttachmentReviewEntry { path, label });
+    }
+    Ok(AttachmentReviewDraft {
+        destination_label: attachment_review_text(
+            fields.get("destinationLabel"),
+            "destinationLabel",
+            locale,
+            position,
+        )?,
+        ownership_label: attachment_review_text(
+            fields.get("ownershipLabel"),
+            "ownershipLabel",
+            locale,
+            position,
+        )?,
+        attachments,
+    })
+}
+
+fn attachment_review_summary(attachments: &[ReviewedAttachment]) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "attachmentCount".into(),
+            Value::Number(attachments.len() as f64),
+        ),
+        (
+            "checksumCount".into(),
+            Value::Number(attachments.len() as f64),
+        ),
+        (
+            "destinationReview".into(),
+            Value::String("user-review-required".into()),
+        ),
+        (
+            "ownershipReview".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("send".into(), Value::String("disabled".into())),
+        ("upload".into(), Value::String("disabled".into())),
+        ("submission".into(), Value::String("disabled".into())),
+        ("payment".into(), Value::String("disabled".into())),
+        ("browser".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
+fn attachment_review_markdown(
+    draft: &AttachmentReviewDraft,
+    attachments: &[ReviewedAttachment],
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut lines = vec!["# Attachment Review Manifest (Draft)".into(), String::new(), "**Status:** Stop and review manually. This manifest cannot send, upload, submit, sign, or pay.".into(), String::new(), "## Review labels".into(), format!("- **Destination:** {}", report_markdown_escape(&draft.destination_label)), format!("- **Ownership:** {}", report_markdown_escape(&draft.ownership_label)), String::new(), "## Attachments".into(), "| Label | Checksum | Bytes |".into(), "| --- | --- | ---: |".into()];
+    for attachment in attachments {
+        lines.push(format!(
+            "| {} | `{}` | {} |",
+            report_markdown_escape(&attachment.label),
+            attachment.checksum,
+            attachment.size
+        ));
+    }
+    lines.push(String::new());
+    lines.push("## Disabled actions".into());
+    lines.push("- Send/upload/submission/payment/browser/account/network/process: disabled".into());
+    let output = format!("{}\n", lines.join("\n"));
+    if output.len() > REPORT_MAX_BYTES {
+        return Err(attachment_review_error(
+            locale,
+            position,
+            "rendered attachment manifest exceeds the local byte limit",
         ));
     }
     Ok(output)
@@ -6571,6 +6762,77 @@ impl Interpreter {
                             "P1015",
                             *position,
                             "reconciliation output path",
+                        )
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.attachment_review_summary"
+                    || name == "client.attachment_review_markdown"
+                    || name == "client.write_attachment_review"
+                {
+                    let expected = if name == "client.write_attachment_review" {
+                        2
+                    } else {
+                        1
+                    };
+                    if arguments.len() != expected {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    self.require_project_capability("filesystem:read", name, *position)?;
+                    let (path_argument, draft_argument) = if expected == 2 {
+                        (Some(&arguments[0]), &arguments[1])
+                    } else {
+                        (None, &arguments[0])
+                    };
+                    let value = self.evaluate(draft_argument)?;
+                    let draft = attachment_review_draft_from_value(&value, self.locale, *position)?;
+                    let mut reviewed = Vec::new();
+                    for attachment in &draft.attachments {
+                        let source = self.resolve_file_path(&attachment.path).map_err(|_| {
+                            attachment_review_error(
+                                self.locale,
+                                *position,
+                                "attachment path must be project-local",
+                            )
+                        })?;
+                        let bytes =
+                            filesystem_productivity_read_file(&source, self.locale, *position)
+                                .map_err(|_| {
+                                    attachment_review_error(
+                                        self.locale,
+                                        *position,
+                                        "attachment must be a readable project-local regular file",
+                                    )
+                                })?;
+                        reviewed.push(ReviewedAttachment {
+                            label: attachment.label.clone(),
+                            checksum: format!("sha256:{}", sha256_hex(&bytes)),
+                            size: bytes.len() as u64,
+                        });
+                    }
+                    if name == "client.attachment_review_summary" {
+                        return Ok(attachment_review_summary(&reviewed));
+                    }
+                    let markdown =
+                        attachment_review_markdown(&draft, &reviewed, self.locale, *position)?;
+                    if name == "client.attachment_review_markdown" {
+                        return Ok(Value::String(markdown));
+                    }
+                    self.require_project_capability("filesystem:write", name, *position)?;
+                    let path_value = self.evaluate(path_argument.expect("writer path"))?;
+                    let path = expect_string(
+                        &path_value,
+                        self.locale,
+                        *position,
+                        "attachment review output path",
+                    )?;
+                    let output = self.client_document_output_path(path, *position)?;
+                    fs::write(output, markdown).map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1015",
+                            *position,
+                            "attachment review output path",
                         )
                     })?;
                     return Ok(Value::Boolean(true));
@@ -13704,7 +13966,9 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.case_study_markdown"
         | "client.case_study_summary"
         | "client.visible_handoff_markdown"
-        | "client.visible_handoff_summary" => Some((1, 1)),
+        | "client.visible_handoff_summary"
+        | "client.attachment_review_summary"
+        | "client.attachment_review_markdown" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
@@ -13720,6 +13984,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.write_delivery_checklist"
         | "client.write_case_study" => Some((2, 2)),
         "client.write_reconciliation" => Some((5, 5)),
+        "client.write_attachment_review" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -17122,6 +17387,131 @@ mod tests {
         assert_eq!(
             static_builtin_arity("client.write_reconciliation"),
             Some((5, 5))
+        );
+    }
+
+    #[test]
+    fn local_attachment_review_is_checksum_backed_redacted_and_project_local() {
+        let root = module_fixture_dir("local-attachment-review");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::write(root.join("data/brief.txt"), "Approved scope\n").unwrap();
+        fs::write(root.join("data/design.txt"), "Approved design\n").unwrap();
+        let draft = "{\"destinationLabel\": \"Client compose screen\", \"ownershipLabel\": \"I confirm authority to share\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Project brief\"}, {\"path\": \"data/design.txt\", \"label\": \"Design note\"}]}";
+        let source = format!("let draft = {draft}\nlet summary = client.attachment_review_summary(draft)\nlet markdown = client.attachment_review_markdown(draft)\nprint summary[\"attachmentCount\"]\nprint text.contains(json.stringify(summary), \"Project brief\")\nprint text.contains(markdown, \"sha256:\")\nprint text.contains(markdown, \"Send/upload/submission/payment/browser/account/network/process: disabled\")\nprint client.write_attachment_review(\"out/attachment-review.md\", draft)\n");
+        let output = run_bridge_project(
+            &root,
+            BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()]),
+            &source,
+        )
+        .unwrap();
+        let document = fs::read_to_string(root.join("out/attachment-review.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(output, vec!["2", "false", "true", "true", "true"]);
+        assert!(document.contains("# Attachment Review Manifest (Draft)"));
+        assert!(document.contains("Project brief"));
+        assert!(document.contains("sha256:"));
+        assert!(document.contains("Stop and review manually"));
+        assert!(document
+            .contains("Send/upload/submission/payment/browser/account/network/process: disabled"));
+    }
+
+    #[test]
+    fn local_attachment_review_rejects_missing_grants_unsafe_schema_paths_and_writer_targets() {
+        let root = module_fixture_dir("local-attachment-review-safety");
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::write(root.join("data/brief.txt"), "Approved scope\n").unwrap();
+        fs::write(root.join("outside.txt"), "Outside\n").unwrap();
+        std::os::unix::fs::symlink("../outside.txt", root.join("data/link.txt")).unwrap();
+        std::os::unix::fs::symlink("out", root.join("out-link")).unwrap();
+        let valid = "{\"destinationLabel\": \"Client compose screen\", \"ownershipLabel\": \"I confirm authority to share\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Project brief\"}]}";
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.attachment_review_summary({valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::from(["filesystem:read".into()]),
+                &format!("print client.write_attachment_review(\"out/review.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        let read_write = BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()]);
+        let unsafe_cases = [
+            "{\"destinationLabel\": \"https://example.invalid\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Brief\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"review@example.invalid\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Brief\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"../outside.txt\", \"label\": \"Brief\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"@downloads/brief.txt\", \"label\": \"Brief\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"data/link.txt\", \"label\": \"Brief\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Brief\"}, {\"path\": \"data/brief.txt\", \"label\": \"Brief copy\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Brief\"}, {\"path\": \"data/other.txt\", \"label\": \"Brief\"}]}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": {\"path\": \"data/brief.txt\", \"label\": \"Brief\"}}",
+            "{\"destinationLabel\": \"Compose\", \"ownershipLabel\": \"Review\", \"attachments\": [{\"path\": \"data/brief.txt\", \"label\": \"Brief\", \"uploadNow\": true}]}",
+        ];
+        for draft in unsafe_cases {
+            assert_eq!(
+                run_bridge_project(
+                    &root,
+                    read_write.clone(),
+                    &format!("print client.attachment_review_summary({draft})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1080"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                read_write.clone(),
+                &format!("print client.write_attachment_review(\"../review.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                read_write,
+                &format!("print client.write_attachment_review(\"out/review.txt\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::from(["filesystem:read".into(), "filesystem:write".into()]),
+                &format!("print client.write_attachment_review(\"out-link/review.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            static_builtin_arity("client.attachment_review_summary"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.attachment_review_markdown"),
+            Some((1, 1))
+        );
+        assert_eq!(
+            static_builtin_arity("client.write_attachment_review"),
+            Some((2, 2))
         );
     }
 

@@ -1,0 +1,2 @@
+Design note attachment sample.
+Manual review is required before any separate external action.

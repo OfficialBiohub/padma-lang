@@ -367,7 +367,14 @@
 
 - [ ] Publish a verified completion matrix for every M18 freelancer subtool and every M24 safe replacement, recording runtime, tests, standalone example, documentation, release verification, and push evidence or the exact missing dependency.
 - [x] Complete client-data delivery/reconciliation first: bounded local CSV/JSON comparison, deterministic mismatch/duplicate/missing-field summary, redacted checksum manifest, and reviewed project-local Markdown export.
-- [ ] Complete the combined attachment-review safe replacement after reconciliation: local file labels, checksum verification, ownership/review labels, destination label, and copy-only handoff artifact without any send/upload/submission action.
+- [x] Complete the combined attachment-review safe replacement after reconciliation: local file labels, checksum verification, ownership/review labels, destination label, and copy-only handoff artifact without any send/upload/submission action.
 - [ ] Complete explicit-input Bangla-English proposal/brief/message-template preparation only after the data/review foundations, with Markdown-safe rendering and no recipient/contact/account/platform action.
 - [ ] Complete deterministic developer delivery task/checksum manifest preparation after the prior local data features, without arbitrary shell, background, deployment, or remote authority.
 - [ ] Keep every remaining plan-only capability unmarked until its runtime, tests, Termux example, documentation, repository verification, focused commit, and GitHub push are complete.
+
+## M26 — Combined Local Attachment-Review Manifest
+
+- [x] Define a strict local attachment-review map with destination label, ownership/review label, and bounded attachment descriptors; each descriptor must reference only a project-local regular file and label.
+- [x] Implement checksum verification and deterministic redacted manifest/Markdown rendering with `filesystem:read`; write one project-local reviewed `.md` artifact only with `filesystem:write`.
+- [x] Add localized diagnostics and regressions for missing/unknown fields, duplicate labels/paths, unsafe URL/contact fields, traversal/absolute/shared-storage/symlink paths, missing grants, and no send/upload/submission/payment/browser/account/network/process side effect.
+- [x] Publish a standalone Termux example, public guide, standard-library/diagnostic/inventory updates, full verification, focused commit, and GitHub push before marking complete.

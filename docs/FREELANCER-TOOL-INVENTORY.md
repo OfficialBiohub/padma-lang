@@ -16,6 +16,7 @@ This inventory states only what the current Padma release binary executes, docum
 | 8 | Local record base | Validates attendance, expense, and inventory records for local review. | `record.*`; `examples/local-records-household` |
 | 9 | Local file/checksum base | Lists/checksums/searches bounded project-local content. | `fs.*`; filesystem toolkit example |
 | 10 | Project templates | Creates basic, data-report, and local response projects with minimum grants. | `padma init`; CLI smoke tests |
+| 11 | Attachment-review manifest | Reads declared project-local attachments for checksum/byte-count review and writes a local Markdown manifest. | `client.attachment_review_*`; `examples/freelancer-attachment-review` |
 
 All client-document writers require only `filesystem = ["write"]` and write a project-local non-symlink `.md` file. The APIs return redacted summaries and disabled-action markers rather than performing external actions.
 
@@ -24,7 +25,7 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 | Requested action | Automatic action added? | Implemented safe replacement | Still missing |
 |---|---:|---|---|
 | Client message | No | Copy-only `visible_handoff` message draft and review steps | Rich message-template library by work type |
-| Upload / attachment delivery | No | Attachment labels, ownership review steps, and existing checksum primitives | Attachment manifest/checksum report bundled into one freelancer API |
+| Upload / attachment delivery | No | Attachment labels, ownership review steps, and a single local checksum/byte-count attachment-review manifest | Manual file selection and upload remain the user's visible action by design |
 | Delivery submission | No | Delivery checklist plus visible destination-label review | User-facing destination revalidation checklist that links delivery checklist and handoff artifact |
 | Payment / withdrawal | No | Quote/invoice-draft review labels; payment disabled marker | No payment replacement beyond manual review by design |
 | Contract / e-signature | No | Scope-of-work review draft; contract disabled marker | No contract automation replacement beyond manual review by design |
@@ -38,11 +39,10 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 
 | Priority | Capability | Current state |
 |---|---|---|
-| P1 | Client-data delivery/reconciliation | Implemented first foundation: local table comparison, redacted counts/checksums, and reviewed Markdown export. CSV/JSON cleaning and attachment bundle remain separate work. |
+| P1 | Client-data delivery/reconciliation | Implemented foundations: local table comparison with redacted counts/checksums plus a separate project-local attachment checksum/ownership review manifest. CSV/JSON cleaning remains separate work. |
 | P1 | Content/document preparation | Not made: explicit-input Bangla-English proposal, brief, and copy template toolkit. |
 | P1 | Developer delivery toolkit | Not made: deterministic task/test/lint/build manifest and combined checksum manifest. |
 | P1 | API integration templates | Not made: reusable request descriptors, extraction rules, retry/timeout policy, and secret-name references. |
-| P2 | Unified attachment review | Partial: checksums exist, but a client-facing attachment manifest is not yet a single workflow. |
 | P2 | Study-note and extra local record schemas | Not made beyond attendance, expense, and inventory. |
 
-The next selected safe increment is **client-data delivery/reconciliation**. It will remain project-local and user-reviewed, without sending, upload, submission, payment, browser, account, network, or background authority.
+The next selected safe increment is **explicit-input Bangla-English proposal, brief, and message-template preparation**. It will remain project-local and user-reviewed, without sending, upload, submission, payment, browser, account, network, or background authority.

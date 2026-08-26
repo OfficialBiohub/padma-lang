@@ -149,6 +149,16 @@ Portfolio drafts reject private client/contact/account/payment fields, unsafe li
 
 The input tables use the existing table contract and must have one shared key header with unique safe values per table. Reconciliation does not expose identifiers in its summary, contact a client, upload, submit delivery, process payment, use a browser/account/network, or start a process. See [`LOCAL-CLIENT-RECONCILIATION.md`](LOCAL-CLIENT-RECONCILIATION.md).
 
+## Local attachment-review manifests
+
+| API | Result and boundary |
+|---|---|
+| `client.attachment_review_summary(draft)` | Reads declared project-local attachments and returns only count/checksum-count plus disabled-action markers. Requires `filesystem:read` in project mode. |
+| `client.attachment_review_markdown(draft)` | Renders a checksum and byte-count review manifest for declared project-local attachments. Requires `filesystem:read` in project mode. |
+| `client.write_attachment_review(path, draft)` | Writes one project-local non-symlink `.md` review artifact; requires both `filesystem:read` and `filesystem:write`. |
+
+The strict draft has `destinationLabel`, `ownershipLabel`, and a non-empty bounded `attachments` list. Each attachment has exactly a unique `path` and unique `label`; paths are read only to produce a SHA-256 checksum and byte count. Absolute/traversal/`@downloads`/symlink/non-regular paths, HTML/URL/contact text, unknown action fields, and duplicate labels/paths are rejected. The summary deliberately omits label, path, and checksum data. This toolkit cannot send, upload, submit, sign, pay, open a browser, access an account, use a network, or start a process. See [`LOCAL-ATTACHMENT-REVIEW.md`](LOCAL-ATTACHMENT-REVIEW.md).
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -177,4 +187,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`; unsafe portfolio case-study data uses `P1077`; unsafe visible handoff data uses `P1078`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`; unsafe portfolio case-study data uses `P1077`; unsafe visible handoff data uses `P1078`; unsafe local reconciliation data uses `P1079`; unsafe local attachment-review data uses `P1080`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

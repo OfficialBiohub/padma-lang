@@ -1,0 +1,9 @@
+ধরি draft = {"destinationLabel": "Client compose screen", "ownershipLabel": "I confirm authority to share", "attachments": [{"path": "data/project-brief.txt", "label": "Project brief"}, {"path": "data/design-note.txt", "label": "Design note"}]}
+
+ধরি summary = client.attachment_review_summary(draft)
+ধরি saved = client.write_attachment_review("out/attachment-review.md", draft)
+
+দেখাও text.format("Attachments: {attachmentCount}", summary)
+দেখাও text.format("Destination review: {destinationReview}", summary)
+দেখাও text.format("Upload: {upload}", summary)
+দেখাও text.format("Saved: {saved}", {"saved": saved})
