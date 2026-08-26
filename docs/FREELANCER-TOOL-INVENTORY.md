@@ -38,7 +38,7 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 
 | Priority | Capability | Current state |
 |---|---|---|
-| P1 | Client-data delivery/reconciliation | Not made: local CSV/JSON cleaning, reconciliation summary, redacted validation report, reviewed export bundle. |
+| P1 | Client-data delivery/reconciliation | Implemented first foundation: local table comparison, redacted counts/checksums, and reviewed Markdown export. CSV/JSON cleaning and attachment bundle remain separate work. |
 | P1 | Content/document preparation | Not made: explicit-input Bangla-English proposal, brief, and copy template toolkit. |
 | P1 | Developer delivery toolkit | Not made: deterministic task/test/lint/build manifest and combined checksum manifest. |
 | P1 | API integration templates | Not made: reusable request descriptors, extraction rules, retry/timeout policy, and secret-name references. |

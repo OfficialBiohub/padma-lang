@@ -322,6 +322,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1077") => (format!("Local portfolio case study is unsafe or invalid: `{detail}`"), Some("Use only bounded public project/challenge/solution/outcome fields; Padma will not handle private client data, contact, payment, marketplace, network, or process actions.".into())),
         (Locale::Bangla, "P1078") => (format!("visible handoff manifest নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded review label, message draft, এবং attachment label ব্যবহার করুন; Padma send, upload, submit, payment, browser, account, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1078") => (format!("Visible handoff manifest is unsafe or invalid: `{detail}`"), Some("Use only bounded review labels, message drafts, and attachment labels; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
+        (Locale::Bangla, "P1079") => (format!("local client-data reconciliation নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded local table, unique match key, redacted summary, এবং project-local review output ব্যবহার করুন; Padma client contact, upload, submission, payment, browser, account, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1079") => (format!("Local client-data reconciliation is unsafe or invalid: `{detail}`"), Some("Use only bounded local tables, a unique match key, redacted summary, and project-local review output; Padma will not run client contact, upload, submission, payment, browser, account, network, or process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1677,6 +1679,10 @@ fn portfolio_error(locale: Locale, position: Position, detail: &str) -> PadmaErr
 
 fn visible_handoff_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1078", position, detail)
+}
+
+fn reconciliation_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1079", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -3767,6 +3773,160 @@ fn visible_handoff_summary(draft: &VisibleHandoffDraft) -> Value {
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ]))
+}
+
+#[derive(Clone, Debug)]
+struct ReconciliationSummary {
+    key: String,
+    left_rows: usize,
+    right_rows: usize,
+    matched: usize,
+    left_only: usize,
+    right_only: usize,
+    left_digest: String,
+    right_digest: String,
+}
+
+fn reconciliation_key(
+    value: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    if value.is_empty()
+        || value.len() > 96
+        || value.chars().any(char::is_control)
+        || value.contains(['<', '>', '/', '\\', '@'])
+        || value.contains("://")
+    {
+        return Err(reconciliation_error(
+            locale,
+            position,
+            "match key must be bounded local table-header text",
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn reconciliation_table_digest(table: &TableData) -> String {
+    let mut canonical = table.headers.join("\u{1f}");
+    for row in &table.rows {
+        canonical.push('\n');
+        canonical.push_str(
+            &table
+                .headers
+                .iter()
+                .map(|header| row.get(header).map(String::as_str).unwrap_or(""))
+                .collect::<Vec<_>>()
+                .join("\u{1f}"),
+        );
+    }
+    format!("sha256:{}", sha256_hex(canonical.as_bytes()))
+}
+
+fn reconcile_tables(
+    left: &TableData,
+    right: &TableData,
+    key: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<ReconciliationSummary, PadmaError> {
+    let key = reconciliation_key(key, locale, position)?;
+    if !left.headers.contains(&key) || !right.headers.contains(&key) {
+        return Err(reconciliation_error(
+            locale,
+            position,
+            "match key must exist in both local tables",
+        ));
+    }
+    let index = |table: &TableData| -> Result<BTreeSet<String>, PadmaError> {
+        let mut values = BTreeSet::new();
+        for row in &table.rows {
+            let value = row.get(&key).map(String::as_str).unwrap_or("");
+            if value.is_empty()
+                || value.contains(['<', '>'])
+                || value.contains("://")
+                || !values.insert(value.to_string())
+            {
+                return Err(reconciliation_error(
+                    locale,
+                    position,
+                    "match-key values must be non-empty, safe, and unique within each table",
+                ));
+            }
+        }
+        Ok(values)
+    };
+    let left_keys = index(left)?;
+    let right_keys = index(right)?;
+    let matched = left_keys.intersection(&right_keys).count();
+    Ok(ReconciliationSummary {
+        key,
+        left_rows: left.rows.len(),
+        right_rows: right.rows.len(),
+        matched,
+        left_only: left_keys.difference(&right_keys).count(),
+        right_only: right_keys.difference(&left_keys).count(),
+        left_digest: reconciliation_table_digest(left),
+        right_digest: reconciliation_table_digest(right),
+    })
+}
+
+fn reconciliation_summary_value(summary: &ReconciliationSummary) -> Value {
+    Value::Map(BTreeMap::from([
+        ("matchKey".into(), Value::String(summary.key.clone())),
+        (
+            "leftRowCount".into(),
+            Value::Number(summary.left_rows as f64),
+        ),
+        (
+            "rightRowCount".into(),
+            Value::Number(summary.right_rows as f64),
+        ),
+        ("matchedCount".into(), Value::Number(summary.matched as f64)),
+        (
+            "leftOnlyCount".into(),
+            Value::Number(summary.left_only as f64),
+        ),
+        (
+            "rightOnlyCount".into(),
+            Value::Number(summary.right_only as f64),
+        ),
+        (
+            "leftChecksum".into(),
+            Value::String(summary.left_digest.clone()),
+        ),
+        (
+            "rightChecksum".into(),
+            Value::String(summary.right_digest.clone()),
+        ),
+        (
+            "clientContact".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("upload".into(), Value::String("disabled".into())),
+        ("submission".into(), Value::String("disabled".into())),
+        ("payment".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
+fn reconciliation_markdown(
+    title: &str,
+    summary: &ReconciliationSummary,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    report_validate_title(title, locale, position)?;
+    let output = format!("# {}\n\n**Status:** User review required. This is a local reconciliation artifact, not a client submission, payment, or delivery action.\n\n| Metric | Count |\n| --- | ---: |\n| Left rows | {} |\n| Right rows | {} |\n| Matched | {} |\n| Left-only | {} |\n| Right-only | {} |\n\n## Redacted checksum manifest\n\n- **Match key:** {}\n- **Left checksum:** `{}`\n- **Right checksum:** `{}`\n\n## Disabled actions\n\n- Client contact: user-reviewed\n- Upload/submission/payment/network/process: disabled\n", report_markdown_escape(title), summary.left_rows, summary.right_rows, summary.matched, summary.left_only, summary.right_only, report_markdown_escape(&summary.key), summary.left_digest, summary.right_digest);
+    if output.len() > REPORT_MAX_BYTES {
+        return Err(reconciliation_error(
+            locale,
+            position,
+            "rendered reconciliation output exceeds the local byte limit",
+        ));
+    }
+    Ok(output)
 }
 
 fn filesystem_productivity_regular_file(
@@ -6325,6 +6485,93 @@ impl Interpreter {
                     let resolved_path = self.report_output_path(path, *position)?;
                     fs::write(&resolved_path, report).map_err(|_| {
                         error_for(self.locale, "P1015", *position, "report output path")
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.reconcile_summary" {
+                    if arguments.len() != 3 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let left_value = self.evaluate(&arguments[0])?;
+                    let right_value = self.evaluate(&arguments[1])?;
+                    let key_value = self.evaluate(&arguments[2])?;
+                    let left = table_data_from_value(&left_value, self.locale, *position)?;
+                    let right = table_data_from_value(&right_value, self.locale, *position)?;
+                    let key = expect_string(
+                        &key_value,
+                        self.locale,
+                        *position,
+                        "reconciliation match key",
+                    )?;
+                    return reconcile_tables(&left, &right, key, self.locale, *position)
+                        .map(|summary| reconciliation_summary_value(&summary));
+                }
+                if name == "client.reconcile_markdown" {
+                    if arguments.len() != 4 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let title_value = self.evaluate(&arguments[0])?;
+                    let left_value = self.evaluate(&arguments[1])?;
+                    let right_value = self.evaluate(&arguments[2])?;
+                    let key_value = self.evaluate(&arguments[3])?;
+                    let title = expect_string(
+                        &title_value,
+                        self.locale,
+                        *position,
+                        "reconciliation title",
+                    )?;
+                    let left = table_data_from_value(&left_value, self.locale, *position)?;
+                    let right = table_data_from_value(&right_value, self.locale, *position)?;
+                    let key = expect_string(
+                        &key_value,
+                        self.locale,
+                        *position,
+                        "reconciliation match key",
+                    )?;
+                    let summary = reconcile_tables(&left, &right, key, self.locale, *position)?;
+                    return reconciliation_markdown(title, &summary, self.locale, *position)
+                        .map(Value::String);
+                }
+                if name == "client.write_reconciliation" {
+                    if arguments.len() != 5 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path_value = self.evaluate(&arguments[0])?;
+                    let title_value = self.evaluate(&arguments[1])?;
+                    let left_value = self.evaluate(&arguments[2])?;
+                    let right_value = self.evaluate(&arguments[3])?;
+                    let key_value = self.evaluate(&arguments[4])?;
+                    let path = expect_string(
+                        &path_value,
+                        self.locale,
+                        *position,
+                        "reconciliation output path",
+                    )?;
+                    let title = expect_string(
+                        &title_value,
+                        self.locale,
+                        *position,
+                        "reconciliation title",
+                    )?;
+                    let left = table_data_from_value(&left_value, self.locale, *position)?;
+                    let right = table_data_from_value(&right_value, self.locale, *position)?;
+                    let key = expect_string(
+                        &key_value,
+                        self.locale,
+                        *position,
+                        "reconciliation match key",
+                    )?;
+                    let summary = reconcile_tables(&left, &right, key, self.locale, *position)?;
+                    let document =
+                        reconciliation_markdown(title, &summary, self.locale, *position)?;
+                    let output = self.client_document_output_path(path, *position)?;
+                    fs::write(output, document).map_err(|_| {
+                        error_for(
+                            self.locale,
+                            "P1015",
+                            *position,
+                            "reconciliation output path",
+                        )
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -13463,11 +13710,16 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
         | "report.summary" | "profile.validate" | "profile.summary" | "record.validate"
         | "record.summary" => Some((2, 2)),
-        "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
+        "text.replace"
+        | "fs.search_text"
+        | "report.write_markdown"
+        | "client.reconcile_summary" => Some((3, 3)),
+        "client.reconcile_markdown" => Some((4, 4)),
         "client.write_document"
         | "client.write_scope"
         | "client.write_delivery_checklist"
         | "client.write_case_study" => Some((2, 2)),
+        "client.write_reconciliation" => Some((5, 5)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -16807,6 +17059,69 @@ mod tests {
         assert_eq!(
             static_builtin_arity("client.visible_handoff_summary"),
             Some((1, 1))
+        );
+    }
+
+    #[test]
+    fn local_client_reconciliation_is_redacted_deterministic_and_project_local() {
+        let root = module_fixture_dir("local-client-reconciliation");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let left = "{\"format\": \"csv\", \"headers\": [\"id\", \"status\"], \"rows\": [{\"id\": \"A-01\", \"status\": \"done\"}, {\"id\": \"A-02\", \"status\": \"open\"}]}";
+        let right = "{\"format\": \"csv\", \"headers\": [\"id\", \"status\"], \"rows\": [{\"id\": \"A-01\", \"status\": \"received\"}, {\"id\": \"A-03\", \"status\": \"missing\"}]}";
+        let source = format!("let left = {left}\nlet right = {right}\nlet summary = client.reconcile_summary(left, right, \"id\")\nlet markdown = client.reconcile_markdown(\"Client Reconciliation\", left, right, \"id\")\nprint summary[\"matchedCount\"]\nprint summary[\"leftOnlyCount\"]\nprint summary[\"rightOnlyCount\"]\nprint text.contains(json.stringify(summary), \"A-01\")\nprint text.contains(markdown, \"A-01\")\nprint client.write_reconciliation(\"out/reconciliation.md\", \"Client Reconciliation\", left, right, \"id\")\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let document = fs::read_to_string(root.join("out/reconciliation.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(output, vec!["1", "1", "1", "false", "false", "true"]);
+        assert!(document.contains("Redacted checksum manifest"));
+        assert!(document.contains("Upload/submission/payment/network/process: disabled"));
+    }
+
+    #[test]
+    fn local_client_reconciliation_rejects_unsafe_or_unmatched_tables_and_paths() {
+        let root = module_fixture_dir("local-client-reconciliation-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let left = "{\"format\": \"csv\", \"headers\": [\"id\"], \"rows\": [{\"id\": \"A\"}]}";
+        let right = "{\"format\": \"csv\", \"headers\": [\"id\"], \"rows\": [{\"id\": \"A\"}]}";
+        let duplicate = "{\"format\": \"csv\", \"headers\": [\"id\"], \"rows\": [{\"id\": \"A\"}, {\"id\": \"A\"}]}";
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.reconcile_summary({duplicate}, {right}, \"id\")\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1079"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.reconcile_summary({left}, {right}, \"missing\")\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1079"
+        );
+        assert_eq!(run_bridge_project(&root, BTreeSet::new(), &format!("print client.write_reconciliation(\"out/reconciliation.md\", \"Report\", {left}, {right}, \"id\")\n")).unwrap_err().code, "P1034");
+        let capability = BTreeSet::from(["filesystem:write".into()]);
+        assert_eq!(run_bridge_project(&root, capability.clone(), &format!("print client.write_reconciliation(\"../report.md\", \"Report\", {left}, {right}, \"id\")\n")).unwrap_err().code, "P1014");
+        assert_eq!(run_bridge_project(&root, capability, &format!("print client.write_reconciliation(\"out/report.txt\", \"Report\", {left}, {right}, \"id\")\n")).unwrap_err().code, "P1073");
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            static_builtin_arity("client.reconcile_summary"),
+            Some((3, 3))
+        );
+        assert_eq!(
+            static_builtin_arity("client.reconcile_markdown"),
+            Some((4, 4))
+        );
+        assert_eq!(
+            static_builtin_arity("client.write_reconciliation"),
+            Some((5, 5))
         );
     }
 

@@ -1,0 +1,9 @@
+ধরি local = table.read("data/local.csv", "csv")
+ধরি client = table.read("data/client.csv", "csv")
+ধরি summary = client.reconcile_summary(local, client, "id")
+ধরি saved = client.write_reconciliation("out/reconciliation.md", "Client Data Reconciliation", local, client, "id")
+দেখাও text.format("Matched: {matchedCount}", summary)
+দেখাও text.format("Local-only: {leftOnlyCount}", summary)
+দেখাও text.format("Client-only: {rightOnlyCount}", summary)
+দেখাও summary["upload"]
+দেখাও text.format("Saved: {saved}", {"saved": saved})

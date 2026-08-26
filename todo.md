@@ -359,6 +359,15 @@
 
 ## M24 — Freelancer Capability Inventory and Remaining Safe Replacements
 
-- [ ] Maintain a public evidence table that separates runnable freelancer tools, bounded local-only tools, planned tools, and prohibited external-action automation without describing any item as income, job, or client-acceptance guarantee.
-- [ ] Add the next safe client-data delivery foundation: project-local CSV/JSON reconciliation, redacted validation summary, checksum manifest, and reviewed export artifact without client contact, upload, submission, payment, browser, account, network, or background authority.
+- [x] Maintain a public evidence table that separates runnable freelancer tools, bounded local-only tools, planned tools, and prohibited external-action automation without describing any item as income, job, or client-acceptance guarantee.
+- [x] Add the next safe client-data delivery foundation: project-local CSV/JSON reconciliation, redacted validation summary, checksum manifest, and reviewed export artifact without client contact, upload, submission, payment, browser, account, network, or background authority.
 - [ ] Evaluate later user-mediated preparation gaps—attachment checksum review, destination review, copy-only message formatting, and visible browser handoff checklist—one bounded feature at a time; do not add automatic sending, posting, upload, delivery submission, payment, signing, marketplace login, browser session, or account control.
+
+## M25 — Incomplete Capability Recovery Program
+
+- [ ] Publish a verified completion matrix for every M18 freelancer subtool and every M24 safe replacement, recording runtime, tests, standalone example, documentation, release verification, and push evidence or the exact missing dependency.
+- [x] Complete client-data delivery/reconciliation first: bounded local CSV/JSON comparison, deterministic mismatch/duplicate/missing-field summary, redacted checksum manifest, and reviewed project-local Markdown export.
+- [ ] Complete the combined attachment-review safe replacement after reconciliation: local file labels, checksum verification, ownership/review labels, destination label, and copy-only handoff artifact without any send/upload/submission action.
+- [ ] Complete explicit-input Bangla-English proposal/brief/message-template preparation only after the data/review foundations, with Markdown-safe rendering and no recipient/contact/account/platform action.
+- [ ] Complete deterministic developer delivery task/checksum manifest preparation after the prior local data features, without arbitrary shell, background, deployment, or remote authority.
+- [ ] Keep every remaining plan-only capability unmarked until its runtime, tests, Termux example, documentation, repository verification, focused commit, and GitHub push are complete.

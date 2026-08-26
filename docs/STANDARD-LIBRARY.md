@@ -139,6 +139,16 @@ Required fields are project title plus unique deliverable, review, and handover 
 
 Portfolio drafts reject private client/contact/account/payment fields, unsafe links, raw markup, and income/guarantee claims. Visible handoff drafts accept only a destination label, a message draft, attachment labels, and review steps; they cannot send, post, upload/download, submit, sign, pay, open a browser, access an account, or use a network/process. See [`LOCAL-PORTFOLIO-HANDOFF.md`](LOCAL-PORTFOLIO-HANDOFF.md).
 
+## Local client-data reconciliation
+
+| API | Result and boundary |
+|---|---|
+| `client.reconcile_summary(left, right, key)` | Returns only local row/match/mismatch counts and deterministic table checksums. |
+| `client.reconcile_markdown(title, left, right, key)` | Renders a redacted local reconciliation Markdown artifact. |
+| `client.write_reconciliation(path, title, left, right, key)` | Writes one project-local non-symlink `.md` artifact; requires `filesystem:write`. |
+
+The input tables use the existing table contract and must have one shared key header with unique safe values per table. Reconciliation does not expose identifiers in its summary, contact a client, upload, submit delivery, process payment, use a browser/account/network, or start a process. See [`LOCAL-CLIENT-RECONCILIATION.md`](LOCAL-CLIENT-RECONCILIATION.md).
+
 ## Interoperability bridge
 
 | API | Result and boundary |

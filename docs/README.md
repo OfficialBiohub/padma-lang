@@ -24,6 +24,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Local records](LOCAL-RECORDS.md) | Strict project-local attendance, expense, and inventory table validation with redacted summaries |
 | [Freelancer workflows roadmap](FREELANCER-WORKFLOWS.md) | Production-oriented local preparation path and explicit marketplace/client-action boundaries |
 | [Freelancer tool inventory](FREELANCER-TOOL-INVENTORY.md) | Evidence-based list of runnable tools, missing workflows, and safe-replacement status |
+| [Local client reconciliation](LOCAL-CLIENT-RECONCILIATION.md) | Redacted local table comparison and checksum review artifact without external action |
 | [Local client documents](CLIENT-DOCUMENTS.md) | Strict local quote/invoice-draft Markdown preparation with user-reviewed client/payment boundaries |
 | [Local scope-of-work](LOCAL-SCOPE-OF-WORK.md) | Strict local scope/exclusion/revision draft with redacted summary and project-local review export |
 | [Local delivery checklists](LOCAL-DELIVERY-CHECKLISTS.md) | Strict local deliverable/review/handover draft with redacted summary and project-local review export |
