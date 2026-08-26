@@ -109,6 +109,16 @@ Attendance requires unique `(date, student)` entries and status `present`, `abse
 
 Drafts require `documentType`, `clientName`, `projectTitle`, three-letter uppercase `currency`, finite non-negative `amount`, and a bounded unique `deliverables` text list. Optional `reference`, `validUntil`, and `notes` are bounded single-line text. Unknown fields—including URLs, recipient/contact, account, payout, or authorization fields—are rejected. Raw `<`/`>` delimiters and control characters are rejected; accepted Markdown-sensitive characters are escaped. Documents cannot write to absolute/traversal/`@downloads`/symlink paths. This toolkit does not contact a client, make a payment, sign a contract, submit to a marketplace, use a network/browser/account, or start a process. See [`CLIENT-DOCUMENTS.md`](CLIENT-DOCUMENTS.md) for the complete contract and Termux example.
 
+## Local scope-of-work
+
+| API | Result and boundary |
+|---|---|
+| `client.scope_markdown(draft)` | Escaped local scope-of-work Markdown from one strict map. No capability is required. |
+| `client.scope_summary(draft)` | Redacted counts and fixed disabled-action markers only. No capability is required. |
+| `client.write_scope(path, draft)` | Writes one bounded project-local non-symlink `.md` review draft. Requires `filesystem:write` in project mode. |
+
+Required fields are client/project labels, unique scope/exclusion lists, a `0`–`10` whole revision limit, and a non-contractual delivery target label. URL/contact/raw-HTML delimiters and unknown payment, account, recipient, authorization, platform, or contract fields are rejected. The APIs do not contact a client, sign, submit, pay, use a marketplace/network/browser/account, or start a process. See [`LOCAL-SCOPE-OF-WORK.md`](LOCAL-SCOPE-OF-WORK.md).
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -137,4 +147,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.

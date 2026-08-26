@@ -69,6 +69,7 @@ Padma diagnostics use a stable `P` code, a source position, a localized title, a
 | P1072 | Local profile safety | A profile/schema is malformed, exceeds bounded field/key/text policy, has an unknown/missing field, uses an unsupported scalar type, mismatched value/default, nested value, or unsafe rule. Raw profile values are not echoed. |
 | P1073 | Local client-document safety | A quote/invoice-draft map is malformed, has a missing/unknown/unsafe field, invalid type/currency/amount/deliverable/date/text, raw HTML delimiter, oversized output, or invalid local Markdown export path. Draft values and paths outside the project root are not echoed. |
 | P1074 | Local record safety | An attendance, expense, or inventory table has an invalid kind/exact header/required text/date/status/currency/amount/quantity/duplicate identity/raw markup or record-specific bound. Record values and paths outside the project root are not echoed. |
+| P1075 | Local scope-of-work safety | A scope-of-work map has missing/unknown fields, invalid text/list/revision bound, duplicate item, raw markup, URL/contact delimiter, oversized output, or unsafe local Markdown export path. Draft values and paths outside the project root are not echoed. |
 
 ## Example
 

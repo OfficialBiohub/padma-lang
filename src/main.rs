@@ -314,6 +314,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1073") => (format!("Freelancer client document draft is unsafe or invalid: `{detail}`"), Some("Use only bounded client draft fields, explicit deliverables, project-local `.md` output, and user review; Padma will not run payment, contact, contract, marketplace, network, or process actions.".into())),
         (Locale::Bangla, "P1074") => (format!("local record data নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded attendance, expense, অথবা inventory table field ব্যবহার করুন; Padma account, cloud, payment, network, device, বা process action চালাবে না।".into())),
         (Locale::English, "P1074") => (format!("Local record data is unsafe or invalid: `{detail}`"), Some("Use only bounded attendance, expense, or inventory table fields; Padma will not run account, cloud, payment, network, device, or process actions.".into())),
+        (Locale::Bangla, "P1075") => (format!("local scope-of-work draft নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded project/scope/exclusion/revision field এবং project-local `.md` review output ব্যবহার করুন; Padma client contact, contract signing, marketplace submission, payment, network, বা process action চালাবে না।".into())),
+        (Locale::English, "P1075") => (format!("Local scope-of-work draft is unsafe or invalid: `{detail}`"), Some("Use only bounded project/scope/exclusion/revision fields and project-local `.md` review output; Padma will not run client contact, contract signing, marketplace submission, payment, network, or process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1582,6 +1584,8 @@ const CLIENT_DOCUMENT_MAX_TEXT_BYTES: usize = 512;
 const CLIENT_DOCUMENT_MAX_NOTES_BYTES: usize = 2_048;
 const CLIENT_DOCUMENT_MAX_DELIVERABLES: usize = 20;
 const CLIENT_DOCUMENT_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
+const SCOPE_OF_WORK_MAX_ITEMS: usize = 20;
+const SCOPE_OF_WORK_MAX_REVISIONS: u64 = 10;
 const RECORD_MAX_TEXT_BYTES: usize = 160;
 const RECORD_MAX_NOTE_BYTES: usize = 512;
 const RECORD_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
@@ -1649,6 +1653,10 @@ fn profile_error(locale: Locale, position: Position, detail: &str) -> PadmaError
 
 fn client_document_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1073", position, detail)
+}
+
+fn scope_of_work_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1075", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -2670,6 +2678,330 @@ fn client_document_summary(draft: &ClientDocumentDraft) -> Value {
             "marketplaceSubmission".into(),
             Value::String("disabled".into()),
         ),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
+#[derive(Clone, Debug)]
+struct ScopeOfWorkDraft {
+    client_label: String,
+    project_title: String,
+    scope_items: Vec<String>,
+    exclusions: Vec<String>,
+    revision_limit: u64,
+    delivery_target_label: String,
+    reference: Option<String>,
+    notes: Option<String>,
+}
+
+fn scope_of_work_text(
+    value: Option<&Value>,
+    required: bool,
+    field: &str,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<Option<String>, PadmaError> {
+    let Some(value) = value else {
+        return if required {
+            Err(scope_of_work_error(
+                locale,
+                position,
+                "scope-of-work is missing a required text field",
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    let Value::String(text) = value else {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            &format!("scope-of-work {field} must be text"),
+        ));
+    };
+    if text.is_empty()
+        || text.len() > max_bytes
+        || text.chars().any(char::is_control)
+        || text.contains(['<', '>'])
+        || text.contains("://")
+        || text.contains('@')
+        || text.contains("www.")
+    {
+        return Err(scope_of_work_error(locale, position, "scope-of-work text must be bounded single-line content without raw HTML, URL, or contact delimiters"));
+    }
+    Ok(Some(text.to_string()))
+}
+
+fn scope_of_work_text_list(
+    value: Option<&Value>,
+    field: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Vec<String>, PadmaError> {
+    let Some(Value::List(values)) = value else {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "scope-of-work is missing a required text list field",
+        ));
+    };
+    if values.is_empty() || values.len() > SCOPE_OF_WORK_MAX_ITEMS {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "scope-of-work item count is outside the allowed limit",
+        ));
+    }
+    let mut items = Vec::with_capacity(values.len());
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let item = scope_of_work_text(
+            Some(value),
+            true,
+            field,
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("required scope item");
+        if !seen.insert(item.clone()) {
+            return Err(scope_of_work_error(
+                locale,
+                position,
+                "scope-of-work list items must not be duplicated",
+            ));
+        }
+        items.push(item);
+    }
+    Ok(items)
+}
+
+fn scope_of_work_revision_limit(
+    value: Option<&Value>,
+    locale: Locale,
+    position: Position,
+) -> Result<u64, PadmaError> {
+    let Some(Value::Number(value)) = value else {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "scope-of-work revisionLimit must be a non-negative whole number",
+        ));
+    };
+    if !value.is_finite()
+        || *value < 0.0
+        || value.fract() != 0.0
+        || *value > SCOPE_OF_WORK_MAX_REVISIONS as f64
+    {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "scope-of-work revisionLimit is outside the allowed limit",
+        ));
+    }
+    Ok(*value as u64)
+}
+
+fn scope_of_work_draft_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<ScopeOfWorkDraft, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "scope-of-work draft must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from([
+        "clientLabel",
+        "projectTitle",
+        "scopeItems",
+        "exclusions",
+        "revisionLimit",
+        "deliveryTargetLabel",
+        "reference",
+        "notes",
+    ]);
+    if fields.len() < 6
+        || fields.len() > allowed.len()
+        || fields.keys().any(|key| !allowed.contains(key.as_str()))
+    {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "scope-of-work contains missing or unsupported fields",
+        ));
+    }
+    Ok(ScopeOfWorkDraft {
+        client_label: scope_of_work_text(
+            fields.get("clientLabel"),
+            true,
+            "clientLabel",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("client label"),
+        project_title: scope_of_work_text(
+            fields.get("projectTitle"),
+            true,
+            "projectTitle",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("project title"),
+        scope_items: scope_of_work_text_list(
+            fields.get("scopeItems"),
+            "scope item",
+            locale,
+            position,
+        )?,
+        exclusions: scope_of_work_text_list(
+            fields.get("exclusions"),
+            "exclusion",
+            locale,
+            position,
+        )?,
+        revision_limit: scope_of_work_revision_limit(
+            fields.get("revisionLimit"),
+            locale,
+            position,
+        )?,
+        delivery_target_label: scope_of_work_text(
+            fields.get("deliveryTargetLabel"),
+            true,
+            "deliveryTargetLabel",
+            CLIENT_DOCUMENT_MAX_TEXT_BYTES,
+            locale,
+            position,
+        )?
+        .expect("delivery target"),
+        reference: scope_of_work_text(
+            fields.get("reference"),
+            false,
+            "reference",
+            96,
+            locale,
+            position,
+        )?,
+        notes: scope_of_work_text(
+            fields.get("notes"),
+            false,
+            "notes",
+            CLIENT_DOCUMENT_MAX_NOTES_BYTES,
+            locale,
+            position,
+        )?,
+    })
+}
+
+fn scope_of_work_markdown(
+    draft: &ScopeOfWorkDraft,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut lines = vec![
+        "# Scope of Work (Draft)".into(), String::new(),
+        "**Status:** User review required. This is not a contract, acceptance, payment request, legal advice, or marketplace submission.".into(), String::new(),
+        "## Project labels".into(),
+        format!("- **Client label:** {}", report_markdown_escape(&draft.client_label)),
+        format!("- **Project:** {}", report_markdown_escape(&draft.project_title)),
+    ];
+    if let Some(reference) = &draft.reference {
+        lines.push(format!(
+            "- **Reference:** {}",
+            report_markdown_escape(reference)
+        ));
+    }
+    lines.push(String::new());
+    lines.push("## Included scope".into());
+    lines.extend(
+        draft
+            .scope_items
+            .iter()
+            .map(|item| format!("- {}", report_markdown_escape(item))),
+    );
+    lines.push(String::new());
+    lines.push("## Exclusions".into());
+    lines.extend(
+        draft
+            .exclusions
+            .iter()
+            .map(|item| format!("- {}", report_markdown_escape(item))),
+    );
+    lines.push(String::new());
+    lines.push("## Review labels (not contractual terms)".into());
+    lines.push(format!("- **Revision limit:** {}", draft.revision_limit));
+    lines.push(format!(
+        "- **Delivery target label:** {}",
+        report_markdown_escape(&draft.delivery_target_label)
+    ));
+    if let Some(notes) = &draft.notes {
+        lines.push(String::new());
+        lines.push("## Notes".into());
+        lines.push(report_markdown_escape(notes));
+    }
+    lines.push(String::new());
+    lines.push("## Manual review checklist".into());
+    lines.push(
+        "- [ ] Review scope, exclusions, and revision label with the client yourself.".into(),
+    );
+    lines.push(
+        "- [ ] Confirm final contract, platform, delivery, and payment steps yourself.".into(),
+    );
+    lines.push("- [ ] Share only content and files you are authorized to share.".into());
+    lines.push(String::new());
+    lines.push("## Automation boundary".into());
+    lines.push("- Client contact: user-reviewed".into());
+    lines.push("- Contract signing: disabled".into());
+    lines.push("- Marketplace submission: disabled".into());
+    lines.push("- Payment/withdrawal: disabled".into());
+    lines.push("- Network/browser/account/process: disabled".into());
+    let rendered = format!("{}\n", lines.join("\n"));
+    if rendered.len() > REPORT_MAX_BYTES {
+        return Err(scope_of_work_error(
+            locale,
+            position,
+            "rendered scope-of-work exceeds the local output byte limit",
+        ));
+    }
+    Ok(rendered)
+}
+
+fn scope_of_work_summary(draft: &ScopeOfWorkDraft) -> Value {
+    Value::Map(BTreeMap::from([
+        (
+            "scopeItemCount".into(),
+            Value::Number(draft.scope_items.len() as f64),
+        ),
+        (
+            "exclusionCount".into(),
+            Value::Number(draft.exclusions.len() as f64),
+        ),
+        (
+            "revisionLimit".into(),
+            Value::Number(draft.revision_limit as f64),
+        ),
+        (
+            "hasReference".into(),
+            Value::Boolean(draft.reference.is_some()),
+        ),
+        ("hasNotes".into(), Value::Boolean(draft.notes.is_some())),
+        (
+            "clientContact".into(),
+            Value::String("user-review-required".into()),
+        ),
+        ("contractSigning".into(), Value::String("disabled".into())),
+        (
+            "marketplaceSubmission".into(),
+            Value::String("disabled".into()),
+        ),
+        ("payment".into(), Value::String("disabled".into())),
         ("network".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ]))
@@ -5268,6 +5600,34 @@ impl Interpreter {
                             *position,
                             "client document output path",
                         )
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "client.scope_markdown" || name == "client.scope_summary" {
+                    if arguments.len() != 1 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let value = self.evaluate(&arguments[0])?;
+                    let draft = scope_of_work_draft_from_value(&value, self.locale, *position)?;
+                    if name == "client.scope_markdown" {
+                        return scope_of_work_markdown(&draft, self.locale, *position)
+                            .map(Value::String);
+                    }
+                    return Ok(scope_of_work_summary(&draft));
+                }
+                if name == "client.write_scope" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let path = self.evaluate(&arguments[0])?;
+                    let path =
+                        expect_string(&path, self.locale, *position, "scope-of-work output path")?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let draft = scope_of_work_draft_from_value(&value, self.locale, *position)?;
+                    let document = scope_of_work_markdown(&draft, self.locale, *position)?;
+                    let resolved_path = self.client_document_output_path(path, *position)?;
+                    fs::write(&resolved_path, document).map_err(|_| {
+                        error_for(self.locale, "P1015", *position, "scope-of-work output path")
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -12237,14 +12597,16 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "table.rows"
         | "fs.checksum"
         | "client.document_markdown"
-        | "client.document_summary" => Some((1, 1)),
+        | "client.document_summary"
+        | "client.scope_markdown"
+        | "client.scope_summary" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
         | "report.summary" | "profile.validate" | "profile.summary" | "record.validate"
         | "record.summary" => Some((2, 2)),
         "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
-        "client.write_document" => Some((2, 2)),
+        "client.write_document" | "client.write_scope" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -15199,6 +15561,106 @@ mod tests {
         assert!(document.contains("- Marketplace submission: disabled"));
         assert!(document.contains("- Payment/withdrawal: disabled"));
         assert!(!document.contains("https://"));
+    }
+
+    #[test]
+    fn local_scope_of_work_renders_redacted_markdown_and_project_scoped_export() {
+        let root = module_fixture_dir("local-scope-of-work");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let draft = "{\"clientLabel\": \"Rina & Co\", \"projectTitle\": \"Bangla guide [pilot]\", \"scopeItems\": [\"Responsive landing page\", \"Source-file handover\"], \"exclusions\": [\"Paid ads\", \"Third-party subscription\"], \"revisionLimit\": 2, \"deliveryTargetLabel\": \"After manual scope confirmation\", \"reference\": \"SOW-2026-01\", \"notes\": \"Review scope before manual use\"}";
+        let source = format!("let draft = {draft}\nlet summary = client.scope_summary(draft)\nlet markdown = client.scope_markdown(draft)\nprint summary[\"scopeItemCount\"]\nprint summary[\"exclusionCount\"]\nprint summary[\"revisionLimit\"]\nprint summary[\"payment\"]\nprint text.contains(json.stringify(summary), \"Rina\")\nprint text.contains(markdown, \"Rina &amp; Co\")\nprint client.write_scope(\"out/scope.md\", draft)\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let document = fs::read_to_string(root.join("out/scope.md")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec!["2", "2", "2", "disabled", "false", "true", "true"]
+        );
+        assert!(document.starts_with("# Scope of Work (Draft)\n"));
+        assert!(document.contains("Rina &amp; Co"));
+        assert!(document.contains("Bangla guide \\[pilot\\]"));
+        assert!(document.contains("- Marketplace submission: disabled"));
+        assert!(!document.contains("https://"));
+    }
+
+    #[test]
+    fn local_scope_of_work_rejects_unsafe_fields_and_writer_paths() {
+        let root = module_fixture_dir("local-scope-of-work-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::create_dir_all(root.join("outside")).unwrap();
+        std::os::unix::fs::symlink("outside", root.join("out-link")).unwrap();
+        let valid = "{\"clientLabel\": \"Rina\", \"projectTitle\": \"Site\", \"scopeItems\": [\"Page\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\"}";
+        let cases = [
+            "print client.scope_markdown({\"clientLabel\": \"Rina\", \"projectTitle\": \"Site\", \"scopeItems\": [\"Page\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\"})\n",
+            "print client.scope_markdown({\"clientLabel\": \"Rina\", \"projectTitle\": \"Site\", \"scopeItems\": [\"Page\", \"Page\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\"})\n",
+            "print client.scope_markdown({\"clientLabel\": \"Rina\", \"projectTitle\": \"Site\", \"scopeItems\": [\"Page\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1.5, \"deliveryTargetLabel\": \"Manual review\"})\n",
+            "print client.scope_markdown({\"clientLabel\": \"Rina\", \"projectTitle\": \"https://bad.invalid\", \"scopeItems\": [\"Page\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\"})\n",
+            "print client.scope_markdown({\"clientLabel\": \"contact@example.invalid\", \"projectTitle\": \"Site\", \"scopeItems\": [\"Page\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\"})\n",
+            "print client.scope_markdown({\"clientLabel\": \"Rina\", \"projectTitle\": \"Site\", \"scopeItems\": [\"<script>x</script>\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\"})\n",
+            "print client.scope_markdown({\"clientLabel\": \"Rina\", \"projectTitle\": \"Site\", \"scopeItems\": [\"Page\"], \"exclusions\": [\"Hosting\"], \"revisionLimit\": 1, \"deliveryTargetLabel\": \"Manual review\", \"paymentUrl\": \"x\"})\n",
+        ];
+        for source in cases {
+            assert_eq!(
+                run_bridge_project(&root, BTreeSet::new(), source)
+                    .unwrap_err()
+                    .code,
+                "P1075"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print client.write_scope(\"out/scope.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        let capability = BTreeSet::from(["filesystem:write".into()]);
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!("print client.write_scope(\"../scope.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!("print client.write_scope(\"@downloads/scope.md\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                capability.clone(),
+                &format!("print client.write_scope(\"out/scope.txt\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1073"
+        );
+        let symlink = run_bridge_project(
+            &root,
+            capability,
+            &format!("print client.write_scope(\"out-link/scope.md\", {valid})\n"),
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(symlink.code, "P1073");
+        assert_eq!(static_builtin_arity("client.scope_markdown"), Some((1, 1)));
+        assert_eq!(static_builtin_arity("client.scope_summary"), Some((1, 1)));
+        assert_eq!(static_builtin_arity("client.write_scope"), Some((2, 2)));
     }
 
     #[test]

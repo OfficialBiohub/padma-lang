@@ -12,7 +12,7 @@ This page is the **truth table** for the current repository. A capability is lab
 | Project workflow | Implemented | Initializes and runs local projects with `padma.toml`, `src/`, `data/`, `out/`, and `tests/`. | `padma init`; direct scripts and legacy flat projects remain supported. |
 | Local text/data/files | Bounded | Handles text, JSON, safe project-local file operations, CSV/TSV/object-row JSON tables, checksums, text search, and local Markdown reports. | Explicit project capabilities and path rules apply; no cloud sync, Excel macro, shared-storage write, or background daemon. |
 | Local configuration | Bounded | Validates in-memory scalar profile maps and returns redacted summaries. | No account/device/network/process action follows from profile data. |
-| Client documents v1 | Bounded | Validates and renders local `quote` and `invoice-draft` Markdown; may write a reviewed `.md` file inside a project. | `client.document_markdown`, `client.document_summary`, `client.write_document`; scope-of-work, delivery checklist, and case-study schemas are **not yet implemented**. |
+| Client documents v1 | Bounded | Validates and renders local `quote`, `invoice-draft`, and scope-of-work Markdown; may write a reviewed `.md` file inside a project. | `client.document_markdown`, `client.document_summary`, `client.write_document`, `client.scope_markdown`, `client.scope_summary`, and `client.write_scope`; delivery checklist and case-study schemas are **not yet implemented**. |
 | SQLite and identity primitives | Bounded | Provides fixed local SQLite record operations and local password/session/CSRF helpers. | It is not a hosted authentication server, ORM, remote database, or account provider. |
 | HTTP, AI, and approved bridges | Bounded | Supports explicit HTTP helpers, one bounded provider-neutral AI workflow envelope, and fixed Python/Node bridge paths. | Requires an explicit capability and valid local configuration; no autonomous agent/tool loop or generated-output execution. |
 | Authorized media helper | Bounded | Can invoke the fixed `yt-dlp` integration for content the user owns or is authorized to download. | Requires the external tool and explicit grants; no platform bypass or unauthorized use. |
@@ -35,7 +35,7 @@ The following are **not complete** and must not be described as finished. They a
 |---|---|---|---|
 | P0 | Starter project templates | Implemented | `padma init` supports the backward-compatible `basic` default plus `--template data-report` and `--template web-response`; generated projects have minimum capabilities, README commands, and regression/CLI smoke coverage. |
 | P0 | Student/family/small-business records | Implemented first foundation | `record.validate` and redacted `record.summary` support strict attendance, expense, and inventory tables; local Markdown output reuses the separately capability-gated report toolkit. Study-note and other record schemas remain separate work. |
-| P0 | Freelancer client workflow expansion | Partial | Add separately bounded scope-of-work, delivery checklist, portfolio case-study, client-task, and reusable report schemas. The current quote/invoice-draft foundation is not the whole toolkit. |
+| P0 | Freelancer client workflow expansion | Partial | Quote/invoice-draft and scope-of-work are implemented foundations. Add separately bounded delivery checklist, portfolio case-study, client-task, and reusable report schemas. |
 | P1 | Client data delivery | Not implemented | Local CSV/JSON cleaning, reconciliation summaries, redacted validation, and reviewed export artifacts. |
 | P1 | Content/document preparation | Not implemented | Explicit-input Bangla-English brief/checklist/copy templates with safe Markdown rendering and human review. |
 | P1 | Developer delivery toolkit | Not implemented | Deterministic project task/test/lint/build descriptors and checksum manifests without arbitrary shell/background execution. |
@@ -51,8 +51,7 @@ Every selected backlog item must pass the same gate before its status changes to
 
 ## Next implementation order
 
-1. **P0 local record schemas** for student/family/small-business work is the next selected item, built on existing safe table/report primitives.
-2. Then expand **P0 freelancer workflows** with one bounded document schema at a time, starting with scope-of-work and delivery checklist.
-3. Continue P1 and P2 items only after their dependencies and safety contracts are complete.
+1. Expand **P0 freelancer workflows** with the next bounded document schema: delivery checklist.
+2. Continue P1 and P2 items only after their dependencies and safety contracts are complete.
 
 For an overview of long-term work, see [`todo.md`](../todo.md). For the exact public API contract, see [`STANDARD-LIBRARY.md`](STANDARD-LIBRARY.md). For runnable examples, see [`PRACTICAL-PROJECT-EXAMPLES.md`](PRACTICAL-PROJECT-EXAMPLES.md).

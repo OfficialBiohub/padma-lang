@@ -1,0 +1,9 @@
+ধরি scope = {"clientLabel": "Rina Studio", "projectTitle": "Mobile-friendly portfolio page", "scopeItems": ["Responsive page", "Source-file handover"], "exclusions": ["Paid advertising", "Third-party subscription"], "revisionLimit": 2, "deliveryTargetLabel": "After manual scope confirmation", "reference": "SOW-2026-01", "notes": "Review all labels before manual use."}
+ধরি summary = client.scope_summary(scope)
+ধরি saved = client.write_scope("out/scope-of-work.md", scope)
+
+দেখাও text.format("Scope items: {scopeItemCount}", summary)
+দেখাও text.format("Exclusions: {exclusionCount}", summary)
+দেখাও text.format("Revisions: {revisionLimit}", summary)
+দেখাও text.format("Saved: {saved}", {"saved": saved})
+দেখাও summary["payment"]

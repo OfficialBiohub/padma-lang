@@ -23,6 +23,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Local expense reporting | `examples/local-reporting-expense` | CSV-to-Markdown local expense report | It is not tax/accounting advice, invoice payment, email/upload, shared-storage, or public publishing. |
 | Local profile validator | `examples/local-profile-validator` | Project-local JSON preferences with schema/default validation | It is not account/login state, game modification, anti-cheat bypass, network profile sync, or device settings control. |
 | Freelancer quote draft | `examples/freelancer-quote-draft` | Local escaped quote Markdown with redacted review summary | It cannot contact a client, submit to a marketplace, sign a contract, make a payment, use a browser/network, or write shared storage. |
+| Freelancer scope-of-work | `examples/freelancer-scope-of-work` | Reviewed local scope/exclusion Markdown draft | It cannot contact a client, sign/accept, submit, pay, use a marketplace/network/browser, or write shared storage. |
 | Local household records | `examples/local-records-household` | Attendance, expense, and inventory CSV validation plus a local Markdown expense report | It cannot cloud-sync, contact a school/shop, make a payment, start a process, or take stock/account action. |
 
 ## 1. Authorized media download

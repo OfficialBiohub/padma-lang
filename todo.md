@@ -334,3 +334,10 @@
 - [x] Implement local record validation and deterministic redacted summaries with localized diagnostics; preserve project-root and explicit `filesystem` boundaries only for optional table/report input or output.
 - [x] Add positive and negative regressions for required/unknown fields, scalar types, dates, amounts, quantities, duplicate keys, oversized values, unsafe markup/URLs, denied capability, path escape, symlink, and no network/process/account/payment side effect.
 - [x] Publish a standalone Termux household/business records example, exact output, capability explanation, public API guide, and full repository verification before marking the record foundation complete.
+
+## M21 — Local Scope-of-Work Draft Foundation
+
+- [x] Define one strict bounded local scope-of-work map for project label, client label, scope items, exclusions, revision limit, delivery target label, and optional notes; reject payment, recipient/contact, account, URL, authorization, platform, and contract-signing fields.
+- [x] Implement deterministic escaped Markdown and redacted summary APIs plus a project-local non-symlink `.md` export requiring only `filesystem:write`, with user-review and disabled action markers.
+- [x] Add Bangla-English P107x diagnostics and positive/negative regressions for missing/unknown fields, type/content/length/duplicate violations, raw markup/URL injection, missing capability, traversal/shared-storage/symlink/bad-extension paths, and no client-contact/payment/network/process side effect.
+- [x] Publish a standalone Termux scope-of-work example, guide, standard-library/diagnostic/roadmap entries, full repository verification, focused commit, and GitHub push before marking this increment complete.
