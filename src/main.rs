@@ -350,6 +350,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1091") => (format!("Local backend route request is unsafe or invalid: `{detail}`"), Some("Use only bounded method, path, status, and JSON body values; callbacks, shell, network, file, credential, and remote deployment actions are unavailable.".into())),
         (Locale::Bangla, "P1092") => (format!("typed local data record নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু নির্দিষ্ট student/product schema, পাঁচটি field, finite value, এবং project-local SQLite ব্যবহার করুন; SQL, URL, credential, payment বা network action নেই।".into())),
         (Locale::English, "P1092") => (format!("Typed local data record is unsafe or invalid: `{detail}`"), Some("Use only the fixed student/product schema, five fields, finite values, and project-local SQLite; SQL, URLs, credentials, payments, and network actions are unavailable.".into())),
+        (Locale::Bangla, "P1093") => (format!("local database route configuration নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু project-local regular .sqlite file, fixed GET path, এবং student/product collection ব্যবহার করুন; SQL, write method, query, credential, URL, payment, network, বা deployment action নেই।".into())),
+        (Locale::English, "P1093") => (format!("Local database route configuration is unsafe or invalid: `{detail}`"), Some("Use only a project-local regular .sqlite file, fixed GET paths, and student/product collections; SQL, write methods, queries, credentials, URLs, payments, network, and deployment actions are unavailable.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -17879,6 +17881,282 @@ fn write_local_server_response(stream: &mut TcpStream, status: &str, body: &str)
 
 const LOCAL_SERVER_MAX_REQUEST_BYTES: usize = 16 * 1024;
 const LOCAL_SERVER_ROUTES_FILE: &str = "server-routes.json";
+const LOCAL_SERVER_DATA_ROUTES_FILE: &str = "server-data-routes.json";
+const LOCAL_SERVER_DATA_MAX_ROUTES: usize = 32;
+const LOCAL_SERVER_DATA_MAX_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, Debug)]
+struct LocalDataRouteManifest {
+    database: PathBuf,
+    routes: BTreeMap<String, String>,
+}
+
+fn local_data_route_safe_path(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() <= 128
+        && path.is_ascii()
+        && !path.contains(char::is_whitespace)
+        && !path.contains("..")
+        && !path.contains('?')
+        && !path.contains('#')
+        && !path.contains('\r')
+        && !path.contains('\n')
+}
+
+fn load_local_server_data_routes(
+    directory: &Path,
+    locale: Locale,
+) -> Result<Option<LocalDataRouteManifest>, String> {
+    let path = directory.join(LOCAL_SERVER_DATA_ROUTES_FILE);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("P1093: data route file metadata could not be read".into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("P1093: data route file must be a regular project-local file".into());
+    }
+    if metadata.len() > LOCAL_SERVER_DATA_MAX_BYTES as u64 {
+        return Err("P1093: data route file exceeds the local byte limit".into());
+    }
+    let text = fs::read_to_string(&path)
+        .map_err(|_| "P1093: data route file must be UTF-8 JSON".to_string())?;
+    let json: JsonValue = serde_json::from_str(&text)
+        .map_err(|_| "P1093: data route file is not valid JSON".to_string())?;
+    let Value::Map(config) = value_from_json(json)
+        .map_err(|_| "P1093: data route JSON contains unsupported values".to_string())?
+    else {
+        return Err("P1093: data route file must be one object".into());
+    };
+    let allowed = BTreeSet::from(["version", "database", "routes"]);
+    if config.len() != allowed.len() || config.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err("P1093: data route configuration fields are not exact".into());
+    }
+    if config.get("version") != Some(&Value::Number(1.0)) {
+        return Err("P1093: data route version must be 1".into());
+    }
+    let database = match config.get("database") {
+        Some(Value::String(value)) => value,
+        _ => return Err("P1093: data route database must be text".into()),
+    };
+    if !database.ends_with(".sqlite") {
+        return Err("P1093: data route database must end in .sqlite".into());
+    }
+    let relative = safe_relative_path(database)
+        .map_err(|_| "P1093: data route database path is unsafe".to_string())?;
+    let resolved = directory.join(&relative);
+    let database_metadata = fs::symlink_metadata(&resolved)
+        .map_err(|_| "P1093: data route database must already exist".to_string())?;
+    if database_metadata.file_type().is_symlink() || !database_metadata.is_file() {
+        return Err("P1093: data route database must be a regular project-local file".into());
+    }
+    let canonical_root = fs::canonicalize(directory)
+        .map_err(|_| "P1093: project root could not be resolved".to_string())?;
+    let canonical_database = fs::canonicalize(&resolved)
+        .map_err(|_| "P1093: data route database could not be resolved".to_string())?;
+    if !canonical_database.starts_with(&canonical_root) {
+        return Err("P1093: data route database escaped the project root".into());
+    }
+    let Value::List(routes) = config
+        .get("routes")
+        .ok_or_else(|| "P1093: data route routes are missing".to_string())?
+    else {
+        return Err("P1093: data route routes must be a list".into());
+    };
+    if routes.is_empty() || routes.len() > LOCAL_SERVER_DATA_MAX_ROUTES {
+        return Err("P1093: data route count is outside the local limit".into());
+    }
+    let mut mapped = BTreeMap::new();
+    for route in routes {
+        let Value::Map(route) = route else {
+            return Err("P1093: data route entry must be an object".into());
+        };
+        let allowed = BTreeSet::from(["path", "collection"]);
+        if route.len() != allowed.len() || route.keys().any(|key| !allowed.contains(key.as_str())) {
+            return Err("P1093: data route entry fields are not exact".into());
+        }
+        let path = match route.get("path") {
+            Some(Value::String(value)) if local_data_route_safe_path(value) => value,
+            _ => return Err("P1093: data route path is unsafe".into()),
+        };
+        let collection = match route.get("collection") {
+            Some(Value::String(value)) if matches!(value.as_str(), "student" | "product") => value,
+            _ => return Err("P1093: data route collection is unsupported".into()),
+        };
+        if mapped.insert(path.clone(), collection.clone()).is_some() {
+            return Err("P1093: duplicate data route path".into());
+        }
+    }
+    let _ = locale;
+    Ok(Some(LocalDataRouteManifest {
+        database: canonical_database,
+        routes: mapped,
+    }))
+}
+
+fn local_data_sqlite_list(
+    database: &Path,
+    collection: &str,
+    locale: Locale,
+) -> Result<Vec<Value>, ()> {
+    let namespace = format!("padma:{collection}");
+    let script = [
+        ".bail on".to_string(),
+        ".timeout 5000".to_string(),
+        ".parameter init".to_string(),
+        sqlite_hex_parameter(":namespace", namespace.as_bytes()),
+        ".mode json".to_string(),
+        "SELECT record_key AS key, value_json FROM padma_records WHERE namespace = CAST(:namespace AS TEXT) ORDER BY record_key LIMIT 100;".to_string(),
+    ]
+    .join("\n");
+    if script.len() > LOCAL_SERVER_DATA_MAX_BYTES {
+        return Err(());
+    }
+    let path = env::var_os("PATH").ok_or(())?;
+    let working_directory = database.parent().ok_or(())?;
+    let mut child = process::Command::new("sqlite3")
+        .arg("-readonly")
+        .arg(database)
+        .args(["-batch", "-bail"])
+        .current_dir(working_directory)
+        .env_clear()
+        .env("PATH", path)
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
+        .stdin(process::Stdio::piped())
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()
+        .map_err(|_| ())?;
+    let mut stdin = child.stdin.take().ok_or(())?;
+    let stdout = child.stdout.take().ok_or(())?;
+    let stderr = child.stderr.take().ok_or(())?;
+    let writer = thread::spawn(move || {
+        stdin
+            .write_all(script.as_bytes())
+            .and_then(|_| stdin.flush())
+    });
+    let stdout_reader =
+        thread::spawn(move || read_bounded_stream(stdout, LOCAL_SERVER_DATA_MAX_BYTES));
+    let stderr_reader = thread::spawn(move || read_bounded_stream(stderr, 4 * 1024));
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() > SQLITE_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(());
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(_) => return Err(()),
+        }
+    };
+    let write_result = writer.join().map_err(|_| ())?;
+    let output = stdout_reader.join().map_err(|_| ())?.map_err(|_| ())?;
+    let _ = stderr_reader.join();
+    if write_result.is_err() || !status.success() {
+        return Err(());
+    }
+    let rows: JsonValue = serde_json::from_slice(&output).map_err(|_| ())?;
+    let rows = rows.as_array().ok_or(())?;
+    if rows.len() > 100 {
+        return Err(());
+    }
+    let mut result = Vec::with_capacity(rows.len());
+    for row in rows {
+        let key = row.get("key").and_then(JsonValue::as_str).ok_or(())?;
+        let value_json = row
+            .get("value_json")
+            .and_then(JsonValue::as_str)
+            .ok_or(())?;
+        if key.is_empty() || key.len() > 128 {
+            return Err(());
+        }
+        let Value::Map(record) =
+            value_from_json(serde_json::from_str(value_json).map_err(|_| ())?).map_err(|_| ())?
+        else {
+            return Err(());
+        };
+        let record =
+            typed_record_value(collection, &record, locale, Position::new(1, 1)).map_err(|_| ())?;
+        result.push(Value::Map(BTreeMap::from([
+            ("key".into(), Value::String(key.into())),
+            ("value".into(), Value::Map(record)),
+        ])));
+    }
+    Ok(result)
+}
+
+fn local_data_route_response(
+    request: &Value,
+    manifest: &LocalDataRouteManifest,
+    locale: Locale,
+    project: &str,
+) -> (String, String) {
+    let Value::Map(request) = request else {
+        return (
+            "400 Bad Request".into(),
+            "{\"error\":\"bad_request\"}".into(),
+        );
+    };
+    let method = request.get("method").and_then(|value| match value {
+        Value::String(value) => Some(value.as_str()),
+        _ => None,
+    });
+    let path = request.get("path").and_then(|value| match value {
+        Value::String(value) => Some(value.as_str()),
+        _ => None,
+    });
+    if method == Some("GET") && path == Some("/health") {
+        return (
+            "200 OK".into(),
+            serde_json::json!({"status":"ok", "project":project, "storage":"local-read-only"})
+                .to_string(),
+        );
+    }
+    let Some(path) = path else {
+        return (
+            "400 Bad Request".into(),
+            "{\"error\":\"bad_request\"}".into(),
+        );
+    };
+    let Some(collection) = manifest.routes.get(path) else {
+        return ("404 Not Found".into(), "{\"error\":\"not_found\"}".into());
+    };
+    if method != Some("GET") {
+        return (
+            "405 Method Not Allowed".into(),
+            "{\"error\":\"method_not_allowed\"}".into(),
+        );
+    }
+    let items = match local_data_sqlite_list(&manifest.database, collection, locale) {
+        Ok(items) => items,
+        Err(_) => {
+            return (
+                "500 Internal Server Error".into(),
+                "{\"error\":\"local_data_unavailable\"}".into(),
+            )
+        }
+    };
+    let body = serde_json::json!({
+        "ok": true,
+        "collection": collection,
+        "items": value_to_json(&Value::List(items)).unwrap_or(JsonValue::Array(Vec::new())),
+        "network": "disabled",
+    })
+    .to_string();
+    if body.len() > LOCAL_SERVER_DATA_MAX_BYTES {
+        return (
+            "500 Internal Server Error".into(),
+            "{\"error\":\"local_data_unavailable\"}".into(),
+        );
+    }
+    ("200 OK".into(), body)
+}
 
 fn load_local_server_routes(directory: &Path) -> Result<Option<Value>, String> {
     let path = directory.join(LOCAL_SERVER_ROUTES_FILE);
@@ -17937,12 +18215,12 @@ fn parse_local_http_request(bytes: &[u8]) -> Result<Value, &'static str> {
 
 fn serve_local_project(directory: &Path) -> Result<(), String> {
     let (manifest, _) = load_project_manifest(directory)?;
+    let locale = if manifest.locale == "bn" {
+        Locale::Bangla
+    } else {
+        Locale::English
+    };
     if !manifest.capabilities.contains("server:local") {
-        let locale = if manifest.locale == "bn" {
-            Locale::Bangla
-        } else {
-            Locale::English
-        };
         let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "server:local");
         return Err(format!(
             "{}: {}\n  = {}: {}",
@@ -17958,6 +18236,16 @@ fn serve_local_project(directory: &Path) -> Result<(), String> {
     }
 
     let routes = load_local_server_routes(directory)?;
+    let data_routes = load_local_server_data_routes(directory, locale)?;
+    if routes.is_some() && data_routes.is_some() {
+        return Err(
+            "P1093: server-routes.json and server-data-routes.json cannot be used together".into(),
+        );
+    }
+    if data_routes.is_some() && !manifest.capabilities.contains("database:sqlite") {
+        let diagnostic = error_for(locale, "P1034", Position::new(1, 1), "database:sqlite");
+        return Err(format!("{}: {}", diagnostic.code, diagnostic.message));
+    }
     let listener = TcpListener::bind("127.0.0.1:8080")
         .map_err(|error| format!("cannot bind loopback server: {error}"))?;
     listener
@@ -17969,6 +18257,9 @@ fn serve_local_project(directory: &Path) -> Result<(), String> {
     );
     if routes.is_some() {
         println!("Custom routes: server-routes.json");
+    }
+    if data_routes.is_some() {
+        println!("Read-only data routes: server-data-routes.json");
     }
     loop {
         let mut stream = match listener.accept() {
@@ -17998,7 +18289,9 @@ fn serve_local_project(directory: &Path) -> Result<(), String> {
         };
         let (status, body) = match parsed_request {
             Ok(request) => {
-                if let Some(routes) = routes.as_ref() {
+                if let Some(data_routes) = data_routes.as_ref() {
+                    local_data_route_response(&request, data_routes, locale, &manifest.name)
+                } else if let Some(routes) = routes.as_ref() {
                     match local_backend_route_response(
                         &request,
                         routes,
@@ -19417,6 +19710,132 @@ mod tests {
         assert!(parse_local_http_request(b"GET /students HTTP/1.1\r\n").is_err());
         assert!(parse_local_http_request(&vec![b'x'; LOCAL_SERVER_MAX_REQUEST_BYTES + 1]).is_err());
         assert!(parse_local_http_request(&[0xff, 0xfe, 0xfd, b'\r', b'\n', b'\r', b'\n']).is_err());
+    }
+
+    #[test]
+    fn local_data_routes_read_only_dispatches_typed_collections() {
+        if process::Command::new("sqlite3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let root = module_fixture_dir("local-data-routes");
+        fs::create_dir(root.join("data")).unwrap();
+        let source = "print db.student_save(\"data/app.sqlite\", \"s-001\", {\"name\": \"Rima\", \"class\": 6, \"school\": \"Padma School\", \"guardian\": \"Nila\", \"active\": true})\nprint db.product_save(\"data/app.sqlite\", \"p-001\", {\"name\": \"Book\", \"price\": 55, \"currency\": \"BDT\", \"stock\": 20, \"category\": \"Education\"})\n";
+        run_bridge_project(&root, BTreeSet::from(["database:sqlite".into()]), source).unwrap();
+        fs::write(
+            root.join(LOCAL_SERVER_DATA_ROUTES_FILE),
+            "{\"version\":1,\"database\":\"data/app.sqlite\",\"routes\":[{\"path\":\"/students\",\"collection\":\"student\"},{\"path\":\"/products\",\"collection\":\"product\"}]}",
+        )
+        .unwrap();
+        let manifest = load_local_server_data_routes(&root, Locale::English)
+            .unwrap()
+            .unwrap();
+        let student_request = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/students".into())),
+        ]));
+        let first = local_data_route_response(&student_request, &manifest, Locale::English, "demo");
+        let second =
+            local_data_route_response(&student_request, &manifest, Locale::English, "demo");
+        assert_eq!(first, second);
+        assert_eq!(first.0, "200 OK");
+        assert!(first.1.contains("Rima"));
+        assert!(first.1.contains("\"network\":\"disabled\""));
+        let post = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("POST".into())),
+            ("path".into(), Value::String("/students".into())),
+        ]));
+        assert_eq!(
+            local_data_route_response(&post, &manifest, Locale::English, "demo").0,
+            "405 Method Not Allowed"
+        );
+        let unknown = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/missing".into())),
+        ]));
+        assert_eq!(
+            local_data_route_response(&unknown, &manifest, Locale::English, "demo").0,
+            "404 Not Found"
+        );
+        let health = Value::Map(BTreeMap::from([
+            ("method".into(), Value::String("GET".into())),
+            ("path".into(), Value::String("/health".into())),
+        ]));
+        assert_eq!(
+            local_data_route_response(&health, &manifest, Locale::English, "demo").0,
+            "200 OK"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_data_routes_reject_unsafe_or_inexact_configuration() {
+        let root = module_fixture_dir("local-data-routes-safety");
+        fs::create_dir(root.join("data")).unwrap();
+        fs::write(root.join("data/app.sqlite"), "not a sqlite database").unwrap();
+        fs::write(
+            root.join(LOCAL_SERVER_DATA_ROUTES_FILE),
+            "{\"version\":1,\"database\":\"../outside.sqlite\",\"routes\":[{\"path\":\"/students\",\"collection\":\"student\"}]}",
+        )
+        .unwrap();
+        assert!(load_local_server_data_routes(&root, Locale::English)
+            .unwrap_err()
+            .starts_with("P1093"));
+        fs::write(
+            root.join(LOCAL_SERVER_DATA_ROUTES_FILE),
+            "{\"version\":1,\"database\":\"data/app.sqlite\",\"routes\":[{\"path\":\"/students?x=1\",\"collection\":\"student\",\"url\":\"https://example.com\"}]}",
+        )
+        .unwrap();
+        assert!(load_local_server_data_routes(&root, Locale::Bangla)
+            .unwrap_err()
+            .starts_with("P1093"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn local_data_routes_require_database_grant_and_reject_conflicting_or_symlinked_files() {
+        let root = module_fixture_dir("local-data-routes-server-safety");
+        fs::create_dir(root.join("data")).unwrap();
+        fs::write(root.join("data/app.sqlite"), "placeholder").unwrap();
+        fs::write(
+            root.join("padma.toml"),
+            "[padma]\nname = \"data-route-denied\"\nversion = \"0.1.0\"\nentry = \"main.pd\"\nlocale = \"en\"\n\n[capabilities]\nserver = [\"local\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("main.pd"), "print \"safe\"\n").unwrap();
+        fs::write(
+            root.join(LOCAL_SERVER_DATA_ROUTES_FILE),
+            "{\"version\":1,\"database\":\"data/app.sqlite\",\"routes\":[{\"path\":\"/students\",\"collection\":\"student\"}]}",
+        )
+        .unwrap();
+        let error = serve_local_project(&root).unwrap_err();
+        assert!(error.starts_with("P1034"));
+        assert!(error.contains("database:sqlite"));
+        fs::write(
+            root.join(LOCAL_SERVER_ROUTES_FILE),
+            "[{\"method\":\"GET\",\"path\":\"/legacy\",\"status\":200,\"body\":{\"ok\":true}}]",
+        )
+        .unwrap();
+        let error = serve_local_project(&root).unwrap_err();
+        assert!(error.starts_with("P1093"));
+        fs::remove_file(root.join(LOCAL_SERVER_ROUTES_FILE)).unwrap();
+        fs::rename(
+            root.join(LOCAL_SERVER_DATA_ROUTES_FILE),
+            root.join("data-route-source.json"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            "data-route-source.json",
+            root.join(LOCAL_SERVER_DATA_ROUTES_FILE),
+        )
+        .unwrap();
+        assert!(load_local_server_data_routes(&root, Locale::English)
+            .unwrap_err()
+            .starts_with("P1093"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

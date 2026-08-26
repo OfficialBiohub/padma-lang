@@ -217,6 +217,8 @@ The request method is one of `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`; the ASC
 
 This helper is the deterministic route-dispatch layer used by the fixed local server. `padma serve .` requires `server:local`, reads only the optional project-root `server-routes.json`, binds only to `127.0.0.1:8080`, applies bounded request/header/body limits, and returns JSON responses for exact method/path matches. It can be stopped with the terminal interrupt signal. Authentication, database transactions, rate limits, audit logging, public deployment, payment, and e-commerce checkout are separate future capabilities. The server does not bind a public interface or start arbitrary callbacks/processes.
 
+M42 additionally supports one mutually-exclusive `server-data-routes.json` file when the project grants both `server:local` and `database:sqlite`. Its exact version-1 manifest maps up to 32 safe fixed paths to only the managed typed `student` or `product` collection in one existing regular project-local `.sqlite` file. The loopback server permits only `GET` collection listings, calls `sqlite3 -readonly` with bounded output/time and a cleared child environment, revalidates each stored record, returns generic failures without filesystem/SQL/stderr disclosure, and leaves database state unchanged. `POST`/other writes receive `405`; unknown paths receive `404`. It is not arbitrary SQL, an ORM, record-by-input lookup, filtering/search/pagination, authentication/authorization, public binding, cloud database, payment, browser/account automation, or deployment. See [`LOCAL-BACKEND-ROUTES.md`](LOCAL-BACKEND-ROUTES.md).
+
 ## Interoperability bridge
 
 | API | Result and boundary |

@@ -484,3 +484,10 @@
 - [x] Add positive and negative tests for schema validation, duplicate keys, malformed/non-finite values, size limits, path/symlink/grant checks, rollback, deterministic outputs, and no network/process/provider/payment action.
 - [x] Publish a Termux example for local education and e-commerce catalog persistence beside the existing loopback route example, with the separation documented honestly; update public documentation/status/changelog, then run full verification, focused commit, and GitHub push before marking M41 complete.
 - [x] Verification follow-up: make the canonical Rust test gate robust on the sandbox's default test-thread stack; the existing OpenQASM regression requires a bounded larger `RUST_MIN_STACK` value and must be reverified without changing runtime semantics.
+
+## M42 — Database-Backed Local Route Dispatch
+
+- [x] Define a strict `server-data-routes.json` read-only manifest that maps exact local GET paths only to one approved typed `student` or `product` collection; reject arbitrary SQL, database path override, write method, request body, query string, credentials, URLs, callbacks, payment, account, and deployment fields.
+- [x] Implement fixed-loopback, capability-gated database read dispatch that resolves only a project-local configured `.sqlite` file, validates stored typed records again, returns deterministic JSON, preserves 404 behavior, and performs no external action.
+- [x] Add unit and integration tests for missing `server:local`/`database:sqlite` grants, unsafe config/path/symlink, malformed and oversized HTTP input, POST/PUT/PATCH/DELETE rejection, malformed stored record, deterministic list output, graceful shutdown, and no network/process/payment/provider action.
+- [x] Add a runnable Termux student/catalog loopback example, update route/persistence/status/diagnostic/changelog documents, run the full repository gate, make a focused Git commit, and push before marking M42 complete.

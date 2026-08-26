@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "database": "data/app.sqlite",
+  "routes": [
+    {"path": "/students", "collection": "student"},
+    {"path": "/products", "collection": "product"}
+  ]
+}

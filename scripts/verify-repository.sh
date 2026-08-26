@@ -33,16 +33,22 @@ if ! grep -Fq 'Padma Termux CLI ready' <<<"$termux_smoke_output" || ! grep -Fq '
 fi
 local_server_smoke_dir="$(mktemp -d)"
 local_server_smoke_pid=""
+local_data_server_smoke_dir="$(mktemp -d)"
+local_data_server_smoke_pid=""
 cleanup_local_server_smoke() {
   if [[ -n "$local_server_smoke_pid" ]]; then
     kill -TERM "$local_server_smoke_pid" 2>/dev/null || true
     wait "$local_server_smoke_pid" 2>/dev/null || true
   fi
-  rm -rf "$local_server_smoke_dir" "$termux_smoke_dir"
+  if [[ -n "$local_data_server_smoke_pid" ]]; then
+    kill -TERM "$local_data_server_smoke_pid" 2>/dev/null || true
+    wait "$local_data_server_smoke_pid" 2>/dev/null || true
+  fi
+  rm -rf "$local_server_smoke_dir" "$local_data_server_smoke_dir" "$termux_smoke_dir"
 }
 trap cleanup_local_server_smoke EXIT
 cp -R examples/local-backend-routes/. "$local_server_smoke_dir"
-(cd "$local_server_smoke_dir" && "$binary" serve . >server.log 2>&1) &
+(cd "$local_server_smoke_dir" && exec "$binary" serve . >server.log 2>&1) &
 local_server_smoke_pid=$!
 health_body=""
 for _ in $(seq 1 80); do
@@ -68,6 +74,36 @@ fi
 kill -TERM "$local_server_smoke_pid" 2>/dev/null || true
 wait "$local_server_smoke_pid" 2>/dev/null || true
 local_server_smoke_pid=""
+cp -R examples/local-data-routes/. "$local_data_server_smoke_dir"
+mkdir -p "$local_data_server_smoke_dir/data"
+(cd "$local_data_server_smoke_dir" && "$binary" . >/dev/null)
+(cd "$local_data_server_smoke_dir" && exec "$binary" serve . >server.log 2>&1) &
+local_data_server_smoke_pid=$!
+data_health_body=""
+for _ in $(seq 1 80); do
+  if data_health_body="$(curl --noproxy '*' --silent --show-error --fail http://127.0.0.1:8080/health)"; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$data_health_body" != *'"storage":"local-read-only"'* ]]; then
+  echo "release local data server health smoke test failed" >&2
+  exit 1
+fi
+data_students_body="$(curl --noproxy '*' --silent --show-error --fail http://127.0.0.1:8080/students)"
+data_products_body="$(curl --noproxy '*' --silent --show-error --fail http://127.0.0.1:8080/products)"
+if [[ "$data_students_body" != *'"collection":"student"'* ]] || [[ "$data_products_body" != *'"collection":"product"'* ]]; then
+  echo "release local data server collection smoke test failed" >&2
+  exit 1
+fi
+data_post_status="$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1:8080/students)"
+if [[ "$data_post_status" != "405" ]]; then
+  echo "release local data server write-method rejection smoke test failed" >&2
+  exit 1
+fi
+kill -TERM "$local_data_server_smoke_pid" 2>/dev/null || true
+wait "$local_data_server_smoke_pid" 2>/dev/null || true
+local_data_server_smoke_pid=""
 repl_output="$(printf '1+1\n২ + ৩\nexit()\n' | "$binary")"
 if ! grep -Fq 'padma> 2' <<<"$repl_output" || ! grep -Fq 'padma> 5' <<<"$repl_output"; then
   echo "release REPL bare-expression smoke test failed" >&2
