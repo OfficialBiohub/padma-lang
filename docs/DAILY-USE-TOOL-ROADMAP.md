@@ -45,7 +45,7 @@
 | M13.2 | `fs.list`, `fs.checksum`, `fs.search_text`, and disabled copy/move/archive plans | **Complete.** Project-only non-symlink inspection, no-mutation/security negative tests, exact Termux example |
 | M15.1 | Local reporting toolkit | **Complete.** Validated table-to-Markdown/text rendering, bounded project-local `.md` export, and injection/path/write denial tests |
 | M15.2 | Writing and study-note toolkit | Bangla-English text cleanup, word/line statistics, title/outline helpers, deterministic Markdown notes |
-| M15.3 | Household, student, and small-business record schemas | Attendance, expense, inventory, and task summary validation over local table data |
+| M15.3 | Household, student, and small-business record schemas | **Complete first foundation:** strict attendance, expense, and inventory validation plus redacted summaries; task/study-note and other schemas remain separate work |
 | M15.4 | Freelancer/office document drafts | First client-document foundation is **complete**: local quote/invoice-draft Markdown, redacted summary, and bounded project-local export; scope/portfolio/client-report schemas remain separate work |
 | M15.5 | HTTP API request templates | Host/secret/timeout/retry/redaction regression tests |
 | M15.6 | Developer workspace task manifests | Fixed executable allowlist, argument vector and exit-code tests |

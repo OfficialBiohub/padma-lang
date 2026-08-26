@@ -1,0 +1,14 @@
+ধরি attendance = table.read("data/attendance.csv", "csv")
+ধরি expenses = table.read("data/expenses.csv", "csv")
+ধরি inventory = table.read("data/inventory.csv", "csv")
+
+ধরি attendanceSummary = record.summary("attendance", attendance)
+ধরি expenseSummary = record.summary("expense", expenses)
+ধরি inventorySummary = record.summary("inventory", inventory)
+ধরি saved = report.write_markdown("out/family-expense.md", "Family Expense Review", expenses)
+
+দেখাও text.format("Present: {presentCount}", attendanceSummary)
+দেখাও text.format("Expense: {totalAmount} {currency}", expenseSummary)
+দেখাও text.format("Low stock: {lowStockCount}", inventorySummary)
+দেখাও text.format("Report saved: {saved}", {"saved": saved})
+দেখাও expenseSummary["payment"]

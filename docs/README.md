@@ -21,6 +21,7 @@ This index is the maintained entry point for detailed Padma documentation. The r
 | [Local reporting toolkit](LOCAL-REPORTING.md) | Validated table-to-Markdown summaries and capability-gated project-local report export |
 | [Simple project structure](SIMPLE-PROJECTS.md) | Beginner-friendly canonical layout, four Termux commands, and flat-project compatibility rules |
 | [Local profile toolkit](LOCAL-PROFILES.md) | Bounded in-memory profile validation, explicit defaults, and redacted summaries without action authority |
+| [Local records](LOCAL-RECORDS.md) | Strict project-local attendance, expense, and inventory table validation with redacted summaries |
 | [Freelancer workflows roadmap](FREELANCER-WORKFLOWS.md) | Production-oriented local preparation path and explicit marketplace/client-action boundaries |
 | [Local client documents](CLIENT-DOCUMENTS.md) | Strict local quote/invoice-draft Markdown preparation with user-reviewed client/payment boundaries |
 | [Capability status](CAPABILITY-STATUS.md) | Evidence-based distinction between implemented runtime, bounded behavior, and remaining delivery backlog |

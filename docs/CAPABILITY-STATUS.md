@@ -34,7 +34,7 @@ The following are **not complete** and must not be described as finished. They a
 | Priority | Capability family | Current state | Completion requirement |
 |---|---|---|---|
 | P0 | Starter project templates | Implemented | `padma init` supports the backward-compatible `basic` default plus `--template data-report` and `--template web-response`; generated projects have minimum capabilities, README commands, and regression/CLI smoke coverage. |
-| P0 | Student/family/small-business records | Not implemented | Bounded attendance, expense, inventory, and printable report schemas built on local tables/reports. |
+| P0 | Student/family/small-business records | Implemented first foundation | `record.validate` and redacted `record.summary` support strict attendance, expense, and inventory tables; local Markdown output reuses the separately capability-gated report toolkit. Study-note and other record schemas remain separate work. |
 | P0 | Freelancer client workflow expansion | Partial | Add separately bounded scope-of-work, delivery checklist, portfolio case-study, client-task, and reusable report schemas. The current quote/invoice-draft foundation is not the whole toolkit. |
 | P1 | Client data delivery | Not implemented | Local CSV/JSON cleaning, reconciliation summaries, redacted validation, and reviewed export artifacts. |
 | P1 | Content/document preparation | Not implemented | Explicit-input Bangla-English brief/checklist/copy templates with safe Markdown rendering and human review. |

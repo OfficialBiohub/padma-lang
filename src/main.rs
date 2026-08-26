@@ -312,6 +312,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1072") => (format!("Local profile is unsafe or invalid: `{detail}`"), Some("Use only bounded Bangla/English keys, supported scalar types, and explicit defaults; Padma will not use profile values for account, network, device, or process actions.".into())),
         (Locale::Bangla, "P1073") => (format!("freelancer client document draft নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded client draft field, explicit deliverable, project-local `.md` output, এবং user review ব্যবহার করুন; Padma payment, contact, contract, marketplace, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1073") => (format!("Freelancer client document draft is unsafe or invalid: `{detail}`"), Some("Use only bounded client draft fields, explicit deliverables, project-local `.md` output, and user review; Padma will not run payment, contact, contract, marketplace, network, or process actions.".into())),
+        (Locale::Bangla, "P1074") => (format!("local record data নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded attendance, expense, অথবা inventory table field ব্যবহার করুন; Padma account, cloud, payment, network, device, বা process action চালাবে না।".into())),
+        (Locale::English, "P1074") => (format!("Local record data is unsafe or invalid: `{detail}`"), Some("Use only bounded attendance, expense, or inventory table fields; Padma will not run account, cloud, payment, network, device, or process actions.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1580,6 +1582,10 @@ const CLIENT_DOCUMENT_MAX_TEXT_BYTES: usize = 512;
 const CLIENT_DOCUMENT_MAX_NOTES_BYTES: usize = 2_048;
 const CLIENT_DOCUMENT_MAX_DELIVERABLES: usize = 20;
 const CLIENT_DOCUMENT_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
+const RECORD_MAX_TEXT_BYTES: usize = 160;
+const RECORD_MAX_NOTE_BYTES: usize = 512;
+const RECORD_MAX_AMOUNT: f64 = 1_000_000_000_000.0;
+const RECORD_MAX_QUANTITY: u64 = 1_000_000_000;
 
 fn value_from_json(value: JsonValue) -> Result<Value, String> {
     match value {
@@ -1643,6 +1649,10 @@ fn profile_error(locale: Locale, position: Position, detail: &str) -> PadmaError
 
 fn client_document_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1073", position, detail)
+}
+
+fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1074", position, detail)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1891,6 +1901,399 @@ fn profile_summary_value(
         ("device".into(), Value::String("disabled".into())),
         ("childProcess".into(), Value::String("disabled".into())),
     ])))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordKind {
+    Attendance,
+    Expense,
+    Inventory,
+}
+
+impl RecordKind {
+    fn parse(value: &Value, locale: Locale, position: Position) -> Result<Self, PadmaError> {
+        let Value::String(value) = value else {
+            return Err(record_error(locale, position, "record kind must be text"));
+        };
+        match value.as_str() {
+            "attendance" => Ok(Self::Attendance),
+            "expense" => Ok(Self::Expense),
+            "inventory" => Ok(Self::Inventory),
+            _ => Err(record_error(
+                locale,
+                position,
+                "record kind must be attendance, expense, or inventory",
+            )),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Attendance => "attendance",
+            Self::Expense => "expense",
+            Self::Inventory => "inventory",
+        }
+    }
+
+    fn headers(self) -> &'static [&'static str] {
+        match self {
+            Self::Attendance => &["date", "student", "status"],
+            Self::Expense => &["date", "category", "amount", "currency", "note"],
+            Self::Inventory => &["item", "category", "quantity", "reorderLevel"],
+        }
+    }
+}
+
+fn record_safe_text(value: &str, max_bytes: usize, allow_empty: bool) -> bool {
+    (allow_empty || !value.is_empty())
+        && value.len() <= max_bytes
+        && !value.chars().any(char::is_control)
+        && !value.contains(['<', '>'])
+}
+
+fn record_required_text<'a>(
+    row: &'a BTreeMap<String, String>,
+    field: &str,
+    max_bytes: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<&'a str, PadmaError> {
+    let value = row
+        .get(field)
+        .map(String::as_str)
+        .ok_or_else(|| record_error(locale, position, "record row is missing a required field"))?;
+    if !record_safe_text(value, max_bytes, false) {
+        return Err(record_error(
+            locale,
+            position,
+            "record text must be bounded single-line content without raw HTML delimiters",
+        ));
+    }
+    Ok(value)
+}
+
+fn record_optional_note(
+    row: &BTreeMap<String, String>,
+    locale: Locale,
+    position: Position,
+) -> Result<(), PadmaError> {
+    let value = row
+        .get("note")
+        .map(String::as_str)
+        .ok_or_else(|| record_error(locale, position, "record row is missing a required field"))?;
+    if !record_safe_text(value, RECORD_MAX_NOTE_BYTES, true) {
+        return Err(record_error(
+            locale,
+            position,
+            "record note must be bounded single-line content without raw HTML delimiters",
+        ));
+    }
+    Ok(())
+}
+
+fn record_valid_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    if [0, 1, 2, 3, 5, 6, 8, 9]
+        .into_iter()
+        .any(|index| !bytes[index].is_ascii_digit())
+    {
+        return false;
+    }
+    let year = value[0..4].parse::<u16>().ok();
+    let month = value[5..7].parse::<u8>().ok();
+    let day = value[8..10].parse::<u8>().ok();
+    let (Some(year), Some(month), Some(day)) = (year, month, day) else {
+        return false;
+    };
+    if year == 0 || !(1..=12).contains(&month) {
+        return false;
+    }
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=max_day).contains(&day)
+}
+
+fn record_non_negative_amount(
+    value: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<f64, PadmaError> {
+    let mut segments = value.split('.');
+    let whole = segments.next().unwrap_or_default();
+    let fractional = segments.next();
+    if segments.next().is_some()
+        || whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || fractional.is_some_and(|fraction| {
+            fraction.is_empty()
+                || fraction.len() > 2
+                || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return Err(record_error(
+            locale,
+            position,
+            "expense amount must be a non-negative decimal with at most two fractional digits",
+        ));
+    }
+    let amount = value
+        .parse::<f64>()
+        .ok()
+        .filter(|amount| amount.is_finite());
+    let Some(amount) = amount else {
+        return Err(record_error(locale, position, "expense amount is invalid"));
+    };
+    if amount > RECORD_MAX_AMOUNT {
+        return Err(record_error(
+            locale,
+            position,
+            "expense amount exceeds the allowed limit",
+        ));
+    }
+    Ok(amount)
+}
+
+fn record_non_negative_quantity(
+    value: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<u64, PadmaError> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(record_error(
+            locale,
+            position,
+            "inventory quantity must be a non-negative whole number",
+        ));
+    }
+    let quantity = value.parse::<u64>().ok();
+    let Some(quantity) = quantity else {
+        return Err(record_error(
+            locale,
+            position,
+            "inventory quantity is invalid",
+        ));
+    };
+    if quantity > RECORD_MAX_QUANTITY {
+        return Err(record_error(
+            locale,
+            position,
+            "inventory quantity exceeds the allowed limit",
+        ));
+    }
+    Ok(quantity)
+}
+
+fn record_currency(value: &str, locale: Locale, position: Position) -> Result<(), PadmaError> {
+    if value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_uppercase()) {
+        return Err(record_error(
+            locale,
+            position,
+            "expense currency must be three uppercase ASCII letters",
+        ));
+    }
+    Ok(())
+}
+
+fn record_validated_table(
+    kind: RecordKind,
+    table: &TableData,
+    locale: Locale,
+    position: Position,
+) -> Result<(), PadmaError> {
+    if table.rows.is_empty() {
+        return Err(record_error(
+            locale,
+            position,
+            "record table must contain at least one row",
+        ));
+    }
+    let expected = kind.headers();
+    if table.headers.len() != expected.len()
+        || table
+            .headers
+            .iter()
+            .zip(expected.iter())
+            .any(|(actual, expected)| actual != expected)
+    {
+        return Err(record_error(
+            locale,
+            position,
+            "record table headers must exactly match the selected record kind",
+        ));
+    }
+    let mut unique_keys = BTreeSet::new();
+    let mut expense_currency = None;
+    for row in &table.rows {
+        match kind {
+            RecordKind::Attendance => {
+                let date = record_required_text(row, "date", 10, locale, position)?;
+                if !record_valid_date(date) {
+                    return Err(record_error(
+                        locale,
+                        position,
+                        "record date must be a real YYYY-MM-DD calendar date",
+                    ));
+                }
+                let student =
+                    record_required_text(row, "student", RECORD_MAX_TEXT_BYTES, locale, position)?;
+                let status = record_required_text(row, "status", 16, locale, position)?;
+                if !matches!(status, "present" | "absent" | "late") {
+                    return Err(record_error(
+                        locale,
+                        position,
+                        "attendance status must be present, absent, or late",
+                    ));
+                }
+                if !unique_keys.insert(format!("{date}\u{1f}{student}")) {
+                    return Err(record_error(
+                        locale,
+                        position,
+                        "attendance date and student combination must be unique",
+                    ));
+                }
+            }
+            RecordKind::Expense => {
+                let date = record_required_text(row, "date", 10, locale, position)?;
+                if !record_valid_date(date) {
+                    return Err(record_error(
+                        locale,
+                        position,
+                        "record date must be a real YYYY-MM-DD calendar date",
+                    ));
+                }
+                record_required_text(row, "category", RECORD_MAX_TEXT_BYTES, locale, position)?;
+                let amount = record_required_text(row, "amount", 32, locale, position)?;
+                record_non_negative_amount(amount, locale, position)?;
+                let currency = record_required_text(row, "currency", 3, locale, position)?;
+                record_currency(currency, locale, position)?;
+                if let Some(expected) = expense_currency {
+                    if expected != currency {
+                        return Err(record_error(
+                            locale,
+                            position,
+                            "expense summary requires one consistent currency per table",
+                        ));
+                    }
+                } else {
+                    expense_currency = Some(currency);
+                }
+                record_optional_note(row, locale, position)?;
+            }
+            RecordKind::Inventory => {
+                let item =
+                    record_required_text(row, "item", RECORD_MAX_TEXT_BYTES, locale, position)?;
+                record_required_text(row, "category", RECORD_MAX_TEXT_BYTES, locale, position)?;
+                let quantity = record_required_text(row, "quantity", 32, locale, position)?;
+                let reorder_level =
+                    record_required_text(row, "reorderLevel", 32, locale, position)?;
+                record_non_negative_quantity(quantity, locale, position)?;
+                record_non_negative_quantity(reorder_level, locale, position)?;
+                if !unique_keys.insert(item.to_string()) {
+                    return Err(record_error(
+                        locale,
+                        position,
+                        "inventory item must be unique within one table",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn record_summary_value(
+    kind: RecordKind,
+    table: &TableData,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    record_validated_table(kind, table, locale, position)?;
+    let mut summary = BTreeMap::from([
+        ("kind".into(), Value::String(kind.name().into())),
+        ("recordCount".into(), Value::Number(table.rows.len() as f64)),
+        ("account".into(), Value::String("disabled".into())),
+        ("cloudSync".into(), Value::String("disabled".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("payment".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]);
+    match kind {
+        RecordKind::Attendance => {
+            let mut present = 0_u64;
+            let mut absent = 0_u64;
+            let mut late = 0_u64;
+            for row in &table.rows {
+                match row.get("status").map(String::as_str) {
+                    Some("present") => present += 1,
+                    Some("absent") => absent += 1,
+                    Some("late") => late += 1,
+                    _ => unreachable!("validated attendance status"),
+                }
+            }
+            summary.insert("presentCount".into(), Value::Number(present as f64));
+            summary.insert("absentCount".into(), Value::Number(absent as f64));
+            summary.insert("lateCount".into(), Value::Number(late as f64));
+        }
+        RecordKind::Expense => {
+            let mut total = 0.0;
+            let mut categories = BTreeSet::new();
+            for row in &table.rows {
+                total += record_non_negative_amount(
+                    row.get("amount").map(String::as_str).unwrap_or_default(),
+                    locale,
+                    position,
+                )?;
+                categories.insert(row.get("category").cloned().unwrap_or_default());
+            }
+            summary.insert("totalAmount".into(), Value::Number(total));
+            summary.insert(
+                "currency".into(),
+                Value::String(table.rows[0].get("currency").cloned().unwrap_or_default()),
+            );
+            summary.insert(
+                "categoryCount".into(),
+                Value::Number(categories.len() as f64),
+            );
+        }
+        RecordKind::Inventory => {
+            let mut categories = BTreeSet::new();
+            let mut low_stock = 0_u64;
+            for row in &table.rows {
+                categories.insert(row.get("category").cloned().unwrap_or_default());
+                let quantity = record_non_negative_quantity(
+                    row.get("quantity").map(String::as_str).unwrap_or_default(),
+                    locale,
+                    position,
+                )?;
+                let reorder_level = record_non_negative_quantity(
+                    row.get("reorderLevel")
+                        .map(String::as_str)
+                        .unwrap_or_default(),
+                    locale,
+                    position,
+                )?;
+                if quantity <= reorder_level {
+                    low_stock += 1;
+                }
+            }
+            summary.insert("itemCount".into(), Value::Number(table.rows.len() as f64));
+            summary.insert(
+                "categoryCount".into(),
+                Value::Number(categories.len() as f64),
+            );
+            summary.insert("lowStockCount".into(), Value::Number(low_stock as f64));
+        }
+    }
+    Ok(Value::Map(summary))
 }
 
 #[derive(Clone, Debug)]
@@ -4880,6 +5283,20 @@ impl Interpreter {
                         return Ok(validated);
                     }
                     return profile_summary_value(&profile, &schema, self.locale, *position);
+                }
+                if name == "record.validate" || name == "record.summary" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let kind_value = self.evaluate(&arguments[0])?;
+                    let kind = RecordKind::parse(&kind_value, self.locale, *position)?;
+                    let value = self.evaluate(&arguments[1])?;
+                    let table = table_data_from_value(&value, self.locale, *position)?;
+                    record_validated_table(kind, &table, self.locale, *position)?;
+                    if name == "record.validate" {
+                        return Ok(table_data_to_value(&table));
+                    }
+                    return record_summary_value(kind, &table, self.locale, *position);
                 }
                 if name == "http.get" {
                     if arguments.len() != 1 {
@@ -11824,7 +12241,8 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
-        | "report.summary" | "profile.validate" | "profile.summary" => Some((2, 2)),
+        | "report.summary" | "profile.validate" | "profile.summary" | "record.validate"
+        | "record.summary" => Some((2, 2)),
         "text.replace" | "fs.search_text" | "report.write_markdown" => Some((3, 3)),
         "client.write_document" => Some((2, 2)),
         "db.put" => Some((4, 4)),
@@ -14713,6 +15131,52 @@ mod tests {
             assert_eq!(error.code, "P1072");
         }
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn local_records_validate_attendance_expense_inventory_and_return_redacted_summaries() {
+        let root = module_fixture_dir("local-records");
+        let source = "let attendance = {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"status\"], \"rows\": [{\"date\": \"2026-02-28\", \"student\": \"Rafi\", \"status\": \"present\"}, {\"date\": \"2026-02-28\", \"student\": \"Rima\", \"status\": \"late\"}, {\"date\": \"2026-02-28\", \"student\": \"Sumi\", \"status\": \"absent\"}]}\nlet expenses = {\"format\": \"csv\", \"headers\": [\"date\", \"category\", \"amount\", \"currency\", \"note\"], \"rows\": [{\"date\": \"2026-02-28\", \"category\": \"food\", \"amount\": \"120.50\", \"currency\": \"BDT\", \"note\": \"market\"}, {\"date\": \"2026-02-28\", \"category\": \"transport\", \"amount\": \"40\", \"currency\": \"BDT\", \"note\": \"\"}]}\nlet inventory = {\"format\": \"csv\", \"headers\": [\"item\", \"category\", \"quantity\", \"reorderLevel\"], \"rows\": [{\"item\": \"Rice\", \"category\": \"food\", \"quantity\": \"2\", \"reorderLevel\": \"3\"}, {\"item\": \"Pen\", \"category\": \"stationery\", \"quantity\": \"9\", \"reorderLevel\": \"2\"}]}\nlet checked = record.validate(\"attendance\", attendance)\nlet attendanceSummary = record.summary(\"attendance\", attendance)\nlet expenseSummary = record.summary(\"expense\", expenses)\nlet inventorySummary = record.summary(\"inventory\", inventory)\nprint table.rows(checked)[0][\"student\"]\nprint attendanceSummary[\"presentCount\"]\nprint attendanceSummary[\"absentCount\"]\nprint attendanceSummary[\"lateCount\"]\nprint text.contains(json.stringify(attendanceSummary), \"Rafi\")\nprint attendanceSummary[\"network\"]\nprint expenseSummary[\"totalAmount\"]\nprint expenseSummary[\"currency\"]\nprint expenseSummary[\"categoryCount\"]\nprint inventorySummary[\"itemCount\"]\nprint inventorySummary[\"lowStockCount\"]\nprint inventorySummary[\"payment\"]\n";
+        let output = run_bridge_project(&root, BTreeSet::new(), source).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "Rafi", "1", "1", "1", "false", "disabled", "160.5", "BDT", "2", "2", "1",
+                "disabled"
+            ]
+        );
+    }
+
+    #[test]
+    fn local_records_reject_unsafe_schema_values_duplicates_and_preserve_table_boundaries() {
+        let root = module_fixture_dir("local-records-safety");
+        let cases = [
+            "print record.validate(\"unknown\", {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"status\"], \"rows\": [{\"date\": \"2026-02-28\", \"student\": \"Rafi\", \"status\": \"present\"}]})\n",
+            "print record.validate(\"attendance\", {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"state\"], \"rows\": [{\"date\": \"2026-02-28\", \"student\": \"Rafi\", \"state\": \"present\"}]})\n",
+            "print record.validate(\"attendance\", {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"status\"], \"rows\": [{\"date\": \"2026-02-30\", \"student\": \"Rafi\", \"status\": \"present\"}]})\n",
+            "print record.validate(\"attendance\", {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"status\"], \"rows\": [{\"date\": \"2026-02-28\", \"student\": \"Rafi\", \"status\": \"pending\"}]})\n",
+            "print record.validate(\"attendance\", {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"status\"], \"rows\": [{\"date\": \"2026-02-28\", \"student\": \"Rafi\", \"status\": \"present\"}, {\"date\": \"2026-02-28\", \"student\": \"Rafi\", \"status\": \"late\"}]})\n",
+            "print record.validate(\"expense\", {\"format\": \"csv\", \"headers\": [\"date\", \"category\", \"amount\", \"currency\", \"note\"], \"rows\": [{\"date\": \"2026-02-28\", \"category\": \"food\", \"amount\": \"-1\", \"currency\": \"BDT\", \"note\": \"x\"}]})\n",
+            "print record.validate(\"expense\", {\"format\": \"csv\", \"headers\": [\"date\", \"category\", \"amount\", \"currency\", \"note\"], \"rows\": [{\"date\": \"2026-02-28\", \"category\": \"food\", \"amount\": \"1.234\", \"currency\": \"BDT\", \"note\": \"x\"}]})\n",
+            "print record.validate(\"expense\", {\"format\": \"csv\", \"headers\": [\"date\", \"category\", \"amount\", \"currency\", \"note\"], \"rows\": [{\"date\": \"2026-02-28\", \"category\": \"food\", \"amount\": \"1\", \"currency\": \"bdt\", \"note\": \"x\"}]})\n",
+            "print record.validate(\"expense\", {\"format\": \"csv\", \"headers\": [\"date\", \"category\", \"amount\", \"currency\", \"note\"], \"rows\": [{\"date\": \"2026-02-28\", \"category\": \"food\", \"amount\": \"1\", \"currency\": \"BDT\", \"note\": \"x\"}, {\"date\": \"2026-02-28\", \"category\": \"food\", \"amount\": \"2\", \"currency\": \"USD\", \"note\": \"x\"}]})\n",
+            "print record.validate(\"inventory\", {\"format\": \"csv\", \"headers\": [\"item\", \"category\", \"quantity\", \"reorderLevel\"], \"rows\": [{\"item\": \"Rice\", \"category\": \"food\", \"quantity\": \"two\", \"reorderLevel\": \"1\"}]})\n",
+            "print record.validate(\"inventory\", {\"format\": \"csv\", \"headers\": [\"item\", \"category\", \"quantity\", \"reorderLevel\"], \"rows\": [{\"item\": \"Rice\", \"category\": \"food\", \"quantity\": \"2\", \"reorderLevel\": \"1\"}, {\"item\": \"Rice\", \"category\": \"food\", \"quantity\": \"4\", \"reorderLevel\": \"1\"}]})\n",
+            "দেখাও record.validate(\"attendance\", {\"format\": \"csv\", \"headers\": [\"date\", \"student\", \"status\"], \"rows\": [{\"date\": \"2026-02-28\", \"student\": \"<script>bad</script>\", \"status\": \"present\"}]})\n",
+        ];
+        for source in cases {
+            let error = run_bridge_project(&root, BTreeSet::new(), source).unwrap_err();
+            assert_eq!(error.code, "P1074");
+        }
+        let malformed = run_bridge_project(
+            &root,
+            BTreeSet::new(),
+            "print record.summary(\"attendance\", {\"format\": \"csv\", \"headers\": [\"date\"], \"rows\": [{\"wrong\": \"x\"}]})\n",
+        )
+        .unwrap_err();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(malformed.code, "P1069");
     }
 
     #[test]

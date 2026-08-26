@@ -23,6 +23,7 @@ export PATH="$HOME/padma-lang/target/release:$PATH"
 | Local expense reporting | `examples/local-reporting-expense` | CSV-to-Markdown local expense report | It is not tax/accounting advice, invoice payment, email/upload, shared-storage, or public publishing. |
 | Local profile validator | `examples/local-profile-validator` | Project-local JSON preferences with schema/default validation | It is not account/login state, game modification, anti-cheat bypass, network profile sync, or device settings control. |
 | Freelancer quote draft | `examples/freelancer-quote-draft` | Local escaped quote Markdown with redacted review summary | It cannot contact a client, submit to a marketplace, sign a contract, make a payment, use a browser/network, or write shared storage. |
+| Local household records | `examples/local-records-household` | Attendance, expense, and inventory CSV validation plus a local Markdown expense report | It cannot cloud-sync, contact a school/shop, make a payment, start a process, or take stock/account action. |
 
 ## 1. Authorized media download
 
@@ -285,6 +286,22 @@ cat out/portfolio-quote.md
 ```
 
 The example prepares an explicit local quote draft, emits only redacted document metadata to the terminal, and writes one escaped project-local Markdown file. It needs `filesystem = ["write"]` only for the final file write. It is not a contract, tax or legal service, invoice transmission tool, marketplace client scraper, proposal sender, account/login system, e-signature service, payment/withdrawal tool, browser automation, network client, or process runner. See [`CLIENT-DOCUMENTS.md`](CLIENT-DOCUMENTS.md) for the exact fields, limits, and review boundary.
+
+## 12. Local household records
+
+```bash
+cd ~/padma-lang/examples/local-records-household
+padma .
+cat out/family-expense.md
+```
+
+```padma
+ধরি expenses = table.read("data/expenses.csv", "csv")
+ধরি summary = record.summary("expense", expenses)
+দেখাও text.format("Expense: {totalAmount} {currency}", summary)
+```
+
+The example validates separate attendance, expense, and inventory CSVs before emitting redacted counts/totals and writing one local Markdown expense report. It needs `filesystem = ["read", "write"]` only for project-local data/report files. It does not send a record, sync cloud data, calculate tax, start a background job, contact a school/client/shop, create payment, alter inventory, open a browser, or use an account. See [`LOCAL-RECORDS.md`](LOCAL-RECORDS.md) for exact record rules.
 
 ## Before you expand an example
 

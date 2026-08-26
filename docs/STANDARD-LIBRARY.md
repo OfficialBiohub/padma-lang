@@ -90,6 +90,15 @@ Report titles are single-line bounded text and reject raw `<`/`>` HTML delimiter
 
 Profile schemas accept only bounded key names and scalar `text`, `number`, `boolean`, or `null` rules, with optional boolean `required` or matching scalar `default`. No nested value/list/map profile data is accepted. Use `json.parse(file.read("data/profile.json"))` for a project-local JSON file; only `file.read` needs `filesystem:read`. These APIs never use a profile to trigger network, account, browser, device, process, game, payment, or output execution. See [`LOCAL-PROFILES.md`](LOCAL-PROFILES.md) for the full contract.
 
+## Local records
+
+| API | Result and boundary |
+|---|---|
+| `record.validate(kind, table)` | Validates one bounded `attendance`, `expense`, or `inventory` table with an exact ordered schema and returns the validated table. No capability is required. |
+| `record.summary(kind, table)` | Returns redacted record counts/totals plus fixed disabled-action markers; it does not return row labels or notes. No capability is required. |
+
+Attendance requires unique `(date, student)` entries and status `present`, `absent`, or `late`. Expense requires a real date, non-negative decimal amount with at most two fractional digits, one three-uppercase-letter currency, and bounded note. Inventory requires unique item names plus non-negative whole-number quantity/reorder level. Input is an existing table value, so `table.read` retains its own project-local `filesystem:read` boundary; use `report.write_markdown` separately for a reviewed local output. These APIs do not use account, cloud, network, payment, process, or device authority. See [`LOCAL-RECORDS.md`](LOCAL-RECORDS.md) for exact schemas, limits, and Termux example.
+
 ## Local client documents
 
 | API | Result and boundary |
@@ -128,4 +137,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
