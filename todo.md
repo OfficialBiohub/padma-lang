@@ -413,3 +413,30 @@
 - [x] Implement deterministic real expectation-value evaluation `⟨ψ|P|ψ⟩` for the existing local state vector, bounded numeric rounding, and no sampled measurement, parameter optimisation, cloud execution, provider, credential, network, or process action.
 - [x] Add bilingual diagnostics and regressions for invalid/empty/wrong-length/non-Pauli observable text, numeric invariants, Bell-state `ZZ`/`XX`, product-state expectations, deterministic output, resource limits, and no external side effect.
 - [x] Publish an updated Termux example, observable contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
+
+## Classical + Quantum Production Foundations
+
+### M32 — Local Parameterized Rotation Gates
+
+- [x] Add strict finite numeric-angle operations `rx`, `ry`, and `rz` to the local circuit contract, deterministic OpenQASM 3 lowering, and exact bounded state-vector evolution without symbolic parameters, external SDKs, or provider execution.
+- [x] Add tests for known-angle states, phase-sensitive expectations, malformed/missing/extra/non-finite angle fields, deterministic output, and no provider/network/process side effect; publish docs, Termux example, verification, focused commit, and push.
+
+### M33 — Reproducible Local Measurement Sampling
+
+- [ ] Define an explicit bounded `shots` and required deterministic integer seed contract over a validated local probability distribution; return reproducible counts only without hidden randomness, collapse-state reuse, provider, network, or process action.
+
+### M34 — Local Pauli Hamiltonian Analysis
+
+- [ ] Add a strict bounded real-coefficient sum of unique full-register Pauli terms with deterministic energy expectation, explicit qubit ordering, numerical limits, and no optimisation/provider authority.
+
+### M35 — Bounded Classical Optimisation Building Blocks
+
+- [ ] Add explicitly bounded deterministic classical numerical primitives suitable for local variational experiments only after parameter and Hamiltonian contracts exist; do not claim QAOA/VQE/QML frameworks until each algorithm and test suite exists.
+
+### M36 — Quantum Program Tooling and Interchange
+
+- [ ] Add verified circuit introspection/validation output, QASM subset round-trip assessment, and stable local artifact metadata only after parser/runtime contracts are separately designed and tested.
+
+### M37 — Provider Integration Assessment
+
+- [ ] Document, but do not implement by default, credentialed IBM/AWS/other provider adapters until a separate user-confirmed project defines capability grants, secrets handling, explicit cost/quota visibility, job confirmation/cancellation, provenance, polling limits, and security review.

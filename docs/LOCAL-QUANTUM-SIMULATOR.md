@@ -22,7 +22,7 @@ The simulator consumes the same strict circuit map accepted by `quantum.openqasm
 | Qubits | Maximum **12**, meaning at most `2^12 = 4096` complex amplitudes. The broader 20-qubit OpenQASM planning limit still applies only to text planning. |
 | Operations | Reuses the planner’s maximum of 256 explicit operations. |
 | Initial state | Exactly `|00…0⟩`; no user-supplied amplitude vector. |
-| Supported lowering | `h`, `x`, `z`, `s`, `t`, `cx`, `superposition`, and `entangle-linear`. |
+| Supported lowering | `h`, `x`, `z`, `s`, `t`, finite-angle `rx`/`ry`/`rz`, `cx`, `superposition`, and `entangle-linear`. |
 | Bit convention | Qubit index `0` is the least-significant internal bit. Output labels are fixed-width, most-significant-bit-first strings, so `q[0]` is the rightmost label bit. |
 | Measurement | The complete declared map only defines output classical-bit placement. There is no sampled measurement, no random seed, no partial-measurement API, and no collapse state. |
 | Output | A deterministic lexicographically ordered map of all basis bitstrings to normalized probabilities, rounded to 12 decimal places. |
@@ -54,7 +54,7 @@ The returned numbers are deterministic probability values, **not shot counts** o
 
 ## Explicitly not included
 
-This v1 does not provide amplitude injection/export, density matrices, mid-circuit measurement, collapse, random sampling/counts, parameterized rotations, Pauli sums/Hamiltonians, gradients, QAOA/QML/Grover algorithms, noise mitigation, hardware calibration, QPU selection, provider accounts, cloud transport, or results from a real quantum device. Single Pauli-product expectations are documented separately in [`LOCAL-QUANTUM-OBSERVABLES.md`](LOCAL-QUANTUM-OBSERVABLES.md).
+This v1 does not provide amplitude injection/export, density matrices, mid-circuit measurement, collapse, random sampling/counts, symbolic parameter binding, Pauli sums/Hamiltonians, gradients, QAOA/QML/Grover algorithms, noise mitigation, hardware calibration, QPU selection, provider accounts, cloud transport, or results from a real quantum device. Explicit finite numeric rotations are documented in [`LOCAL-QUANTUM-ROTATIONS.md`](LOCAL-QUANTUM-ROTATIONS.md); single Pauli-product expectations are documented separately in [`LOCAL-QUANTUM-OBSERVABLES.md`](LOCAL-QUANTUM-OBSERVABLES.md).
 
 ## References
 

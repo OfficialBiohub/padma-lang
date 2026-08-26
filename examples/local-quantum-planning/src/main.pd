@@ -1,7 +1,10 @@
 ধরি circuit = {"qubits": 2, "operations": [{"gate": "superposition", "targets": [0]}, {"gate": "entangle-linear", "targets": [0, 1]}], "measurements": [{"qubit": 0, "bit": 0}, {"qubit": 1, "bit": 1}]}
+ধরি halfTurn = 1.5707963267948966
+ধরি rotated = {"qubits": 1, "operations": [{"gate": "ry", "targets": [0], "angle": halfTurn}], "measurements": [{"qubit": 0, "bit": 0}]}
 
 ধরি summary = quantum.circuit_summary(circuit)
 ধরি simulation = quantum.simulate_probabilities(circuit)
+ধরি rotatedSimulation = quantum.simulate_probabilities(rotated)
 দেখাও text.format("Qubits: {qubitCount}", summary)
 দেখাও text.format("Operations: {operationCount}", summary)
 দেখাও text.format("Provider: {provider}", summary)
@@ -9,5 +12,7 @@
 দেখাও simulation["probabilities"]["11"]
 দেখাও quantum.expectation_pauli(circuit, "ZZ")
 দেখাও quantum.expectation_pauli(circuit, "XX")
+দেখাও rotatedSimulation["probabilities"]["1"]
+দেখাও quantum.expectation_pauli(rotated, "Z")
 দেখাও text.contains(quantum.openqasm3(circuit), "OPENQASM 3.0;")
 দেখাও quantum.write_openqasm3("out/bell-plan.qasm", circuit)

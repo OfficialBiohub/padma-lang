@@ -4738,11 +4738,13 @@ const QUANTUM_MAX_QUBITS: usize = 20;
 const QUANTUM_MAX_OPERATIONS: usize = 256;
 const QUANTUM_SIMULATOR_MAX_QUBITS: usize = 12;
 const QUANTUM_SIMULATOR_EPSILON: f64 = 1e-10;
+const QUANTUM_MAX_ROTATION_ANGLE: f64 = 1_000_000.0;
 
 #[derive(Clone, Debug)]
 struct QuantumOperation {
     gate: String,
     targets: Vec<usize>,
+    angle: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -4843,7 +4845,19 @@ fn quantum_circuit_from_value(
                 "each quantum operation must be a map",
             ));
         };
-        let operation_allowed = BTreeSet::from(["gate", "targets"]);
+        let Some(Value::String(gate)) = operation.get("gate") else {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum gate must be text",
+            ));
+        };
+        let is_rotation = matches!(gate.as_str(), "rx" | "ry" | "rz");
+        let operation_allowed = if is_rotation {
+            BTreeSet::from(["gate", "targets", "angle"])
+        } else {
+            BTreeSet::from(["gate", "targets"])
+        };
         if operation.len() != operation_allowed.len()
             || operation
                 .keys()
@@ -4855,16 +4869,18 @@ fn quantum_circuit_from_value(
                 "quantum operation contains unsupported fields",
             ));
         }
-        let Some(Value::String(gate)) = operation.get("gate") else {
-            return Err(quantum_plan_error(
-                locale,
-                position,
-                "quantum gate must be text",
-            ));
-        };
         if !matches!(
             gate.as_str(),
-            "h" | "x" | "z" | "s" | "t" | "cx" | "superposition" | "entangle-linear"
+            "h" | "x"
+                | "z"
+                | "s"
+                | "t"
+                | "rx"
+                | "ry"
+                | "rz"
+                | "cx"
+                | "superposition"
+                | "entangle-linear"
         ) {
             return Err(quantum_plan_error(
                 locale,
@@ -4872,6 +4888,25 @@ fn quantum_circuit_from_value(
                 "quantum gate is not supported by the local OpenQASM subset",
             ));
         }
+        let angle = if is_rotation {
+            let Some(Value::Number(angle)) = operation.get("angle") else {
+                return Err(quantum_plan_error(
+                    locale,
+                    position,
+                    "quantum rotation angle must be a finite number",
+                ));
+            };
+            if !angle.is_finite() || angle.abs() > QUANTUM_MAX_ROTATION_ANGLE {
+                return Err(quantum_plan_error(
+                    locale,
+                    position,
+                    "quantum rotation angle is outside the local numeric limit",
+                ));
+            }
+            Some(*angle)
+        } else {
+            None
+        };
         let Some(Value::List(target_values)) = operation.get("targets") else {
             return Err(quantum_plan_error(
                 locale,
@@ -4880,7 +4915,7 @@ fn quantum_circuit_from_value(
             ));
         };
         let expected = match gate.as_str() {
-            "h" | "x" | "z" | "s" | "t" => Some(1),
+            "h" | "x" | "z" | "s" | "t" | "rx" | "ry" | "rz" => Some(1),
             "cx" => Some(2),
             "superposition" => None,
             "entangle-linear" => None,
@@ -4913,6 +4948,7 @@ fn quantum_circuit_from_value(
         operations.push(QuantumOperation {
             gate: gate.clone(),
             targets,
+            angle,
         });
     }
     let Some(Value::List(measurement_values)) = fields.get("measurements") else {
@@ -5001,6 +5037,12 @@ fn quantum_openqasm3(
             "h" | "x" | "z" | "s" | "t" => {
                 lines.push(format!("{} q[{}];", operation.gate, operation.targets[0]))
             }
+            "rx" | "ry" | "rz" => lines.push(format!(
+                "{}({:.17}) q[{}];",
+                operation.gate,
+                operation.angle.expect("validated quantum rotation angle"),
+                operation.targets[0]
+            )),
             "cx" => lines.push(format!(
                 "cx q[{}], q[{}];",
                 operation.targets[0], operation.targets[1]
@@ -5115,7 +5157,7 @@ fn quantum_local_state_vector(
     state[0] = (1.0, 0.0);
     let inverse_sqrt_two = 1.0 / 2.0_f64.sqrt();
     for operation in &circuit.operations {
-        let mut apply_gate = |gate: &str, target: usize| match gate {
+        let mut apply_gate = |gate: &str, target: usize, angle: Option<f64>| match gate {
             "h" => quantum_apply_single_qubit(
                 &mut state,
                 target,
@@ -5151,14 +5193,46 @@ fn quantum_local_state_vector(
                     (inverse_sqrt_two, inverse_sqrt_two),
                 ),
             ),
+            "rx" => {
+                let half_angle = angle.expect("validated rx angle") / 2.0;
+                let cosine = half_angle.cos();
+                let sine = half_angle.sin();
+                quantum_apply_single_qubit(
+                    &mut state,
+                    target,
+                    ((cosine, 0.0), (0.0, -sine), (0.0, -sine), (cosine, 0.0)),
+                )
+            }
+            "ry" => {
+                let half_angle = angle.expect("validated ry angle") / 2.0;
+                let cosine = half_angle.cos();
+                let sine = half_angle.sin();
+                quantum_apply_single_qubit(
+                    &mut state,
+                    target,
+                    ((cosine, 0.0), (-sine, 0.0), (sine, 0.0), (cosine, 0.0)),
+                )
+            }
+            "rz" => {
+                let half_angle = angle.expect("validated rz angle") / 2.0;
+                let cosine = half_angle.cos();
+                let sine = half_angle.sin();
+                quantum_apply_single_qubit(
+                    &mut state,
+                    target,
+                    ((cosine, -sine), (0.0, 0.0), (0.0, 0.0), (cosine, sine)),
+                )
+            }
             _ => unreachable!("validated single-qubit quantum gate"),
         };
         match operation.gate.as_str() {
-            "h" | "x" | "z" | "s" | "t" => apply_gate(&operation.gate, operation.targets[0]),
+            "h" | "x" | "z" | "s" | "t" | "rx" | "ry" | "rz" => {
+                apply_gate(&operation.gate, operation.targets[0], operation.angle)
+            }
             "cx" => quantum_apply_cx(&mut state, operation.targets[0], operation.targets[1]),
             "superposition" => {
                 for target in &operation.targets {
-                    apply_gate("h", *target);
+                    apply_gate("h", *target, None);
                 }
             }
             "entangle-linear" => {
@@ -19489,6 +19563,73 @@ mod tests {
         assert_eq!(
             static_builtin_arity("quantum.expectation_pauli"),
             Some((2, 2))
+        );
+    }
+
+    #[test]
+    fn local_quantum_rotations_simulate_known_angles_and_lower_to_openqasm() {
+        let root = module_fixture_dir("local-quantum-rotations");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let ry = "{\"qubits\": 1, \"operations\": [{\"gate\": \"ry\", \"targets\": [0], \"angle\": 1.5707963267948966}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        let rx = "{\"qubits\": 1, \"operations\": [{\"gate\": \"rx\", \"targets\": [0], \"angle\": 1.5707963267948966}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        let rz = "{\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"rz\", \"targets\": [0], \"angle\": 3.141592653589793}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        let source = format!("let ry = {ry}\nlet rx = {rx}\nlet rz = {rz}\nlet first = quantum.simulate_probabilities(ry)\nlet second = quantum.simulate_probabilities(ry)\nlet qasm = quantum.openqasm3(ry)\nprint first[\"probabilities\"][\"0\"]\nprint first[\"probabilities\"][\"1\"]\nprint quantum.expectation_pauli(ry, \"Z\")\nprint quantum.expectation_pauli(rx, \"Y\")\nprint quantum.expectation_pauli(rz, \"X\")\nprint text.contains(qasm, \"ry(1.57079632679489656) q[0];\")\nprint json.stringify(first) == json.stringify(second)\nprint quantum.write_openqasm3(\"out/rotation.qasm\", ry)\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let qasm = fs::read_to_string(root.join("out/rotation.qasm")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec!["0.5", "0.5", "0", "-1", "-1", "true", "true", "true"]
+        );
+        assert!(qasm.contains("ry(1.57079632679489656) q[0];"));
+    }
+
+    #[test]
+    fn local_quantum_rotations_reject_malformed_angle_fields_and_non_finite_values() {
+        let base = "\"qubits\": 1, \"measurements\": [{\"qubit\": 0, \"bit\": 0}]";
+        let invalid_circuits = [
+            format!("{{{base}, \"operations\": [{{\"gate\": \"rx\", \"targets\": [0]}}]}}"),
+            format!("{{{base}, \"operations\": [{{\"gate\": \"ry\", \"targets\": [0], \"angle\": \"half\"}}]}}"),
+            format!("{{{base}, \"operations\": [{{\"gate\": \"rz\", \"targets\": [0], \"angle\": 1000001}}]}}"),
+            format!("{{{base}, \"operations\": [{{\"gate\": \"h\", \"targets\": [0], \"angle\": 0}}]}}"),
+        ];
+        for circuit in invalid_circuits {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-quantum-rotations-invalid"),
+                    BTreeSet::new(),
+                    &format!("print quantum.circuit_summary({circuit})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1083"
+            );
+        }
+        let non_finite = Value::Map(BTreeMap::from([
+            ("qubits".into(), Value::Number(1.0)),
+            (
+                "operations".into(),
+                Value::List(vec![Value::Map(BTreeMap::from([
+                    ("gate".into(), Value::String("rx".into())),
+                    ("targets".into(), Value::List(vec![Value::Number(0.0)])),
+                    ("angle".into(), Value::Number(f64::NAN)),
+                ]))]),
+            ),
+            (
+                "measurements".into(),
+                Value::List(vec![Value::Map(BTreeMap::from([
+                    ("qubit".into(), Value::Number(0.0)),
+                    ("bit".into(), Value::Number(0.0)),
+                ]))]),
+            ),
+        ]));
+        assert_eq!(
+            quantum_circuit_from_value(&non_finite, Locale::English, Position::new(1, 1))
+                .unwrap_err()
+                .code,
+            "P1083"
         );
     }
 

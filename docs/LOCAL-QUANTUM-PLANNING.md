@@ -15,9 +15,10 @@ Padma Quantum Planning v1 turns an explicit, bounded local circuit map into dete
 | Field | Rule |
 |---|---|
 | `qubits` | Whole number from `1` to `20`. This is a v1 planning bound, not a simulator or QPU capacity claim. |
-| `operations` | One to `256` strict `{gate, targets}` maps in declared order. |
-| `operations[].gate` | Exactly one of `h`, `x`, `z`, `s`, `t`, `cx`, `superposition`, or `entangle-linear`. |
-| `operations[].targets` | Bounded distinct whole qubit indexes. Single-qubit gates require one target; `cx` two; high-level `superposition` and `entangle-linear` use the listed targets. |
+| `operations` | One to `256` strict `{gate, targets}` maps in declared order, except rotation maps which additionally require `angle`. |
+| `operations[].gate` | Exactly one of `h`, `x`, `z`, `s`, `t`, `rx`, `ry`, `rz`, `cx`, `superposition`, or `entangle-linear`. |
+| `operations[].targets` | Bounded distinct whole qubit indexes. Single-qubit and rotation gates require one target; `cx` two; high-level `superposition` and `entangle-linear` use the listed targets. |
+| `operations[].angle` | Required only by `rx`, `ry`, and `rz`: finite numeric radians with absolute value at most `1_000_000`. Symbolic parameters, text expressions, units, and extra angle fields are rejected. |
 | `measurements` | Exactly one `{qubit, bit}` entry for every qubit, with a unique qubit and bit index in `0..qubits-1`. |
 
 `superposition` emits an `h` instruction for each target. `entangle-linear` emits a chain of `cx` instructions over the target list. The generator inserts `reset q;` before all requested gates and emits `c[bit] = measure q[qubit];` for every declared mapping. OpenQASM 3 supports static `qubit[size]` and `bit[size]` registers and measurement assignment syntax of this form. [2] [3]
@@ -43,7 +44,7 @@ The writer follows the existing project-root policy: target parent must already 
 
 ## Safety and diagnostics
 
-`P1083` reports malformed or unsafe circuit data, unsupported gates, invalid indices/mapping, unsupported provider/device/simulator fields, or oversized QASM. The circuit summary declares bounded local simulator availability, while the planning/QASM feature itself never accesses a provider, network, credential, QPU, or process. `P1084` covers local state-vector resource and numeric invariants.
+`P1083` reports malformed or unsafe circuit data, unsupported gates, missing/extra/non-finite/oversized rotation angles, invalid indices/mapping, unsupported provider/device/simulator fields, or oversized QASM. The circuit summary declares bounded local simulator availability, while the planning/QASM feature itself never accesses a provider, network, credential, QPU, or process. `P1084` covers local state-vector resource and numeric invariants.
 
 ## References
 
