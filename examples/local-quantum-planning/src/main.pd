@@ -1,0 +1,8 @@
+ধরি circuit = {"qubits": 2, "operations": [{"gate": "superposition", "targets": [0, 1]}, {"gate": "entangle-linear", "targets": [0, 1]}], "measurements": [{"qubit": 0, "bit": 0}, {"qubit": 1, "bit": 1}]}
+
+ধরি summary = quantum.circuit_summary(circuit)
+দেখাও text.format("Qubits: {qubitCount}", summary)
+দেখাও text.format("Operations: {operationCount}", summary)
+দেখাও text.format("Provider: {provider}", summary)
+দেখাও text.contains(quantum.openqasm3(circuit), "OPENQASM 3.0;")
+দেখাও quantum.write_openqasm3("out/bell-plan.qasm", circuit)

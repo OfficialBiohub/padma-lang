@@ -19,6 +19,7 @@ This inventory states only what the current Padma release binary executes, docum
 | 11 | Attachment-review manifest | Reads declared project-local attachments for checksum/byte-count review and writes a local Markdown manifest. | `client.attachment_review_*`; `examples/freelancer-attachment-review` |
 | 12 | Verifiable delivery package | Reads declared project-local files for integrity metadata and writes a manual folder/review package manifest. | `client.delivery_package_*`; `examples/freelancer-delivery-package` |
 | 13 | Proposal, brief, and copy-only message templates | Renders explicit Bangla-English local preparation drafts with review checklists. | `client.template_*`; `examples/freelancer-client-templates` |
+| 14 | Local quantum circuit planning | Validates bounded gates and exports deterministic OpenQASM 3.0 circuit text. | `quantum.*`; `examples/local-quantum-planning` |
 
 All client-document writers require only `filesystem = ["write"]` and write a project-local non-symlink `.md` file. The APIs return redacted summaries and disabled-action markers rather than performing external actions.
 
@@ -43,6 +44,7 @@ All client-document writers require only `filesystem = ["write"]` and write a pr
 |---|---|---|
 | P1 | Client-data delivery/reconciliation | Implemented foundations: local table comparison with redacted counts/checksums plus a separate project-local attachment checksum/ownership review manifest. CSV/JSON cleaning remains separate work. |
 | P1 | Content/document preparation | Implemented first foundation: explicit-input Bangla-English proposal, brief, and copy-only message-template Markdown with local review/export. Recipient, platform, and sending remain separate by design. |
+| P2 | Quantum computing | Implemented first foundation: local validated circuit planning and OpenQASM 3.0 text export. Simulation, QPU/cloud submission, provider credentials, algorithm libraries, noise mitigation, and performance claims are intentionally unavailable. |
 | P1 | Developer delivery toolkit | Not made: deterministic task/test/lint/build manifest and combined checksum manifest. |
 | P1 | API integration templates | Not made: reusable request descriptors, extraction rules, retry/timeout policy, and secret-name references. |
 | P2 | Study-note and extra local record schemas | Not made beyond attendance, expense, and inventory. |

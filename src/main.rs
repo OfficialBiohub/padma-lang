@@ -330,6 +330,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1081") => (format!("Local delivery package is unsafe or invalid: `{detail}`"), Some("Use only project-local regular files, checksum review, and manual review steps; Padma will not copy files, render PDF, send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
         (Locale::Bangla, "P1082") => (format!("local proposal, brief, বা message-template নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু explicit bounded local content, user review, এবং project-local Markdown output ব্যবহার করুন; Padma send, upload, submit, payment, browser, account, network, বা process action চালাবে না।".into())),
         (Locale::English, "P1082") => (format!("Local proposal, brief, or message-template is unsafe or invalid: `{detail}`"), Some("Use only explicit bounded local content, user review, and project-local Markdown output; Padma will not send, upload, submit, pay, use a browser/account/network, or start a process.".into())),
+        (Locale::Bangla, "P1083") => (format!("local quantum circuit plan নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু supported gate ও bounded local qubit/measurement map ব্যবহার করুন; Padma provider, QPU, simulator, credential, network, বা process চালাবে না।".into())),
+        (Locale::English, "P1083") => (format!("Local quantum circuit plan is unsafe or invalid: `{detail}`"), Some("Use only supported gates and bounded local qubit/measurement maps; Padma will not run a provider, QPU, simulator, credential, network, or process.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1701,6 +1703,10 @@ fn delivery_package_error(locale: Locale, position: Position, detail: &str) -> P
 
 fn client_template_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1082", position, detail)
+}
+
+fn quantum_plan_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1083", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4716,6 +4722,329 @@ fn client_template_summary(draft: &ClientTemplateDraft) -> Value {
     ]))
 }
 
+const QUANTUM_MAX_QUBITS: usize = 20;
+const QUANTUM_MAX_OPERATIONS: usize = 256;
+
+#[derive(Clone, Debug)]
+struct QuantumOperation {
+    gate: String,
+    targets: Vec<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct QuantumMeasurement {
+    qubit: usize,
+    bit: usize,
+}
+
+#[derive(Clone, Debug)]
+struct QuantumCircuitPlan {
+    qubits: usize,
+    operations: Vec<QuantumOperation>,
+    measurements: Vec<QuantumMeasurement>,
+}
+
+fn quantum_index(
+    value: Option<&Value>,
+    field: &str,
+    qubits: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<usize, PadmaError> {
+    let Some(Value::Number(number)) = value else {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            &format!("quantum {field} must be a whole number"),
+        ));
+    };
+    if !number.is_finite() || number.fract() != 0.0 || *number < 0.0 || *number >= qubits as f64 {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            &format!("quantum {field} is outside the declared qubit range"),
+        ));
+    }
+    Ok(*number as usize)
+}
+
+fn quantum_circuit_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<QuantumCircuitPlan, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum circuit must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from(["qubits", "operations", "measurements"]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum circuit contains missing or unsupported fields",
+        ));
+    }
+    let Some(Value::Number(qubits)) = fields.get("qubits") else {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum qubits must be a whole number",
+        ));
+    };
+    if !qubits.is_finite()
+        || qubits.fract() != 0.0
+        || !(1.0..=QUANTUM_MAX_QUBITS as f64).contains(qubits)
+    {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum qubit count is outside the local planning limit",
+        ));
+    }
+    let qubits = *qubits as usize;
+    let Some(Value::List(operation_values)) = fields.get("operations") else {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum operations must be a non-empty list",
+        ));
+    };
+    if operation_values.is_empty() || operation_values.len() > QUANTUM_MAX_OPERATIONS {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum operation count is outside the local planning limit",
+        ));
+    }
+    let mut operations = Vec::new();
+    for operation_value in operation_values {
+        let Value::Map(operation) = operation_value else {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "each quantum operation must be a map",
+            ));
+        };
+        let operation_allowed = BTreeSet::from(["gate", "targets"]);
+        if operation.len() != operation_allowed.len()
+            || operation
+                .keys()
+                .any(|key| !operation_allowed.contains(key.as_str()))
+        {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum operation contains unsupported fields",
+            ));
+        }
+        let Some(Value::String(gate)) = operation.get("gate") else {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum gate must be text",
+            ));
+        };
+        if !matches!(
+            gate.as_str(),
+            "h" | "x" | "z" | "s" | "t" | "cx" | "superposition" | "entangle-linear"
+        ) {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum gate is not supported by the local OpenQASM subset",
+            ));
+        }
+        let Some(Value::List(target_values)) = operation.get("targets") else {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum targets must be a list",
+            ));
+        };
+        let expected = match gate.as_str() {
+            "h" | "x" | "z" | "s" | "t" => Some(1),
+            "cx" => Some(2),
+            "superposition" => None,
+            "entangle-linear" => None,
+            _ => unreachable!("validated quantum gate"),
+        };
+        if target_values.is_empty()
+            || target_values.len() > QUANTUM_MAX_QUBITS
+            || expected.is_some_and(|count| target_values.len() != count)
+            || (gate == "entangle-linear" && target_values.len() < 2)
+        {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum gate target count is invalid",
+            ));
+        }
+        let mut targets = Vec::new();
+        let mut seen_targets = BTreeSet::new();
+        for target in target_values {
+            let target = quantum_index(Some(target), "target", qubits, locale, position)?;
+            if !seen_targets.insert(target) {
+                return Err(quantum_plan_error(
+                    locale,
+                    position,
+                    "quantum operation targets must be unique",
+                ));
+            }
+            targets.push(target);
+        }
+        operations.push(QuantumOperation {
+            gate: gate.clone(),
+            targets,
+        });
+    }
+    let Some(Value::List(measurement_values)) = fields.get("measurements") else {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum measurements must be a list",
+        ));
+    };
+    if measurement_values.len() != qubits {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "quantum measurements must map every declared qubit exactly once",
+        ));
+    }
+    let mut measurements = Vec::new();
+    let mut seen_qubits = BTreeSet::new();
+    let mut seen_bits = BTreeSet::new();
+    for measurement_value in measurement_values {
+        let Value::Map(measurement) = measurement_value else {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "each quantum measurement must be a map",
+            ));
+        };
+        let measurement_allowed = BTreeSet::from(["qubit", "bit"]);
+        if measurement.len() != measurement_allowed.len()
+            || measurement
+                .keys()
+                .any(|key| !measurement_allowed.contains(key.as_str()))
+        {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum measurement contains unsupported fields",
+            ));
+        }
+        let qubit = quantum_index(
+            measurement.get("qubit"),
+            "measurement qubit",
+            qubits,
+            locale,
+            position,
+        )?;
+        let bit = quantum_index(
+            measurement.get("bit"),
+            "measurement bit",
+            qubits,
+            locale,
+            position,
+        )?;
+        if !seen_qubits.insert(qubit) || !seen_bits.insert(bit) {
+            return Err(quantum_plan_error(
+                locale,
+                position,
+                "quantum measurement qubit and bit indexes must be unique",
+            ));
+        }
+        measurements.push(QuantumMeasurement { qubit, bit });
+    }
+    Ok(QuantumCircuitPlan {
+        qubits,
+        operations,
+        measurements,
+    })
+}
+
+fn quantum_openqasm3(
+    circuit: &QuantumCircuitPlan,
+    locale: Locale,
+    position: Position,
+) -> Result<String, PadmaError> {
+    let mut lines = vec![
+        "OPENQASM 3.0;".into(),
+        "include \"stdgates.inc\";".into(),
+        String::new(),
+        format!("qubit[{}] q;", circuit.qubits),
+        format!("bit[{}] c;", circuit.qubits),
+        String::new(),
+        "reset q;".into(),
+    ];
+    for operation in &circuit.operations {
+        match operation.gate.as_str() {
+            "h" | "x" | "z" | "s" | "t" => {
+                lines.push(format!("{} q[{}];", operation.gate, operation.targets[0]))
+            }
+            "cx" => lines.push(format!(
+                "cx q[{}], q[{}];",
+                operation.targets[0], operation.targets[1]
+            )),
+            "superposition" => lines.extend(
+                operation
+                    .targets
+                    .iter()
+                    .map(|target| format!("h q[{target}];")),
+            ),
+            "entangle-linear" => lines.extend(
+                operation
+                    .targets
+                    .windows(2)
+                    .map(|pair| format!("cx q[{}], q[{}];", pair[0], pair[1])),
+            ),
+            _ => unreachable!("validated quantum gate"),
+        }
+    }
+    lines.push(String::new());
+    for measurement in &circuit.measurements {
+        lines.push(format!(
+            "c[{}] = measure q[{}];",
+            measurement.bit, measurement.qubit
+        ));
+    }
+    let output = format!("{}\n", lines.join("\n"));
+    if output.len() > REPORT_MAX_BYTES {
+        return Err(quantum_plan_error(
+            locale,
+            position,
+            "rendered OpenQASM exceeds the local output byte limit",
+        ));
+    }
+    Ok(output)
+}
+
+fn quantum_circuit_summary(circuit: &QuantumCircuitPlan) -> Value {
+    Value::Map(BTreeMap::from([
+        ("qubitCount".into(), Value::Number(circuit.qubits as f64)),
+        (
+            "operationCount".into(),
+            Value::Number(circuit.operations.len() as f64),
+        ),
+        (
+            "measurementCount".into(),
+            Value::Number(circuit.measurements.len() as f64),
+        ),
+        ("openQasmVersion".into(), Value::String("3.0".into())),
+        ("provider".into(), Value::String("not-configured".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("simulator".into(), Value::String("not-provided".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ]))
+}
+
 fn filesystem_productivity_regular_file(
     path: &Path,
     locale: Locale,
@@ -5690,6 +6019,57 @@ impl Interpreter {
                 "P1014",
                 position,
                 "client document output path",
+            ));
+        }
+        Ok(resolved)
+    }
+
+    fn quantum_output_path(&self, path: &str, position: Position) -> Result<PathBuf, PadmaError> {
+        self.require_project_capability("filesystem:write", "quantum", position)?;
+        if !path.ends_with(".qasm") {
+            return Err(quantum_plan_error(
+                self.locale,
+                position,
+                "OpenQASM output path must end with .qasm",
+            ));
+        }
+        let root = self.project_root.as_ref().ok_or_else(|| {
+            quantum_plan_error(
+                self.locale,
+                position,
+                "OpenQASM export requires a project root",
+            )
+        })?;
+        let relative = safe_relative_path(path)
+            .map_err(|_| error_for(self.locale, "P1014", position, "OpenQASM output path"))?;
+        let resolved = root.join(&relative);
+        let mut current = root.clone();
+        for component in relative.components() {
+            current.push(component);
+            if current.exists()
+                && fs::symlink_metadata(&current)
+                    .map_err(|_| error_for(self.locale, "P1015", position, "OpenQASM output path"))?
+                    .file_type()
+                    .is_symlink()
+            {
+                return Err(quantum_plan_error(
+                    self.locale,
+                    position,
+                    "OpenQASM output path must not contain a symlink",
+                ));
+            }
+        }
+        let parent = resolved
+            .parent()
+            .ok_or_else(|| error_for(self.locale, "P1014", position, "OpenQASM output path"))?;
+        let canonical_parent = fs::canonicalize(parent)
+            .map_err(|_| error_for(self.locale, "P1015", position, "OpenQASM output path"))?;
+        if !canonical_parent.starts_with(root) {
+            return Err(error_for(
+                self.locale,
+                "P1014",
+                position,
+                "OpenQASM output path",
             ));
         }
         Ok(resolved)
@@ -7536,6 +7916,41 @@ impl Interpreter {
                     let output = self.client_document_output_path(path, *position)?;
                     fs::write(output, markdown).map_err(|_| {
                         error_for(self.locale, "P1015", *position, "template output path")
+                    })?;
+                    return Ok(Value::Boolean(true));
+                }
+                if name == "quantum.circuit_summary"
+                    || name == "quantum.openqasm3"
+                    || name == "quantum.write_openqasm3"
+                {
+                    let expected = if name == "quantum.write_openqasm3" {
+                        2
+                    } else {
+                        1
+                    };
+                    if arguments.len() != expected {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let (path_argument, circuit_argument) = if expected == 2 {
+                        (Some(&arguments[0]), &arguments[1])
+                    } else {
+                        (None, &arguments[0])
+                    };
+                    let value = self.evaluate(circuit_argument)?;
+                    let circuit = quantum_circuit_from_value(&value, self.locale, *position)?;
+                    if name == "quantum.circuit_summary" {
+                        return Ok(quantum_circuit_summary(&circuit));
+                    }
+                    let openqasm = quantum_openqasm3(&circuit, self.locale, *position)?;
+                    if name == "quantum.openqasm3" {
+                        return Ok(Value::String(openqasm));
+                    }
+                    let path_value = self.evaluate(path_argument.expect("OpenQASM writer path"))?;
+                    let path =
+                        expect_string(&path_value, self.locale, *position, "OpenQASM output path")?;
+                    let output = self.quantum_output_path(path, *position)?;
+                    fs::write(output, openqasm).map_err(|_| {
+                        error_for(self.locale, "P1015", *position, "OpenQASM output path")
                     })?;
                     return Ok(Value::Boolean(true));
                 }
@@ -14674,7 +15089,9 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         | "client.delivery_package_summary"
         | "client.delivery_package_markdown"
         | "client.template_summary"
-        | "client.template_markdown" => Some((1, 1)),
+        | "client.template_markdown"
+        | "quantum.circuit_summary"
+        | "quantum.openqasm3" => Some((1, 1)),
         "file.write" | "text.contains" | "text.split" | "text.join" | "text.format"
         | "random.int" | "table.read" | "table.select" | "table.count_by" | "table.write_csv"
         | "fs.list" | "fs.copy_plan" | "fs.move_plan" | "fs.archive_plan" | "report.markdown"
@@ -14693,6 +15110,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "client.write_attachment_review" => Some((2, 2)),
         "client.write_delivery_package" => Some((2, 2)),
         "client.write_template" => Some((2, 2)),
+        "quantum.write_openqasm3" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -18475,6 +18893,120 @@ mod tests {
             Some((1, 1))
         );
         assert_eq!(static_builtin_arity("client.write_template"), Some((2, 2)));
+    }
+
+    #[test]
+    fn local_quantum_planner_emits_deterministic_openqasm_without_execution() {
+        let root = module_fixture_dir("local-quantum-planning");
+        fs::create_dir_all(root.join("out")).unwrap();
+        let circuit = "{\"qubits\": 3, \"operations\": [{\"gate\": \"superposition\", \"targets\": [0, 1, 2]}, {\"gate\": \"entangle-linear\", \"targets\": [0, 1, 2]}, {\"gate\": \"z\", \"targets\": [2]}], \"measurements\": [{\"qubit\": 0, \"bit\": 2}, {\"qubit\": 1, \"bit\": 1}, {\"qubit\": 2, \"bit\": 0}]}";
+        let source = format!("let circuit = {circuit}\nlet summary = quantum.circuit_summary(circuit)\nlet qasm = quantum.openqasm3(circuit)\nprint summary[\"qubitCount\"]\nprint summary[\"operationCount\"]\nprint summary[\"measurementCount\"]\nprint summary[\"openQasmVersion\"]\nprint summary[\"provider\"]\nprint summary[\"qpu\"]\nprint summary[\"simulator\"]\nprint summary[\"network\"]\nprint text.contains(json.stringify(summary), \"entangle-linear\")\nprint text.contains(qasm, \"OPENQASM 3.0;\")\nprint text.contains(qasm, \"cx q[0], q[1];\")\nprint text.contains(qasm, \"c[2] = measure q[0];\")\nprint quantum.write_openqasm3(\"out/circuit.qasm\", circuit)\n");
+        let output =
+            run_bridge_project(&root, BTreeSet::from(["filesystem:write".into()]), &source)
+                .unwrap();
+        let qasm = fs::read_to_string(root.join("out/circuit.qasm")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "3",
+                "3",
+                "3",
+                "3.0",
+                "not-configured",
+                "disabled",
+                "not-provided",
+                "disabled",
+                "false",
+                "true",
+                "true",
+                "true",
+                "true"
+            ]
+        );
+        assert_eq!(qasm, "OPENQASM 3.0;\ninclude \"stdgates.inc\";\n\nqubit[3] q;\nbit[3] c;\n\nreset q;\nh q[0];\nh q[1];\nh q[2];\ncx q[0], q[1];\ncx q[1], q[2];\nz q[2];\n\nc[2] = measure q[0];\nc[1] = measure q[1];\nc[0] = measure q[2];\n");
+    }
+
+    #[test]
+    fn local_quantum_planner_rejects_unsafe_schema_indices_and_writer_targets() {
+        let root = module_fixture_dir("local-quantum-planning-safety");
+        fs::create_dir_all(root.join("out")).unwrap();
+        std::os::unix::fs::symlink("out", root.join("out-link")).unwrap();
+        let valid = "{\"qubits\": 2, \"operations\": [{\"gate\": \"cx\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                BTreeSet::new(),
+                &format!("print quantum.write_openqasm3(\"out/circuit.qasm\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1034"
+        );
+        let write = BTreeSet::from(["filesystem:write".into()]);
+        let unsafe_cases = [
+            "{\"qubits\": 0, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": []}",
+            "{\"qubits\": 2.5, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"provider\": \"ibm_quantum\", \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"operations\": [{\"gate\": \"qaoa\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"operations\": [{\"gate\": \"cx\", \"targets\": [0, 0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [2]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"operations\": [{\"gate\": \"entangle-linear\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 0, \"bit\": 1}]}",
+            "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}",
+        ];
+        for circuit in unsafe_cases {
+            assert_eq!(
+                run_bridge_project(
+                    &root,
+                    write.clone(),
+                    &format!("print quantum.circuit_summary({circuit})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1083"
+            );
+        }
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                write.clone(),
+                &format!("print quantum.write_openqasm3(\"../circuit.qasm\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1014"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                write.clone(),
+                &format!("print quantum.write_openqasm3(\"out/circuit.txt\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1083"
+        );
+        assert_eq!(
+            run_bridge_project(
+                &root,
+                write,
+                &format!("print quantum.write_openqasm3(\"out-link/circuit.qasm\", {valid})\n")
+            )
+            .unwrap_err()
+            .code,
+            "P1083"
+        );
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            static_builtin_arity("quantum.circuit_summary"),
+            Some((1, 1))
+        );
+        assert_eq!(static_builtin_arity("quantum.openqasm3"), Some((1, 1)));
+        assert_eq!(
+            static_builtin_arity("quantum.write_openqasm3"),
+            Some((2, 2))
+        );
     }
 
     #[test]

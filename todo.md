@@ -392,3 +392,10 @@
 - [x] Implement deterministic escaped Markdown, a redacted summary, and project-local `.md` export requiring only `filesystem:write`; make every external action marker fixed as disabled and treat message text as copy-only.
 - [x] Add a bilingual diagnostic plus positive/negative tests for wrong draft type, unknown/unsafe fields, raw markup/URL/contact injection, duplicate/empty lists, bad writer path/symlink/extension/missing grant, and no browser/network/process/send/upload/submission/payment action.
 - [x] Publish a standalone Bangla-English Termux example, public guide, standard-library/diagnostic/inventory updates, full repository verification, focused commit, and GitHub push before marking complete.
+
+## M29 — Local Quantum Circuit Planning Foundation
+
+- [x] Define a strict local quantum-circuit map with a bounded qubit count, explicit supported gates, deterministic measurement mapping, and no hidden classical or provider fields.
+- [x] Implement deterministic OpenQASM 3 generation and redacted circuit metadata only; do not claim quantum speed-up, QAOA/QML/Grover correctness, noise mitigation, automatic fallback simulation, cloud QPU execution, provider selection, REST/gRPC transport, or credential handling until separately implemented and verified.
+- [x] Add localized diagnostics and regression tests for unsupported gate/device/provider fields, invalid qubit/measurement values, duplicate/unsafe operations, malformed map/list types, no network/process/provider access, and deterministic output.
+- [x] Publish a standalone Termux planning example, public contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.

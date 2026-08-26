@@ -179,6 +179,16 @@ The strict draft has `packageLabel`, `destinationLabel`, `ownershipLabel`, uniqu
 
 The strict draft accepts `templateType` (`proposal`, `brief`, or `message-template`), `title`, `overview`, unique `skills`, `requirements`, `deliverables`, and `reviewSteps`, with optional `callToActionLabel` and `notes`. The message type creates text to review and manually copy; it has no recipient, platform, or send action. Unknown recipient/contact/account/platform/authorization/payment/upload/send fields, raw HTML, URL/contact delimiters, duplicates, empty lists, and income or client-acceptance guarantees are rejected. This toolkit cannot send/post/upload/submit/sign/pay, or access browser/account/network/process authority. See [`LOCAL-CLIENT-TEMPLATES.md`](LOCAL-CLIENT-TEMPLATES.md).
 
+## Local quantum circuit planning
+
+| API | Result and boundary |
+|---|---|
+| `quantum.circuit_summary(circuit)` | Returns redacted qubit/operation/measurement counts and fixed disabled provider/QPU/simulator/credential/network/process markers. No capability is required. |
+| `quantum.openqasm3(circuit)` | Generates a deterministic bounded OpenQASM 3.0 text program in memory. No capability is required. |
+| `quantum.write_openqasm3(path, circuit)` | Writes one project-local non-symlink `.qasm` plan. Requires `filesystem:write` in project mode. |
+
+The strict map accepts only a `1..20` qubit count, supported gate maps (`h`, `x`, `z`, `s`, `t`, `cx`, `superposition`, `entangle-linear`), and a complete unique measurement mapping. It emits local circuit text only; there is no state-vector simulation, QPU/provider/device selection, cloud transport, credential use, QAOA/QML/Grover implementation, noise mitigation, or result data. See [`LOCAL-QUANTUM-PLANNING.md`](LOCAL-QUANTUM-PLANNING.md).
+
 ## Interoperability bridge
 
 | API | Result and boundary |
@@ -207,4 +217,4 @@ Path helpers reject absolute paths, `..`, and the special `@downloads` alias bec
 
 ## Errors
 
-Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`; unsafe portfolio case-study data uses `P1077`; unsafe visible handoff data uses `P1078`; unsafe local reconciliation data uses `P1079`; unsafe local attachment-review data uses `P1080`; unsafe local delivery-package data uses `P1081`; unsafe local template data uses `P1082`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
+Wrong argument counts use `P1009`; incompatible values use `P1010`; unsafe paths use `P1014`; unreadable files use `P1028`; malformed JSON uses `P1029`; unsupported URLs use `P1030`; invalid format placeholders use `P1031`; and over-limit sleeps or random bounds use `P1012`. Malformed or unsafe structured tables use `P1069`; unsafe filesystem productivity input/plan state uses `P1070`; unsafe local reporting policy uses `P1071`; unsafe local profile policy uses `P1072`; unsafe client-document drafts use `P1073`; unsafe local record policy uses `P1074`; unsafe local scope-of-work drafts use `P1075`; unsafe local delivery-checklist drafts use `P1076`; unsafe portfolio case-study data uses `P1077`; unsafe visible handoff data uses `P1078`; unsafe local reconciliation data uses `P1079`; unsafe local attachment-review data uses `P1080`; unsafe local delivery-package data uses `P1081`; unsafe local template data uses `P1082`; unsafe local quantum-circuit data uses `P1083`. Bridge failures use `P1035` through `P1040`. In manifest-run projects, undeclared sensitive operations use `P1034`; see [`PROJECTS.md`](PROJECTS.md) for capability grants and [`DIAGNOSTICS.md`](DIAGNOSTICS.md) for localized messages and stable code meanings.
