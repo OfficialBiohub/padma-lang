@@ -5,6 +5,7 @@
 ধরি summary = quantum.circuit_summary(circuit)
 ধরি simulation = quantum.simulate_probabilities(circuit)
 ধরি rotatedSimulation = quantum.simulate_probabilities(rotated)
+ধরি sampled = quantum.sample_counts(circuit, {"shots": 64, "seed": 20260826})
 দেখাও text.format("Qubits: {qubitCount}", summary)
 দেখাও text.format("Operations: {operationCount}", summary)
 দেখাও text.format("Provider: {provider}", summary)
@@ -14,5 +15,8 @@
 দেখাও quantum.expectation_pauli(circuit, "XX")
 দেখাও rotatedSimulation["probabilities"]["1"]
 দেখাও quantum.expectation_pauli(rotated, "Z")
+দেখাও sampled["shots"]
+দেখাও sampled["counts"]["00"] + sampled["counts"]["11"]
+দেখাও sampled["method"]
 দেখাও text.contains(quantum.openqasm3(circuit), "OPENQASM 3.0;")
 দেখাও quantum.write_openqasm3("out/bell-plan.qasm", circuit)

@@ -336,6 +336,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1084") => (format!("Local quantum simulator limit or state invariant failed: `{detail}`"), Some("Use a small bounded circuit; this is deterministic local probability calculation only, not provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1085") => (format!("local Pauli observable নিরাপদ বা সঠিক নয়: `{detail}`"), Some("Circuit-এর qubit count-এর সমান দৈর্ঘ্যের শুধু I, X, Y, Z Pauli text ব্যবহার করুন; এটি local deterministic expectation analysis, provider/QPU/network/process execution নয়।".into())),
         (Locale::English, "P1085") => (format!("Local Pauli observable is unsafe or invalid: `{detail}`"), Some("Use only I, X, Y, Z Pauli text whose length matches the circuit qubit count; this is local deterministic expectation analysis, not provider/QPU/network/process execution.".into())),
+        (Locale::Bangla, "P1086") => (format!("local quantum sampling request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু explicit bounded whole-number shots ও seed ব্যবহার করুন; Padma local seeded count তৈরি করবে, provider/QPU/network/process execution নয়।".into())),
+        (Locale::English, "P1086") => (format!("Local quantum sampling request is unsafe or invalid: `{detail}`"), Some("Use only explicit bounded whole-number shots and seed values; Padma returns local seeded counts, not provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1719,6 +1721,10 @@ fn quantum_simulator_error(locale: Locale, position: Position, detail: &str) -> 
 
 fn quantum_observable_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1085", position, detail)
+}
+
+fn quantum_sampler_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1086", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4739,6 +4745,8 @@ const QUANTUM_MAX_OPERATIONS: usize = 256;
 const QUANTUM_SIMULATOR_MAX_QUBITS: usize = 12;
 const QUANTUM_SIMULATOR_EPSILON: f64 = 1e-10;
 const QUANTUM_MAX_ROTATION_ANGLE: f64 = 1_000_000.0;
+const QUANTUM_SAMPLER_MAX_SHOTS: usize = 100_000;
+const QUANTUM_SAMPLER_MAX_SEED: u64 = 9_007_199_254_740_991;
 
 #[derive(Clone, Debug)]
 struct QuantumOperation {
@@ -4758,6 +4766,12 @@ struct QuantumCircuitPlan {
     qubits: usize,
     operations: Vec<QuantumOperation>,
     measurements: Vec<QuantumMeasurement>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct QuantumSamplerRequest {
+    shots: usize,
+    seed: u64,
 }
 
 fn quantum_index(
@@ -5324,6 +5338,186 @@ fn quantum_simulation_probability_map(
             Value::String("local-state-vector-exact-probabilities".into()),
         ),
         ("sampling".into(), Value::String("disabled".into())),
+        ("provider".into(), Value::String("not-configured".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ])))
+}
+
+fn quantum_sampler_request_from_value(
+    value: &Value,
+    locale: Locale,
+    position: Position,
+) -> Result<QuantumSamplerRequest, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sampling request must be a map",
+        ));
+    };
+    let allowed = BTreeSet::from(["shots", "seed"]);
+    if fields.len() != allowed.len() || fields.keys().any(|key| !allowed.contains(key.as_str())) {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sampling request contains missing or unsupported fields",
+        ));
+    }
+    let Some(Value::Number(shots)) = fields.get("shots") else {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sampling shots must be a whole number",
+        ));
+    };
+    if !shots.is_finite()
+        || shots.fract() != 0.0
+        || *shots < 1.0
+        || *shots > QUANTUM_SAMPLER_MAX_SHOTS as f64
+    {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sampling shots are outside the local limit",
+        ));
+    }
+    let Some(Value::Number(seed)) = fields.get("seed") else {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sampling seed must be a whole number",
+        ));
+    };
+    if !seed.is_finite()
+        || seed.fract() != 0.0
+        || *seed < 0.0
+        || *seed > QUANTUM_SAMPLER_MAX_SEED as f64
+    {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sampling seed is outside the exact local numeric range",
+        ));
+    }
+    Ok(QuantumSamplerRequest {
+        shots: *shots as usize,
+        seed: *seed as u64,
+    })
+}
+
+fn quantum_splitmix64_next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+fn quantum_splitmix64_unit_interval(state: &mut u64) -> f64 {
+    let bits = quantum_splitmix64_next(state) >> 11;
+    bits as f64 * (1.0 / ((1u64 << 53) as f64))
+}
+
+fn quantum_sample_counts(
+    circuit: &QuantumCircuitPlan,
+    request: QuantumSamplerRequest,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let probability_value = quantum_simulation_probability_map(circuit, locale, position)?;
+    let Value::Map(result) = probability_value else {
+        unreachable!("quantum probability result is a map")
+    };
+    let Some(Value::Map(probabilities)) = result.get("probabilities") else {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "local probability data is unavailable",
+        ));
+    };
+    let mut outcomes = Vec::with_capacity(probabilities.len());
+    for (label, value) in probabilities {
+        let Value::Number(probability) = value else {
+            return Err(quantum_sampler_error(
+                locale,
+                position,
+                "local probability data is malformed",
+            ));
+        };
+        if !probability.is_finite() || *probability < 0.0 {
+            return Err(quantum_sampler_error(
+                locale,
+                position,
+                "local probability data is outside the normalized range",
+            ));
+        }
+        outcomes.push((label.clone(), *probability));
+    }
+    if outcomes.is_empty() {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "local probability data is empty",
+        ));
+    }
+    let probability_sum: f64 = outcomes.iter().map(|(_, probability)| probability).sum();
+    if !probability_sum.is_finite() || (probability_sum - 1.0).abs() > QUANTUM_SIMULATOR_EPSILON {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "local probability data does not sum to one",
+        ));
+    }
+    let mut generator_state = request.seed;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for _ in 0..request.shots {
+        let draw = quantum_splitmix64_unit_interval(&mut generator_state);
+        let mut cumulative = 0.0;
+        let mut chosen = outcomes
+            .last()
+            .map(|(label, _)| label.clone())
+            .expect("non-empty local probability outcomes");
+        for (label, probability) in &outcomes {
+            cumulative += probability;
+            if draw < cumulative {
+                chosen = label.clone();
+                break;
+            }
+        }
+        *counts.entry(chosen).or_insert(0) += 1;
+    }
+    let total: usize = counts.values().sum();
+    if total != request.shots {
+        return Err(quantum_sampler_error(
+            locale,
+            position,
+            "sample count total does not match requested shots",
+        ));
+    }
+    let count_map = counts
+        .iter()
+        .map(|(label, count)| (label.clone(), Value::Number(*count as f64)))
+        .collect();
+    Ok(Value::Map(BTreeMap::from([
+        ("shots".into(), Value::Number(request.shots as f64)),
+        ("seed".into(), Value::Number(request.seed as f64)),
+        ("counts".into(), Value::Map(count_map)),
+        (
+            "distinctOutcomeCount".into(),
+            Value::Number(counts.len() as f64),
+        ),
+        (
+            "method".into(),
+            Value::String("local-seeded-cdf-sampler-v1".into()),
+        ),
+        (
+            "randomness".into(),
+            Value::String("explicit-seeded-pseudorandom".into()),
+        ),
+        ("collapse".into(), Value::String("not-exposed".into())),
         ("provider".into(), Value::String("not-configured".into())),
         ("qpu".into(), Value::String("disabled".into())),
         ("credential".into(), Value::String("not-read".into())),
@@ -8291,6 +8485,18 @@ impl Interpreter {
                     let value = self.evaluate(&arguments[0])?;
                     let circuit = quantum_circuit_from_value(&value, self.locale, *position)?;
                     return quantum_simulation_probability_map(&circuit, self.locale, *position);
+                }
+                if name == "quantum.sample_counts" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let circuit_value = self.evaluate(&arguments[0])?;
+                    let request_value = self.evaluate(&arguments[1])?;
+                    let circuit =
+                        quantum_circuit_from_value(&circuit_value, self.locale, *position)?;
+                    let request =
+                        quantum_sampler_request_from_value(&request_value, self.locale, *position)?;
+                    return quantum_sample_counts(&circuit, request, self.locale, *position);
                 }
                 if name == "quantum.expectation_pauli" {
                     if arguments.len() != 2 {
@@ -15502,6 +15708,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "client.write_template" => Some((2, 2)),
         "quantum.write_openqasm3" => Some((2, 2)),
         "quantum.expectation_pauli" => Some((2, 2)),
+        "quantum.sample_counts" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
         "db.apply" => Some((2, 2)),
@@ -19631,6 +19838,89 @@ mod tests {
                 .code,
             "P1083"
         );
+    }
+
+    #[test]
+    fn local_quantum_sampler_returns_reproducible_sparse_counts_with_exact_total() {
+        let bell = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"cx\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        let source = format!("let bell = {bell}\nlet request = {{\"shots\": 256, \"seed\": 20260826}}\nlet first = quantum.sample_counts(bell, request)\nlet second = quantum.sample_counts(bell, request)\nlet changed = quantum.sample_counts(bell, {{\"shots\": 256, \"seed\": 20260827}})\nprint json.stringify(first) == json.stringify(second)\nprint first[\"shots\"]\nprint first[\"counts\"][\"00\"] + first[\"counts\"][\"11\"]\nprint first[\"distinctOutcomeCount\"]\nprint first[\"method\"]\nprint first[\"randomness\"]\nprint first[\"collapse\"]\nprint first[\"provider\"]\nprint first[\"qpu\"]\nprint first[\"network\"]\nprint first[\"childProcess\"]\nprint first[\"seed\"] == changed[\"seed\"]\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-sampler-reproducible"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "true",
+                "256",
+                "256",
+                "2",
+                "local-seeded-cdf-sampler-v1",
+                "explicit-seeded-pseudorandom",
+                "not-exposed",
+                "not-configured",
+                "disabled",
+                "disabled",
+                "disabled",
+                "false",
+            ]
+        );
+    }
+
+    #[test]
+    fn local_quantum_sampler_rejects_unsafe_requests_and_preserves_local_only_boundary() {
+        let circuit = "{\"qubits\": 1, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        for request in [
+            "{}",
+            "{\"shots\": 0, \"seed\": 1}",
+            "{\"shots\": 100001, \"seed\": 1}",
+            "{\"shots\": 1.5, \"seed\": 1}",
+            "{\"shots\": 1, \"seed\": -1}",
+            "{\"shots\": 1, \"seed\": 9007199254740992}",
+            "{\"shots\": 1, \"seed\": true}",
+            "{\"shots\": 1, \"seed\": 1, \"provider\": \"remote\"}",
+        ] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-quantum-sampler-invalid"),
+                    BTreeSet::new(),
+                    &format!("print quantum.sample_counts({circuit}, {request})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1086"
+            );
+        }
+        let non_finite = Value::Map(BTreeMap::from([
+            ("shots".into(), Value::Number(1.0)),
+            ("seed".into(), Value::Number(f64::NAN)),
+        ]));
+        assert_eq!(
+            quantum_sampler_request_from_value(&non_finite, Locale::English, Position::new(1, 1))
+                .unwrap_err()
+                .code,
+            "P1086"
+        );
+        let measurements = (0..13)
+            .map(|index| format!("{{\"qubit\": {index}, \"bit\": {index}}}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let oversized = format!("{{\"qubits\": 13, \"operations\": [{{\"gate\": \"h\", \"targets\": [0]}}], \"measurements\": [{measurements}]}}");
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-sampler-limit"),
+                BTreeSet::new(),
+                &format!(
+                    "print quantum.sample_counts({oversized}, {{\"shots\": 1, \"seed\": 1}})\n"
+                )
+            )
+            .unwrap_err()
+            .code,
+            "P1084"
+        );
+        assert_eq!(static_builtin_arity("quantum.sample_counts"), Some((2, 2)));
     }
 
     #[test]

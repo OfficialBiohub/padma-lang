@@ -423,7 +423,10 @@
 
 ### M33 — Reproducible Local Measurement Sampling
 
-- [ ] Define an explicit bounded `shots` and required deterministic integer seed contract over a validated local probability distribution; return reproducible counts only without hidden randomness, collapse-state reuse, provider, network, or process action.
+- [x] Define an explicit bounded `shots` and required deterministic integer seed contract over a validated local probability distribution; return reproducible counts only without hidden randomness, collapse-state reuse, provider, network, or process action.
+- [x] Implement a versioned deterministic local PRNG, ordered count map, exact total-count invariant, and a redacted metadata result without filesystem/provider/QPU/credential/network/process authority.
+- [x] Add bilingual diagnostics and regressions for malformed request maps, absent/non-integer/out-of-range seed/shots, deterministic same-seed output, distinct-seed metadata, count-total invariant, 12-qubit resource limit, and no external side effect.
+- [x] Publish a Termux sampling example, public contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
 
 ### M34 — Local Pauli Hamiltonian Analysis
 

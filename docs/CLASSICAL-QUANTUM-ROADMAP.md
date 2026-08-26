@@ -23,7 +23,7 @@ The local circuit surface follows a deliberately small OpenQASM 3-compatible sub
 | Milestone | Status | Why it comes in this order |
 |---|---|---|
 | M32: finite numeric rotations | Implemented in current increment | Local rotation matrices and QASM lowering are required before parameter experiments. |
-| M33: reproducible local sampling | Planned | A deterministic seed and bounded shots must be designed before returned counts can be trusted or reproduced. |
+| M33: reproducible local sampling | Implemented bounded foundation | `quantum.sample_counts` uses required explicit integer `seed` and bounded `shots` with a versioned local PRNG to return a deterministic sparse count map. It does not expose collapse, noise, hardware, or hidden randomness. |
 | M34: real-coefficient Pauli Hamiltonians | Planned | A multi-term observable needs strict coefficient, duplicate-term, ordering, and numerical error rules beyond one Pauli product. |
 | M35: bounded classical optimisation primitives | Planned | Optimisation depends on explicit parameters and Hamiltonian semantics; it must not be called VQE/QAOA/QML before those algorithms exist and are tested. |
 | M36: program tooling/interchange | Planned | Introspection and broader QASM assessment need a separate parser/round-trip contract, stable artifact metadata, and compatibility tests. |

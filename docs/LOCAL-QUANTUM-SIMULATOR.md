@@ -54,7 +54,7 @@ The returned numbers are deterministic probability values, **not shot counts** o
 
 ## Explicitly not included
 
-This v1 does not provide amplitude injection/export, density matrices, mid-circuit measurement, collapse, random sampling/counts, symbolic parameter binding, Pauli sums/Hamiltonians, gradients, QAOA/QML/Grover algorithms, noise mitigation, hardware calibration, QPU selection, provider accounts, cloud transport, or results from a real quantum device. Explicit finite numeric rotations are documented in [`LOCAL-QUANTUM-ROTATIONS.md`](LOCAL-QUANTUM-ROTATIONS.md); single Pauli-product expectations are documented separately in [`LOCAL-QUANTUM-OBSERVABLES.md`](LOCAL-QUANTUM-OBSERVABLES.md).
+This v1 does not provide amplitude injection/export, density matrices, mid-circuit measurement, exposed collapse state, symbolic parameter binding, Pauli sums/Hamiltonians, gradients, QAOA/QML/Grover algorithms, noise mitigation, hardware calibration, QPU selection, provider accounts, cloud transport, or results from a real quantum device. Explicit finite numeric rotations are documented in [`LOCAL-QUANTUM-ROTATIONS.md`](LOCAL-QUANTUM-ROTATIONS.md); deterministic single Pauli-product expectations are documented in [`LOCAL-QUANTUM-OBSERVABLES.md`](LOCAL-QUANTUM-OBSERVABLES.md); explicit-seed finite-shot local counts are documented in [`LOCAL-QUANTUM-SAMPLING.md`](LOCAL-QUANTUM-SAMPLING.md).
 
 ## References
 
