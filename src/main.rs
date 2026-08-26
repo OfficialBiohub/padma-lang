@@ -338,6 +338,8 @@ fn error_for(locale: Locale, code: &'static str, position: Position, detail: &st
         (Locale::English, "P1085") => (format!("Local Pauli observable is unsafe or invalid: `{detail}`"), Some("Use only I, X, Y, Z Pauli text whose length matches the circuit qubit count; this is local deterministic expectation analysis, not provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1086") => (format!("local quantum sampling request নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু explicit bounded whole-number shots ও seed ব্যবহার করুন; Padma local seeded count তৈরি করবে, provider/QPU/network/process execution নয়।".into())),
         (Locale::English, "P1086") => (format!("Local quantum sampling request is unsafe or invalid: `{detail}`"), Some("Use only explicit bounded whole-number shots and seed values; Padma returns local seeded counts, not provider/QPU/network/process execution.".into())),
+        (Locale::Bangla, "P1087") => (format!("local Pauli Hamiltonian নিরাপদ বা সঠিক নয়: `{detail}`"), Some("শুধু bounded unique full-register I/X/Y/Z term ও finite real coefficient ব্যবহার করুন; Padma deterministic local energy দেবে, optimizer/provider/QPU/network/process execution নয়।".into())),
+        (Locale::English, "P1087") => (format!("Local Pauli Hamiltonian is unsafe or invalid: `{detail}`"), Some("Use only bounded unique full-register I/X/Y/Z terms and finite real coefficients; Padma returns deterministic local energy, not optimizer/provider/QPU/network/process execution.".into())),
         (Locale::Bangla, "P1013") => ("input পড়া যায়নি".into(), Some("আবার চেষ্টা করুন।".into())),
         (Locale::English, "P1013") => ("Could not read input".into(), Some("Try again.".into())),
         _ => (format!("Internal Padma error: {detail}"), None),
@@ -1725,6 +1727,10 @@ fn quantum_observable_error(locale: Locale, position: Position, detail: &str) ->
 
 fn quantum_sampler_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
     error_for(locale, "P1086", position, detail)
+}
+
+fn quantum_hamiltonian_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
+    error_for(locale, "P1087", position, detail)
 }
 
 fn record_error(locale: Locale, position: Position, detail: &str) -> PadmaError {
@@ -4747,6 +4753,8 @@ const QUANTUM_SIMULATOR_EPSILON: f64 = 1e-10;
 const QUANTUM_MAX_ROTATION_ANGLE: f64 = 1_000_000.0;
 const QUANTUM_SAMPLER_MAX_SHOTS: usize = 100_000;
 const QUANTUM_SAMPLER_MAX_SEED: u64 = 9_007_199_254_740_991;
+const QUANTUM_HAMILTONIAN_MAX_TERMS: usize = 64;
+const QUANTUM_HAMILTONIAN_MAX_COEFFICIENT: f64 = 1_000_000.0;
 
 #[derive(Clone, Debug)]
 struct QuantumOperation {
@@ -4772,6 +4780,17 @@ struct QuantumCircuitPlan {
 struct QuantumSamplerRequest {
     shots: usize,
     seed: u64,
+}
+
+#[derive(Clone, Debug)]
+struct QuantumHamiltonianTerm {
+    coefficient: f64,
+    pauli: String,
+}
+
+#[derive(Clone, Debug)]
+struct QuantumHamiltonian {
+    terms: Vec<QuantumHamiltonianTerm>,
 }
 
 fn quantum_index(
@@ -5526,38 +5545,135 @@ fn quantum_sample_counts(
     ])))
 }
 
-fn quantum_expectation_pauli(
-    circuit: &QuantumCircuitPlan,
+fn quantum_hamiltonian_from_value(
+    value: &Value,
+    qubits: usize,
+    locale: Locale,
+    position: Position,
+) -> Result<QuantumHamiltonian, PadmaError> {
+    let Value::Map(fields) = value else {
+        return Err(quantum_hamiltonian_error(
+            locale,
+            position,
+            "Hamiltonian must be a map",
+        ));
+    };
+    if fields.len() != 1 || !fields.contains_key("terms") {
+        return Err(quantum_hamiltonian_error(
+            locale,
+            position,
+            "Hamiltonian must contain exactly one terms field",
+        ));
+    }
+    let Some(Value::List(items)) = fields.get("terms") else {
+        return Err(quantum_hamiltonian_error(
+            locale,
+            position,
+            "Hamiltonian terms must be a list",
+        ));
+    };
+    if items.is_empty() || items.len() > QUANTUM_HAMILTONIAN_MAX_TERMS {
+        return Err(quantum_hamiltonian_error(
+            locale,
+            position,
+            "Hamiltonian term count is outside the local limit",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    let mut l1_norm = 0.0;
+    let mut terms = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::Map(term) = item else {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "every Hamiltonian term must be a map",
+            ));
+        };
+        let allowed = BTreeSet::from(["coefficient", "pauli"]);
+        if term.len() != allowed.len() || term.keys().any(|key| !allowed.contains(key.as_str())) {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian term contains missing or unsupported fields",
+            ));
+        }
+        let Some(Value::Number(coefficient)) = term.get("coefficient") else {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian coefficient must be a real number",
+            ));
+        };
+        if !coefficient.is_finite()
+            || *coefficient == 0.0
+            || coefficient.abs() > QUANTUM_HAMILTONIAN_MAX_COEFFICIENT
+        {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian coefficient is outside the finite local range",
+            ));
+        }
+        let Some(Value::String(pauli)) = term.get("pauli") else {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian Pauli term must be text",
+            ));
+        };
+        if !pauli.is_ascii()
+            || pauli.is_empty()
+            || pauli.len() != qubits
+            || pauli
+                .chars()
+                .any(|character| !matches!(character, 'I' | 'X' | 'Y' | 'Z'))
+        {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian Pauli term must be full-register I, X, Y, or Z text",
+            ));
+        }
+        if !seen.insert(pauli.clone()) {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian Pauli terms must be unique",
+            ));
+        }
+        l1_norm += coefficient.abs();
+        if !l1_norm.is_finite() || l1_norm > QUANTUM_HAMILTONIAN_MAX_COEFFICIENT {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian coefficient total exceeds the local range",
+            ));
+        }
+        terms.push(QuantumHamiltonianTerm {
+            coefficient: *coefficient,
+            pauli: pauli.clone(),
+        });
+    }
+    Ok(QuantumHamiltonian { terms })
+}
+
+fn quantum_pauli_expectation_from_state(
+    state: &[(f64, f64)],
+    qubits: usize,
     observable: &str,
     locale: Locale,
     position: Position,
-) -> Result<Value, PadmaError> {
-    if !observable.is_ascii() || observable.len() != circuit.qubits || observable.is_empty() {
-        return Err(quantum_observable_error(
-            locale,
-            position,
-            "Pauli observable must be non-empty ASCII text with one character per qubit",
-        ));
-    }
+    error: fn(Locale, Position, &str) -> PadmaError,
+) -> Result<f64, PadmaError> {
     let paulis: Vec<char> = observable.chars().collect();
-    if paulis
-        .iter()
-        .any(|pauli| !matches!(pauli, 'I' | 'X' | 'Y' | 'Z'))
-    {
-        return Err(quantum_observable_error(
-            locale,
-            position,
-            "Pauli observable may contain only I, X, Y, or Z",
-        ));
-    }
-    let state = quantum_local_state_vector(circuit, locale, position)?;
     let mut real = 0.0;
     let mut imaginary = 0.0;
     for (basis, source) in state.iter().enumerate() {
         let mut transformed_basis = basis;
         let mut coefficient = (1.0, 0.0);
-        for qubit in 0..circuit.qubits {
-            match paulis[circuit.qubits - 1 - qubit] {
+        for qubit in 0..qubits {
+            match paulis[qubits - 1 - qubit] {
                 'I' => {}
                 'X' => transformed_basis ^= 1usize << qubit,
                 'Y' => {
@@ -5590,18 +5706,137 @@ fn quantum_expectation_pauli(
         || real < -1.0 - QUANTUM_SIMULATOR_EPSILON
         || real > 1.0 + QUANTUM_SIMULATOR_EPSILON
     {
-        return Err(quantum_observable_error(
+        return Err(error(
             locale,
             position,
             "Pauli expectation is not a finite real value in the normalized range",
         ));
     }
-    let rounded = if real.abs() < 0.5e-12 {
+    Ok(real.clamp(-1.0, 1.0))
+}
+
+fn quantum_round_local(value: f64) -> f64 {
+    if value.abs() < 0.5e-12 {
         0.0
     } else {
-        (real * 1e12).round() / 1e12
-    };
-    Ok(Value::Number(rounded.clamp(-1.0, 1.0)))
+        (value * 1e12).round() / 1e12
+    }
+}
+
+fn quantum_expectation_pauli(
+    circuit: &QuantumCircuitPlan,
+    observable: &str,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    if !observable.is_ascii() || observable.len() != circuit.qubits || observable.is_empty() {
+        return Err(quantum_observable_error(
+            locale,
+            position,
+            "Pauli observable must be non-empty ASCII text with one character per qubit",
+        ));
+    }
+    if observable
+        .chars()
+        .any(|pauli| !matches!(pauli, 'I' | 'X' | 'Y' | 'Z'))
+    {
+        return Err(quantum_observable_error(
+            locale,
+            position,
+            "Pauli observable may contain only I, X, Y, or Z",
+        ));
+    }
+    let state = quantum_local_state_vector(circuit, locale, position)?;
+    let expectation = quantum_pauli_expectation_from_state(
+        &state,
+        circuit.qubits,
+        observable,
+        locale,
+        position,
+        quantum_observable_error,
+    )?;
+    Ok(Value::Number(quantum_round_local(expectation)))
+}
+
+fn quantum_expectation_hamiltonian(
+    circuit: &QuantumCircuitPlan,
+    hamiltonian: &QuantumHamiltonian,
+    locale: Locale,
+    position: Position,
+) -> Result<Value, PadmaError> {
+    let state = quantum_local_state_vector(circuit, locale, position)?;
+    let mut energy = 0.0;
+    let mut l1_norm = 0.0;
+    let mut breakdown = Vec::with_capacity(hamiltonian.terms.len());
+    for term in &hamiltonian.terms {
+        let expectation = quantum_pauli_expectation_from_state(
+            &state,
+            circuit.qubits,
+            &term.pauli,
+            locale,
+            position,
+            quantum_hamiltonian_error,
+        )?;
+        let contribution = term.coefficient * expectation;
+        if !contribution.is_finite() {
+            return Err(quantum_hamiltonian_error(
+                locale,
+                position,
+                "Hamiltonian contribution is not finite",
+            ));
+        }
+        energy += contribution;
+        l1_norm += term.coefficient.abs();
+        breakdown.push(Value::Map(BTreeMap::from([
+            ("pauli".into(), Value::String(term.pauli.clone())),
+            (
+                "coefficient".into(),
+                Value::Number(quantum_round_local(term.coefficient)),
+            ),
+            (
+                "expectation".into(),
+                Value::Number(quantum_round_local(expectation)),
+            ),
+            (
+                "contribution".into(),
+                Value::Number(quantum_round_local(contribution)),
+            ),
+        ])));
+    }
+    if !energy.is_finite()
+        || !l1_norm.is_finite()
+        || l1_norm > QUANTUM_HAMILTONIAN_MAX_COEFFICIENT
+        || energy.abs() > QUANTUM_HAMILTONIAN_MAX_COEFFICIENT + QUANTUM_SIMULATOR_EPSILON
+    {
+        return Err(quantum_hamiltonian_error(
+            locale,
+            position,
+            "Hamiltonian energy is outside the local numeric range",
+        ));
+    }
+    Ok(Value::Map(BTreeMap::from([
+        ("energy".into(), Value::Number(quantum_round_local(energy))),
+        (
+            "termCount".into(),
+            Value::Number(hamiltonian.terms.len() as f64),
+        ),
+        (
+            "coefficientL1Norm".into(),
+            Value::Number(quantum_round_local(l1_norm)),
+        ),
+        ("terms".into(), Value::List(breakdown)),
+        (
+            "method".into(),
+            Value::String("local-pauli-hamiltonian-exact-v1".into()),
+        ),
+        ("optimizer".into(), Value::String("disabled".into())),
+        ("sampling".into(), Value::String("disabled".into())),
+        ("provider".into(), Value::String("not-configured".into())),
+        ("qpu".into(), Value::String("disabled".into())),
+        ("credential".into(), Value::String("not-read".into())),
+        ("network".into(), Value::String("disabled".into())),
+        ("childProcess".into(), Value::String("disabled".into())),
+    ])))
 }
 
 fn filesystem_productivity_regular_file(
@@ -8513,6 +8748,27 @@ impl Interpreter {
                         "Pauli observable",
                     )?;
                     return quantum_expectation_pauli(&circuit, observable, self.locale, *position);
+                }
+                if name == "quantum.expectation_hamiltonian" {
+                    if arguments.len() != 2 {
+                        return Err(error_for(self.locale, "P1009", *position, name));
+                    }
+                    let circuit_value = self.evaluate(&arguments[0])?;
+                    let hamiltonian_value = self.evaluate(&arguments[1])?;
+                    let circuit =
+                        quantum_circuit_from_value(&circuit_value, self.locale, *position)?;
+                    let hamiltonian = quantum_hamiltonian_from_value(
+                        &hamiltonian_value,
+                        circuit.qubits,
+                        self.locale,
+                        *position,
+                    )?;
+                    return quantum_expectation_hamiltonian(
+                        &circuit,
+                        &hamiltonian,
+                        self.locale,
+                        *position,
+                    );
                 }
                 if name == "quantum.circuit_summary"
                     || name == "quantum.openqasm3"
@@ -15708,6 +15964,7 @@ fn static_builtin_arity(name: &str) -> Option<(usize, usize)> {
         "client.write_template" => Some((2, 2)),
         "quantum.write_openqasm3" => Some((2, 2)),
         "quantum.expectation_pauli" => Some((2, 2)),
+        "quantum.expectation_hamiltonian" => Some((2, 2)),
         "quantum.sample_counts" => Some((2, 2)),
         "db.put" => Some((4, 4)),
         "db.version" => Some((1, 1)),
@@ -19921,6 +20178,110 @@ mod tests {
             "P1084"
         );
         assert_eq!(static_builtin_arity("quantum.sample_counts"), Some((2, 2)));
+    }
+
+    #[test]
+    fn local_quantum_hamiltonian_returns_deterministic_bell_and_product_energies() {
+        let bell = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"cx\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        let hamiltonian = "{\"terms\": [{\"coefficient\": 1, \"pauli\": \"ZZ\"}, {\"coefficient\": 0.5, \"pauli\": \"XX\"}, {\"coefficient\": 0.25, \"pauli\": \"II\"}]}";
+        let source = format!("let bell = {bell}\nlet hamiltonian = {hamiltonian}\nlet first = quantum.expectation_hamiltonian(bell, hamiltonian)\nlet second = quantum.expectation_hamiltonian(bell, hamiltonian)\nprint first[\"energy\"]\nprint first[\"termCount\"]\nprint first[\"coefficientL1Norm\"]\nprint first[\"terms\"][0][\"pauli\"]\nprint first[\"terms\"][0][\"contribution\"]\nprint first[\"terms\"][1][\"contribution\"]\nprint first[\"terms\"][2][\"contribution\"]\nprint first[\"method\"]\nprint first[\"optimizer\"]\nprint first[\"sampling\"]\nprint first[\"provider\"]\nprint first[\"qpu\"]\nprint first[\"network\"]\nprint first[\"childProcess\"]\nprint json.stringify(first) == json.stringify(second)\n");
+        let output = run_bridge_project(
+            &module_fixture_dir("local-quantum-hamiltonian-energy"),
+            BTreeSet::new(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            vec![
+                "1.75",
+                "3",
+                "1.75",
+                "ZZ",
+                "1",
+                "0.5",
+                "0.25",
+                "local-pauli-hamiltonian-exact-v1",
+                "disabled",
+                "disabled",
+                "not-configured",
+                "disabled",
+                "disabled",
+                "disabled",
+                "true",
+            ]
+        );
+        let product = "{\"qubits\": 1, \"operations\": [{\"gate\": \"z\", \"targets\": [0]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}]}";
+        let product_hamiltonian =
+            "{\"terms\": [{\"coefficient\": 2, \"pauli\": \"Z\"}, {\"coefficient\": -0.5, \"pauli\": \"I\"}]}";
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-hamiltonian-product"),
+                BTreeSet::new(),
+                &format!("let circuit = {product}\nlet hamiltonian = {product_hamiltonian}\nlet result = quantum.expectation_hamiltonian(circuit, hamiltonian)\nprint result[\"energy\"]\n")
+            )
+            .unwrap(),
+            vec!["1.5"]
+        );
+    }
+
+    #[test]
+    fn local_quantum_hamiltonian_rejects_invalid_terms_and_preserves_local_only_boundary() {
+        let circuit = "{\"qubits\": 2, \"operations\": [{\"gate\": \"h\", \"targets\": [0]}, {\"gate\": \"cx\", \"targets\": [0, 1]}], \"measurements\": [{\"qubit\": 0, \"bit\": 0}, {\"qubit\": 1, \"bit\": 1}]}";
+        for hamiltonian in [
+            "{}",
+            "{\"terms\": []}",
+            "{\"terms\": [{\"coefficient\": 1, \"pauli\": \"ZZ\"}, {\"coefficient\": 2, \"pauli\": \"ZZ\"}]}",
+            "{\"terms\": [{\"coefficient\": 0, \"pauli\": \"ZZ\"}]}",
+            "{\"terms\": [{\"coefficient\": 1000001, \"pauli\": \"ZZ\"}]}",
+            "{\"terms\": [{\"coefficient\": 1, \"pauli\": \"Z\"}]}",
+            "{\"terms\": [{\"coefficient\": 1, \"pauli\": \"ZA\"}]}",
+            "{\"terms\": [{\"coefficient\": 1, \"pauli\": \"ZZ\", \"provider\": \"remote\"}]}",
+            "{\"terms\": [{\"coefficient\": 1, \"pauli\": \"ZZ\"}], \"backend\": \"remote\"}",
+        ] {
+            assert_eq!(
+                run_bridge_project(
+                    &module_fixture_dir("local-quantum-hamiltonian-invalid"),
+                    BTreeSet::new(),
+                    &format!("print quantum.expectation_hamiltonian({circuit}, {hamiltonian})\n")
+                )
+                .unwrap_err()
+                .code,
+                "P1087"
+            );
+        }
+        let non_finite = Value::Map(BTreeMap::from([(
+            "terms".into(),
+            Value::List(vec![Value::Map(BTreeMap::from([
+                ("coefficient".into(), Value::Number(f64::NAN)),
+                ("pauli".into(), Value::String("ZZ".into())),
+            ]))]),
+        )]));
+        assert_eq!(
+            quantum_hamiltonian_from_value(&non_finite, 2, Locale::English, Position::new(1, 1))
+                .unwrap_err()
+                .code,
+            "P1087"
+        );
+        let measurements = (0..13)
+            .map(|index| format!("{{\"qubit\": {index}, \"bit\": {index}}}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let oversized = format!("{{\"qubits\": 13, \"operations\": [{{\"gate\": \"h\", \"targets\": [0]}}], \"measurements\": [{measurements}]}}");
+        assert_eq!(
+            run_bridge_project(
+                &module_fixture_dir("local-quantum-hamiltonian-limit"),
+                BTreeSet::new(),
+                &format!("print quantum.expectation_hamiltonian({oversized}, {{\"terms\": [{{\"coefficient\": 1, \"pauli\": \"{}\"}}]}})\n", "I".repeat(13))
+            )
+            .unwrap_err()
+            .code,
+            "P1084"
+        );
+        assert_eq!(
+            static_builtin_arity("quantum.expectation_hamiltonian"),
+            Some((2, 2))
+        );
     }
 
     #[test]

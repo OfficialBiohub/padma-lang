@@ -24,7 +24,7 @@ The local circuit surface follows a deliberately small OpenQASM 3-compatible sub
 |---|---|---|
 | M32: finite numeric rotations | Implemented in current increment | Local rotation matrices and QASM lowering are required before parameter experiments. |
 | M33: reproducible local sampling | Implemented bounded foundation | `quantum.sample_counts` uses required explicit integer `seed` and bounded `shots` with a versioned local PRNG to return a deterministic sparse count map. It does not expose collapse, noise, hardware, or hidden randomness. |
-| M34: real-coefficient Pauli Hamiltonians | Planned | A multi-term observable needs strict coefficient, duplicate-term, ordering, and numerical error rules beyond one Pauli product. |
+| M34: real-coefficient Pauli Hamiltonians | Implemented bounded foundation | `quantum.expectation_hamiltonian` evaluates up to 64 unique ordered real full-register Pauli terms against the local state vector and returns deterministic energy plus contribution breakdown. It does not optimise, bind symbolic values, estimate hardware energy, or execute an algorithm. |
 | M35: bounded classical optimisation primitives | Planned | Optimisation depends on explicit parameters and Hamiltonian semantics; it must not be called VQE/QAOA/QML before those algorithms exist and are tested. |
 | M36: program tooling/interchange | Planned | Introspection and broader QASM assessment need a separate parser/round-trip contract, stable artifact metadata, and compatibility tests. |
 | M37: provider integration assessment | Planned assessment only | A cloud adapter needs explicit capability grants, secret management, user-confirmed cost/job actions, cancellation, provenance, and provider-specific regression tests. |

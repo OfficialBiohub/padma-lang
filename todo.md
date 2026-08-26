@@ -430,7 +430,10 @@
 
 ### M34 — Local Pauli Hamiltonian Analysis
 
-- [ ] Add a strict bounded real-coefficient sum of unique full-register Pauli terms with deterministic energy expectation, explicit qubit ordering, numerical limits, and no optimisation/provider authority.
+- [x] Define a strict bounded Hamiltonian map with a non-empty unique ordered list of real finite coefficient/full-register Pauli terms, explicit sum-of-terms energy semantics, and no constant/symbolic/provider fields.
+- [x] Implement deterministic local `quantum.expectation_hamiltonian(circuit, hamiltonian)` energy plus bounded redacted metadata over the existing 12-qubit state vector; do not add gradient, minimisation, VQE/QAOA/QML, noise, provider, network, credential, or process authority.
+- [x] Add bilingual diagnostics and regressions for malformed/unknown maps, empty/duplicate/wrong-length/non-Pauli terms, zero/non-finite/out-of-range coefficients, Bell/product energy, deterministic ordering, resource limits, and no external side effect.
+- [x] Publish a Termux Hamiltonian example, public contract, standard-library/diagnostic/status updates, full repository verification, focused commit, and GitHub push before marking complete.
 
 ### M35 — Bounded Classical Optimisation Building Blocks
 

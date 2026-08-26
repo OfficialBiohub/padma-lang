@@ -6,6 +6,8 @@
 ধরি simulation = quantum.simulate_probabilities(circuit)
 ধরি rotatedSimulation = quantum.simulate_probabilities(rotated)
 ধরি sampled = quantum.sample_counts(circuit, {"shots": 64, "seed": 20260826})
+ধরি hamiltonian = {"terms": [{"coefficient": 1, "pauli": "ZZ"}, {"coefficient": 0.5, "pauli": "XX"}, {"coefficient": 0.25, "pauli": "II"}]}
+ধরি energy = quantum.expectation_hamiltonian(circuit, hamiltonian)
 দেখাও text.format("Qubits: {qubitCount}", summary)
 দেখাও text.format("Operations: {operationCount}", summary)
 দেখাও text.format("Provider: {provider}", summary)
@@ -18,5 +20,8 @@
 দেখাও sampled["shots"]
 দেখাও sampled["counts"]["00"] + sampled["counts"]["11"]
 দেখাও sampled["method"]
+দেখাও energy["energy"]
+দেখাও energy["termCount"]
+দেখাও energy["method"]
 দেখাও text.contains(quantum.openqasm3(circuit), "OPENQASM 3.0;")
 দেখাও quantum.write_openqasm3("out/bell-plan.qasm", circuit)
